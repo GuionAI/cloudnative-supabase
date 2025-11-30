@@ -105,7 +105,8 @@ additionalRoles: []
 
 # === Bootstrap Database Configuration ===
 # The main database is created via CNPG bootstrap.initdb
-# Extensions and schemas are configured here
+# Extensions are managed here; schemas are created in bootstrap init SQL
+# (auth, storage, _realtime, _analytics, graphql_public, extensions)
 bootstrapDatabase:
   extensions:
     - name: uuid-ossp
@@ -116,19 +117,6 @@ bootstrapDatabase:
       ensure: present
     - name: pgjwt
       ensure: present
-  schemas:
-    - name: auth
-      owner: supabase_auth_admin
-    - name: storage
-      owner: supabase_storage_admin
-    - name: graphql_public
-      owner: supabase_admin
-    - name: extensions
-      owner: supabase_admin
-    - name: _analytics
-      owner: supabase_analytics_admin
-    - name: _realtime
-      owner: supabase_realtime_admin
 
 # === Additional Databases ===
 # Created as CNPG Database CRDs (after bootstrap database)

@@ -54,19 +54,7 @@ secret:
 # Note: Database (db) and Sequin CDC initialization have been removed.
 # This chart now expects an external PostgreSQL database (e.g., CNPG).
 # Configure DB_HOST in each service's environment to point to your database.
-
-# Database initialization hook
-# Sets up grants for API roles (JWT settings are in cnpg-cluster chart)
-dbInit:
-  # Database host (CNPG cluster service name)
-  host: "supabase-pg-rw"
-  port: "5432"
-  # Database name (always "supabase")
-  database: "supabase"
-  # Secret for database admin credentials (same pattern as other services)
-  secret:
-    db:
-      secretRef: ""
+# Database initialization (schemas, grants, JWT) is handled by cnpg-cluster chart.
 
 # Studio Application
 studio:

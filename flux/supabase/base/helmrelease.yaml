@@ -37,13 +37,6 @@ spec:
       ingress:
         enabled: false
 
-    # Database init hook - sets JWT settings on postgres database
-    dbInit:
-      host: supabase-pg-rw
-      secret:
-        db:
-          secretRef: cnpg-supabase-admin-password
-
     # Per-service database credentials from CNPG-managed role secrets
     studio:
       environment:

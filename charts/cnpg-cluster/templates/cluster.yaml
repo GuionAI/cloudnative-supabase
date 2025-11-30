@@ -16,12 +16,10 @@ spec:
       owner: {{ .Values.cluster.bootstrap.owner }}
       secret:
         name: {{ .Values.supabaseRoles.supabaseAdmin.passwordSecret }}
-      {{- if or .Values.jwt.secretRef .Values.cluster.bootstrap.extraSQL }}
       postInitApplicationSQLRefs:
         configMapRefs:
           - name: {{ include "cnpg-cluster.fullname" . }}-init-sql
             key: init.sql
-      {{- end }}
 
   {{- if .Values.jwt.secretRef }}
   env:
