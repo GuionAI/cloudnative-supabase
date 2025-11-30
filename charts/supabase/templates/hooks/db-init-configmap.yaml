@@ -35,9 +35,9 @@ data:
 
     echo "Setting JWT configuration on database..."
     psql -v ON_ERROR_STOP=1 <<-EOSQL
-      -- Set JWT settings on postgres database (required for RLS policies)
-      ALTER DATABASE postgres SET "app.settings.jwt_secret" TO '$JWT_SECRET';
-      ALTER DATABASE postgres SET "app.settings.jwt_exp" TO '$JWT_EXP';
+      -- Set JWT settings on database (required for RLS policies)
+      ALTER DATABASE $PGDATABASE SET "app.settings.jwt_secret" TO '$JWT_SECRET';
+      ALTER DATABASE $PGDATABASE SET "app.settings.jwt_exp" TO '$JWT_EXP';
     EOSQL
 
     echo "Database initialization completed successfully."
