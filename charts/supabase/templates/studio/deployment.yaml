@@ -81,7 +81,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.studio.secret.db.secretRef }}
-                  key: {{ .Values.studio.secret.db.secretRefKey.password | default "password" }}
+                  key: password
             {{- end }}
           {{- with .Values.studio.livenessProbe }}
           livenessProbe:

@@ -43,12 +43,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.meta.secret.db.secretRef }}
-                  key: {{ .Values.meta.secret.db.secretRefKey.username | default "username" }}
+                  key: username
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.meta.secret.db.secretRef }}
-                  key: {{ .Values.meta.secret.db.secretRefKey.password | default "password" }}
+                  key: password
             - name: DB_NAME
               value: {{ .Values.meta.environment.DB_NAME | default "supabase" | quote }}
             - name: PG_META_DB_HOST

@@ -39,7 +39,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.auth.secret.db.secretRef }}
-                  key: {{ .Values.auth.secret.db.secretRefKey.username | default "username" }}
+                  key: username
             - name: DB_PORT
               value: {{ .Values.auth.environment.DB_PORT | quote }}
           command: ["/bin/sh", "-c"]
@@ -65,17 +65,17 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.auth.secret.db.secretRef }}
-                  key: {{ .Values.auth.secret.db.secretRefKey.username | default "username" }}
+                  key: username
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.auth.secret.db.secretRef }}
-                  key: {{ .Values.auth.secret.db.secretRefKey.password | default "password" }}
+                  key: password
             - name: DB_PASSWORD_ENC
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.auth.secret.db.secretRef }}
-                  key: {{ .Values.auth.secret.db.secretRefKey.password | default "password" }}
+                  key: password
             - name: DB_NAME
               value: {{ .Values.auth.environment.DB_NAME | default "supabase" | quote }}
             - name: GOTRUE_DB_DATABASE_URL

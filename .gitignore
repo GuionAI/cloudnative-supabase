@@ -1,9 +1,3 @@
-# Unencrypted secrets (should be encrypted before committing)
-**/secrets/**/*.yaml
-!**/secrets/**/*.enc.yaml
-!**/secrets/**/*.yaml.example
-!**/secrets/**/kustomization.yaml
-
 # Age private keys
 *.agekey
 age.key

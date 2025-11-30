@@ -38,17 +38,15 @@ spec:
         enabled: false
 
     # Database init hook - creates schemas, grants, and sets JWT settings
+    # Uses global secret.jwt.secretRef for JWT, local secret.db for admin credentials
     dbInit:
       enabled: true
       host: supabase-pg-rw
-
-    # Global secrets for db-init hook (must exist before helm install)
-    secret:
-      db:
-        secretRef: cnpg-supabase-admin-password
+      secret:
+        db:
+          secretRef: cnpg-supabase-admin-password
 
     # Per-service database credentials from CNPG-managed role secrets
-    # secretRefKey defaults to { username: "username", password: "password" }
     studio:
       environment:
         POSTGRES_HOST: supabase-pg-rw

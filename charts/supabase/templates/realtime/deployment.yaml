@@ -39,7 +39,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.realtime.secret.db.secretRef }}
-                  key: {{ .Values.realtime.secret.db.secretRefKey.username | default "username" }}
+                  key: username
             - name: DB_PORT
               value: {{ .Values.realtime.environment.DB_PORT | quote }}
           command: ["/bin/sh", "-c"]
@@ -67,12 +67,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.realtime.secret.db.secretRef }}
-                  key: {{ .Values.realtime.secret.db.secretRefKey.username | default "username" }}
+                  key: username
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.realtime.secret.db.secretRef }}
-                  key: {{ .Values.realtime.secret.db.secretRefKey.password | default "password" }}
+                  key: password
             - name: DB_NAME
               value: {{ .Values.realtime.environment.DB_NAME | default "supabase" | quote }}
             - name: JWT_SECRET

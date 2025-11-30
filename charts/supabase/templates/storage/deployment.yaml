@@ -40,7 +40,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.storage.secret.db.secretRef }}
-                  key: {{ .Values.storage.secret.db.secretRefKey.username | default "username" }}
+                  key: username
             - name: DB_PORT
               value: {{ .Values.storage.environment.DB_PORT | quote }}
           command: ["/bin/sh", "-c"]
@@ -95,17 +95,17 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.storage.secret.db.secretRef }}
-                  key: {{ .Values.storage.secret.db.secretRefKey.username | default "username" }}
+                  key: username
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.storage.secret.db.secretRef }}
-                  key: {{ .Values.storage.secret.db.secretRefKey.password | default "password" }}
+                  key: password
             - name: DB_PASSWORD_ENC
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.storage.secret.db.secretRef }}
-                  key: {{ .Values.storage.secret.db.secretRefKey.password | default "password" }}
+                  key: password
             - name: DB_NAME
               value: {{ .Values.storage.environment.DB_NAME | default "supabase" | quote }}
             - name: DATABASE_URL
