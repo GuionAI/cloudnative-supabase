@@ -14,6 +14,8 @@ spec:
     initdb:
       database: {{ .Values.cluster.bootstrap.database }}
       owner: {{ .Values.cluster.bootstrap.owner }}
+      secret:
+        name: {{ .Values.supabaseRoles.supabaseAdmin.passwordSecret }}
       {{- if .Values.jwt.secretRef }}
       postInitApplicationSQLRefs:
         configMapRefs:

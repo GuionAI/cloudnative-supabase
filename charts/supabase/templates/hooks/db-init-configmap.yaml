@@ -19,7 +19,12 @@ data:
       sleep 2
     done
 
-    # Note: Schemas are managed by CNPG Database CRD (database-postgres.yaml)
+    # Wait for CNPG Database CRD to create schemas (extensions schema required)
+    echo "Waiting for extensions schema to be created by CNPG..."
+    until psql -tAc "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'extensions'" | grep -q 1; do
+      echo "Schema 'extensions' not ready, waiting..."
+      sleep 2
+    done
 
     # Note: JWT settings are configured via cnpg-cluster chart's bootstrap.postInitApplicationSQL
 
