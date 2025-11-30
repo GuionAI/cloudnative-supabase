@@ -27,7 +27,7 @@ data:
     _transform: true
 
     consumers:
-    {{- if .Values.secret.dashboard }}
+    {{- if .Values.secret.dashboard.secretRef }}
       - username: DASHBOARD
     {{- end }}
       - username: anon
@@ -41,7 +41,7 @@ data:
         group: anon
       - consumer: service_role
         group: admin
-    {{- if .Values.secret.dashboard }}
+    {{- if .Values.secret.dashboard.secretRef }}
     basicauth_credentials:
       - consumer: DASHBOARD
         username: ${DASHBOARD_USERNAME}
@@ -223,7 +223,7 @@ data:
             strip_path: true
             paths:
               - /
-    {{- if .Values.secret.dashboard }}
+    {{- if .Values.secret.dashboard.secretRef }}
         plugins:
           - name: cors
           - name: basic-auth

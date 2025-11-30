@@ -14,68 +14,42 @@
 # |-- 13. Functions
 # |-- 14. Minio
 
+# =============================================================================
+# SECRETS CONFIGURATION
+# =============================================================================
+# This chart does NOT generate secrets. You must create them before deployment.
+# See SECRETS.md for required secrets and their key names.
+#
+# All secrets use FIXED key names (no customization via secretRefKey).
+# =============================================================================
+
 secret:
-  # jwt will be used to reference secret in multiple services:
-  # Anon & Service key: Studio, Storage, Kong
-  # JWT Secret: Analytics, Auth, Rest, Realtime, Storage
+  # JWT Secret (REQUIRED)
+  # Used by: Kong, Studio, Auth, Rest, Realtime, Storage
+  # Required keys: anonKey, serviceKey, secret
   jwt:
-    anonKey: ""
-    serviceKey: ""
-    secret: ""
-    # specify existing secret, which takes precedence over variables above
-    secretRef: ""
-    # override secret keys for existing secret refs
-    secretRefKey:
-      anonKey: anonKey
-      serviceKey: serviceKey
-      secret: secret
-  # NOTE: Per-service database secrets are now required.
-  # Configure each service's secret.db.secretRef individually:
-  # - auth.secret.db.secretRef
-  # - rest.secret.db.secretRef
-  # - realtime.secret.db.secretRef
-  # - meta.secret.db.secretRef
-  # - storage.secret.db.secretRef
-  # - analytics.secret.db.secretRef
-  # analytics Logflare API key
+    secretRef: ""  # REQUIRED: Secret containing JWT tokens
+
+  # Analytics API Key (REQUIRED if analytics.enabled=true)
+  # Required keys: apiKey
   analytics:
-    apiKey: ""
-    # specify existing secret, which takes precedence over variable above
     secretRef: ""
-    # override secret keys for existing secret refs
-    secretRefKey:
-      apiKey: apiKey
-  # smtp will be used to reference secret including smtp credentials
+
+  # SMTP Credentials (OPTIONAL - only if email enabled in auth)
+  # Required keys: username, password
   smtp:
-    # username: ""
-    # password: ""
-    # specify existing secret, which takes precedence over variables above
-    # secretRef: ""
-    # override secret keys for existing secret refs
-    secretRefKey:
-      username: username
-      password: password
-  # secret used to access the studio dashboard
-  # leave it empty to disable dashboard authentication
+    secretRef: ""
+
+  # Dashboard Basic Auth (OPTIONAL - enables basic auth on Studio)
+  # Required keys: username, password
+  # Leave empty to disable dashboard authentication
   dashboard:
-    # username: ""
-    # password: ""
-    # specify existing secret, which takes precedence over variables above
-    # secretRef: ""
-    # override secret keys for existing secret refs
-    secretRefKey:
-      username: username
-      password: password
-  # S3 credentials for storage object bucket
+    secretRef: ""
+
+  # S3 Credentials (OPTIONAL - only if storage.environment.STORAGE_BACKEND=s3)
+  # Required keys: keyId, accessKey
   s3:
-    # keyId: ""
-    # accessKey: ""
-    # specify existing secret, which takes precedence over variables above
-    # secretRef: ""
-    # override secret keys for existing secret refs
-    secretRefKey:
-      keyId: keyId
-      accessKey: accessKey
+    secretRef: ""
 
 # Note: Database (db) and Sequin CDC initialization have been removed.
 # This chart now expects an external PostgreSQL database (e.g., CNPG).
@@ -144,12 +118,11 @@ studio:
     NEXT_PUBLIC_ENABLE_LOGS: "true"
     # Set value to bigquery to use Big Query backend for analytics
     NEXT_ANALYTICS_BACKEND_PROVIDER: postgres  # postgres, bigquery
-  # Per-service DB secret (required)
+  # Per-service DB secret (REQUIRED)
+  # Required keys: username, password
   secret:
     db:
-      secretRef: ""  # REQUIRED: secret name containing DB password
-      secretRefKey:
-        password: password
+      secretRef: ""
   # volumeMounts:
   #   - name: volume_name
   #     mountPath: /path/to/my/secret
@@ -251,12 +224,11 @@ auth:
   envFrom: []
     # - secretRef:
     #     name: env-secret
-  # Per-service DB secret (required)
+  # Per-service DB secret (REQUIRED)
+  # Required keys: username, password
   secret:
     db:
-      secretRef: ""  # REQUIRED: secret name containing DB password
-      secretRefKey:
-        password: password
+      secretRef: ""
   # volumeMounts:
   #   - name: volume_name
   #     mountPath: /path/to/my/secret
@@ -334,12 +306,11 @@ rest:
     PGRST_DB_ANON_ROLE: anon
     PGRST_DB_USE_LEGACY_GUCS: false
     PGRST_APP_SETTINGS_JWT_EXP: 3600
-  # Per-service DB secret (required)
+  # Per-service DB secret (REQUIRED)
+  # Required keys: username, password
   secret:
     db:
-      secretRef: ""  # REQUIRED: secret name containing DB password
-      secretRefKey:
-        password: password
+      secretRef: ""
   # volumeMounts:
   #   - name: volume_name
   #     mountPath: /path/to/my/secret
@@ -421,12 +392,11 @@ realtime:
     ERL_AFLAGS: -proto_dist inet_tcp
     ENABLE_TAILSCALE: "false"
     DNS_NODES: "''"
-  # Per-service DB secret (required)
+  # Per-service DB secret (REQUIRED)
+  # Required keys: username, password
   secret:
     db:
-      secretRef: ""  # REQUIRED: secret name containing DB password
-      secretRefKey:
-        password: password
+      secretRef: ""
   # volumeMounts:
   #   - name: volume_name
   #     mountPath: /path/to/my/secret
@@ -502,12 +472,11 @@ meta:
     DB_DRIVER: postgres
     DB_SSL: disable  # disable, allow, prefer, require, verify-ca, verify-full
     PG_META_PORT: "8080"
-  # Per-service DB secret (required)
+  # Per-service DB secret (REQUIRED)
+  # Required keys: username, password
   secret:
     db:
-      secretRef: ""  # REQUIRED: secret name containing DB password
-      secretRefKey:
-        password: password
+      secretRef: ""
   # volumeMounts:
   #   - name: volume_name
   #     mountPath: /path/to/my/secret
@@ -595,12 +564,11 @@ storage:
     # GLOBAL_S3_PROTOCOL: http
     # GLOBAL_S3_FORCE_PATH_STYLE: true
     # AWS_DEFAULT_REGION: stub
-  # Per-service DB secret (required)
+  # Per-service DB secret (REQUIRED)
+  # Required keys: username, password
   secret:
     db:
-      secretRef: ""  # REQUIRED: secret name containing DB password
-      secretRefKey:
-        password: password
+      secretRef: ""
   # volumeMounts:
   #   - name: volume_name
   #     mountPath: /path/to/my/secret
@@ -863,12 +831,11 @@ analytics:
     projectId: google-project-id
     projectNumber: google-project-number
     gcloudJson: ""
-  # Per-service DB secret (required)
+  # Per-service DB secret (REQUIRED)
+  # Required keys: username, password
   secret:
     db:
-      secretRef: ""  # REQUIRED: secret name containing DB password
-      secretRefKey:
-        password: password
+      secretRef: ""
   # volumeMounts:
   #   - name: volume_name
   #     mountPath: /path/to/my/secret
@@ -1010,6 +977,11 @@ functions:
     DB_PORT: 5432
     DB_DRIVER: postgresql
     DB_SSL: disable  # disable, allow, prefer, require, verify-ca, verify-full
+  # Per-service DB secret (REQUIRED if functions.enabled=true)
+  # Required keys: username, password
+  secret:
+    db:
+      secretRef: ""
   # Mount user functions
   # volumeMounts:
   #   - name: my_functions

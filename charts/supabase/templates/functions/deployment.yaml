@@ -48,45 +48,30 @@ spec:
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secret.db.secretRef | default (include "supabase.secret.db" .) }}
+                  name: {{ .Values.functions.secret.db.secretRef }}
                   key: password
             - name: DB_PASSWORD_ENC
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secret.db.secretRef | default (include "supabase.secret.db" .) }}
+                  name: {{ .Values.functions.secret.db.secretRef }}
                   key: password
             - name: DB_DATABASE
               value: "supabase"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.jwt.secretRef }}
                   name: {{ .Values.secret.jwt.secretRef }}
-                  key: {{ .Values.secret.jwt.secretRefKey.secret | default "secret" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.jwt" . }}
                   key: secret
-                  {{- end }}
             - name: SUPABASE_ANON_KEY
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.jwt.secretRef }}
                   name: {{ .Values.secret.jwt.secretRef }}
-                  key: {{ .Values.secret.jwt.secretRefKey.anonKey | default "anonKey" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.jwt" . }}
                   key: anonKey
-                  {{- end }}
             - name: SUPABASE_SERVICE_ROLE_KEY
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.jwt.secretRef }}
                   name: {{ .Values.secret.jwt.secretRef }}
-                  key: {{ .Values.secret.jwt.secretRefKey.serviceKey | default "serviceKey" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.jwt" . }}
                   key: serviceKey
-                  {{- end }}
             - name: POSTGRES_BACKEND_URL
               value: $(DB_DRIVER)://$(DB_USERNAME):$(DB_PASSWORD_ENC)@$(DB_HOSTNAME):$(DB_PORT)/$(DB_DATABASE)?search_path=auth&sslmode=$(DB_SSL)
           {{- with .Values.functions.livenessProbe }}

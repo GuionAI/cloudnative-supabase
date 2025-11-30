@@ -50,30 +50,20 @@ spec:
             - name: SUPABASE_ANON_KEY
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.jwt.secretRef }}
                   name: {{ .Values.secret.jwt.secretRef }}
-                  key: {{ .Values.secret.jwt.secretRefKey.anonKey | default "anonKey" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.jwt" . }}
                   key: anonKey
-                  {{- end }}
             - name: SUPABASE_SERVICE_KEY
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.jwt.secretRef }}
                   name: {{ .Values.secret.jwt.secretRef }}
-                  key: {{ .Values.secret.jwt.secretRefKey.serviceKey | default "serviceKey" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.jwt" . }}
                   key: serviceKey
-                  {{- end }}
             {{- if .Values.analytics.enabled }}
             - name: LOGFLARE_URL
               value: http://{{ include "supabase.analytics.fullname" . }}:{{ .Values.analytics.service.port }}
             - name: LOGFLARE_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "supabase.secret.analytics" . }}
+                  name: {{ .Values.secret.analytics.secretRef }}
                   key: apiKey
             {{- end }}
             {{- if .Values.studio.secret.db.secretRef }}

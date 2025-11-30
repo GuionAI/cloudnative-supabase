@@ -44,12 +44,12 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "supabase.secret.s3" . }}
+                  name: {{ .Values.secret.s3.secretRef }}
                   key: keyId
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "supabase.secret.s3" . }}
+                  name: {{ .Values.secret.s3.secretRef }}
                   key: accessKey
           {{- with .Values.minio.livenessProbe }}
           livenessProbe:

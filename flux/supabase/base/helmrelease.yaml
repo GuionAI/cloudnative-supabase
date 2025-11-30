@@ -15,10 +15,6 @@ spec:
         namespace: flux-system
   driftDetection:
     mode: enabled
-  valuesFrom:
-    - kind: Secret
-      name: supabase-helm-values
-      valuesKey: values.yaml
   install:
     remediation:
       retries: 3
@@ -30,8 +26,10 @@ spec:
       remediateLastFailure: true
     timeout: 15m
   values:
-    # Environment-specific configuration only
-    # Image tags, service enable/disable flags, and studio env vars are in chart defaults
+    # JWT secret - required for all services
+    secret:
+      jwt:
+        secretRef: supabase-jwt
 
     kong:
       ingress:
