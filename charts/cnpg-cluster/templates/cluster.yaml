@@ -134,21 +134,23 @@ spec:
       {{- end }}
 
       {{- if .Values.supabaseRoles.supabaseRealtimeAdmin.enabled }}
-      # Realtime service admin
+      # Realtime service admin (needs REPLICATION for CDC)
       - name: supabase_realtime_admin
         ensure: present
         login: true
         inherit: false
+        replication: true
         passwordSecret:
           name: {{ .Values.supabaseRoles.supabaseRealtimeAdmin.passwordSecret }}
       {{- end }}
 
       {{- if .Values.supabaseRoles.supabaseAnalyticsAdmin.enabled }}
-      # Analytics service admin (Logflare)
+      # Analytics service admin (Logflare, needs REPLICATION for CDC)
       - name: supabase_analytics_admin
         ensure: present
         login: true
         inherit: false
+        replication: true
         passwordSecret:
           name: {{ .Values.supabaseRoles.supabaseAnalyticsAdmin.passwordSecret }}
       {{- end }}
