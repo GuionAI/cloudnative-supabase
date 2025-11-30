@@ -58,20 +58,20 @@ spec:
           imagePullPolicy: {{ .Values.analytics.image.pullPolicy }}
           env:
             {{- range $key, $value := .Values.analytics.environment }}
+            {{- if and (ne $key "DB_HOST") (ne $key "DB_NAME") }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- end }}
+            # Logflare DB config - uses DB_HOSTNAME not DB_HOST
+            - name: DB_HOSTNAME
+              value: {{ .Values.analytics.environment.DB_HOST | quote }}
             - name: DB_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.analytics.secret.db.secretRef }}
                   key: username
             - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.analytics.secret.db.secretRef }}
-                  key: password
-            - name: DB_PASSWORD_ENC
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.analytics.secret.db.secretRef }}
@@ -88,15 +88,6 @@ spec:
               value: {{ .Values.analytics.bigQuery.projectId | quote }}
             - name: GOOGLE_PROJECT_NUMBER
               value: {{ .Values.analytics.bigQuery.projectNumber | quote }}
-            {{- else }}
-            - name: DATABASE_URL
-              value: $(DB_DRIVER)://$(DB_USERNAME):$(DB_PASSWORD_ENC)@$(DB_HOST):$(DB_PORT)/$(DB_DATABASE)
-            - name: POSTGRES_BACKEND_URL
-              value: $(DB_DRIVER)://$(DB_USERNAME):$(DB_PASSWORD_ENC)@$(DB_HOST):$(DB_PORT)/$(DB_DATABASE)
-            - name: POSTGRES_BACKEND_SCHEMA
-              value: $(DB_SCHEMA)
-            - name: LOGFLARE_FEATURE_FLAG_OVERRIDE
-              value: $(FEATURE_FLAG_OVERRIDE)
             {{- end }}
           {{- with .Values.analytics.livenessProbe }}
           livenessProbe:
