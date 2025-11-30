@@ -92,8 +92,11 @@ spec:
         DB_HOST: supabase-pg-rw
       secret:
         db:
-          secretRef: cnpg-supabase-admin-password
+          secretRef: cnpg-supabase-analytics-password
 
     functions:
       environment:
         DB_HOST: supabase-pg-rw
+      secret:
+        db:
+          secretRef: cnpg-supabase-functions-password
