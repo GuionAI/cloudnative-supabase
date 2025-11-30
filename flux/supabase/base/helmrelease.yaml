@@ -37,10 +37,8 @@ spec:
       ingress:
         enabled: false
 
-    # Database init hook - creates schemas, grants, and sets JWT settings
-    # Uses global secret.jwt.secretRef for JWT, local secret.db for admin credentials
+    # Database init hook - sets JWT settings on postgres database
     dbInit:
-      enabled: true
       host: supabase-pg-rw
       secret:
         db:

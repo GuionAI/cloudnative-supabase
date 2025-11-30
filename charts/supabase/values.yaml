@@ -58,7 +58,6 @@ secret:
 # Database initialization hook
 # Sets JWT settings on postgres database (required for RLS policies)
 dbInit:
-  enabled: false
   # Database host (CNPG cluster service name)
   host: "supabase-pg-rw"
   port: "5432"

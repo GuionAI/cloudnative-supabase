@@ -1,4 +1,3 @@
-{{- if .Values.dbInit.enabled -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,7 +6,7 @@ metadata:
     {{- include "supabase.labels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-delete-policy": hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
     "helm.sh/hook-weight": "-10"
 data:
   init.sh: |
@@ -42,4 +41,3 @@ data:
     EOSQL
 
     echo "Database initialization completed successfully."
-{{- end }}
