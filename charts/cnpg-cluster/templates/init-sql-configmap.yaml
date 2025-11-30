@@ -25,7 +25,7 @@ data:
     CREATE ROLE authenticator NOINHERIT LOGIN;
     CREATE ROLE supabase_auth_admin NOINHERIT LOGIN CREATEROLE;
     CREATE ROLE supabase_storage_admin NOINHERIT LOGIN CREATEROLE;
-    CREATE ROLE supabase_realtime_admin NOINHERIT LOGIN;
+    CREATE ROLE supabase_realtime_admin NOINHERIT LOGIN REPLICATION;
     CREATE ROLE supabase_analytics_admin NOINHERIT LOGIN REPLICATION;
     CREATE ROLE supabase_functions_admin NOINHERIT LOGIN;
     CREATE ROLE pgbouncer NOINHERIT LOGIN;
