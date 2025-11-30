@@ -80,8 +80,22 @@ studio:
   replicaCount: 1
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /api/platform/profile
+      port: 3000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /api/platform/profile
+      port: 3000
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -163,8 +177,22 @@ auth:
   replicaCount: 1
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 9999
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 9999
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -266,8 +294,22 @@ rest:
   imagePullSecrets: []
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /ready
+      port: 3000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: 3000
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -346,8 +388,21 @@ realtime:
   imagePullSecrets: []
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  # Realtime health check requires Authorization header, use TCP socket instead
+  livenessProbe:
+    tcpSocket:
+      port: 4000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    tcpSocket:
+      port: 4000
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -431,8 +486,22 @@ meta:
   replicaCount: 1
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -509,8 +578,22 @@ storage:
   replicaCount: 1
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /status
+      port: 5000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /status
+      port: 5000
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -607,8 +690,22 @@ imgproxy:
   replicaCount: 1
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -687,8 +784,22 @@ kong:
   replicaCount: 1
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 8000
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 8000
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -777,8 +888,22 @@ analytics:
   replicaCount: 1
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 4000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 4000
+    initialDelaySeconds: 15
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 6
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -864,8 +989,22 @@ vector:
   replicaCount: 1
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 9001
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 9001
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -931,8 +1070,22 @@ functions:
   replicaCount: 1
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /_internal/health
+      port: 9000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /_internal/health
+      port: 9000
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -1008,8 +1161,22 @@ minio:
   replicaCount: 1
   nameOverride: ""
   fullnameOverride: ""
-  livenessProbe: {}
-  readinessProbe: {}
+  livenessProbe:
+    httpGet:
+      path: /minio/health/live
+      port: 9000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /minio/health/ready
+      port: 9000
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
