@@ -43,6 +43,12 @@ cluster:
   bootstrap:
     database: supabase
     owner: supabase_admin
+    # Custom SQL to run after bootstrap (appended to postInitApplicationSQL)
+    # Example:
+    #   extraSQL: |
+    #     CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+    #     GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonly_role;
+    extraSQL: ""
 
 # === Supabase Core Roles ===
 # These are always created for Supabase to function
