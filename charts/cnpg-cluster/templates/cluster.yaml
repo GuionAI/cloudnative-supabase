@@ -145,6 +145,26 @@ spec:
           name: {{ .Values.supabaseRoles.supabaseRealtimeAdmin.passwordSecret }}
       {{- end }}
 
+      {{- if .Values.supabaseRoles.supabaseAnalyticsAdmin.enabled }}
+      # Analytics service admin (Logflare)
+      - name: supabase_analytics_admin
+        ensure: present
+        login: true
+        inherit: false
+        passwordSecret:
+          name: {{ .Values.supabaseRoles.supabaseAnalyticsAdmin.passwordSecret }}
+      {{- end }}
+
+      {{- if .Values.supabaseRoles.supabaseFunctionsAdmin.enabled }}
+      # Edge Functions service admin
+      - name: supabase_functions_admin
+        ensure: present
+        login: true
+        inherit: false
+        passwordSecret:
+          name: {{ .Values.supabaseRoles.supabaseFunctionsAdmin.passwordSecret }}
+      {{- end }}
+
       {{- if .Values.supabaseRoles.pgbouncer.enabled }}
       # PgBouncer (connection pooling)
       - name: pgbouncer

@@ -73,6 +73,12 @@ supabaseRoles:
   supabaseRealtimeAdmin:
     enabled: true
     passwordSecret: cnpg-supabase-realtime-password
+  supabaseAnalyticsAdmin:
+    enabled: true
+    passwordSecret: cnpg-supabase-analytics-password
+  supabaseFunctionsAdmin:
+    enabled: true
+    passwordSecret: cnpg-supabase-functions-password
   pgbouncer:
     enabled: true
     passwordSecret: cnpg-pgbouncer-password
@@ -114,7 +120,7 @@ bootstrapDatabase:
     - name: extensions
       owner: supabase_admin
     - name: _analytics
-      owner: supabase_admin
+      owner: supabase_analytics_admin
     - name: _realtime
       owner: supabase_realtime_admin
 

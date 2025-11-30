@@ -19,12 +19,14 @@ set -e
 #     cnpg.io/reload: "true"
 #
 # CNPG SECRETS (see flux/database/base/cluster.yaml):
-#   cnpg-supabase-admin-password:     Database owner, manages schemas
-#   cnpg-authenticator-password:      PostgREST uses this to switch roles
-#   cnpg-supabase-auth-password:      GoTrue auth service
-#   cnpg-supabase-storage-password:   Storage service
-#   cnpg-supabase-realtime-password:  Realtime service
-#   cnpg-pgbouncer-password:          Connection pooling
+#   cnpg-supabase-admin-password:       Database owner, manages schemas
+#   cnpg-authenticator-password:        PostgREST uses this to switch roles
+#   cnpg-supabase-auth-password:        GoTrue auth service
+#   cnpg-supabase-storage-password:     Storage service
+#   cnpg-supabase-realtime-password:    Realtime service
+#   cnpg-supabase-analytics-password:   Logflare analytics service
+#   cnpg-supabase-functions-password:   Edge Functions service
+#   cnpg-pgbouncer-password:            Connection pooling
 #
 # SUPABASE SECRETS:
 #   supabase-jwt:       JWT signing secret and tokens (anonKey, serviceKey)
@@ -42,6 +44,8 @@ AUTHENTICATOR_PASSWORD=$(openssl rand -hex 32)
 AUTH_PASSWORD=$(openssl rand -hex 32)
 STORAGE_PASSWORD=$(openssl rand -hex 32)
 REALTIME_PASSWORD=$(openssl rand -hex 32)
+ANALYTICS_PASSWORD=$(openssl rand -hex 32)
+FUNCTIONS_PASSWORD=$(openssl rand -hex 32)
 PGBOUNCER_PASSWORD=$(openssl rand -hex 32)
 
 # Generate Supabase application secrets
@@ -111,6 +115,30 @@ type: kubernetes.io/basic-auth
 stringData:
   username: supabase_realtime_admin
   password: "$REALTIME_PASSWORD"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cnpg-supabase-analytics-password
+  namespace: $NAMESPACE
+  labels:
+    cnpg.io/reload: "true"
+type: kubernetes.io/basic-auth
+stringData:
+  username: supabase_analytics_admin
+  password: "$ANALYTICS_PASSWORD"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cnpg-supabase-functions-password
+  namespace: $NAMESPACE
+  labels:
+    cnpg.io/reload: "true"
+type: kubernetes.io/basic-auth
+stringData:
+  username: supabase_functions_admin
+  password: "$FUNCTIONS_PASSWORD"
 ---
 apiVersion: v1
 kind: Secret
