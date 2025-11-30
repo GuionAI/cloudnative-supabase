@@ -26,10 +26,12 @@ spec:
       remediateLastFailure: true
     timeout: 15m
   values:
-    # JWT secret - required for all services
+    # Global secrets
     secret:
       jwt:
         secretRef: supabase-jwt
+      analytics:
+        secretRef: supabase-analytics
 
     kong:
       ingress:
