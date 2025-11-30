@@ -1,0 +1,36 @@
+name: Build PostgreSQL Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate image tag from Dockerfile hash
+        id: tag
+        run: |
+          echo "hash=$(sha256sum Dockerfile | cut -c1-8)" >> $GITHUB_OUTPUT
+          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: |
+            ghcr.io/${{ steps.tag.outputs.owner }}/postgres-pgjwt:16.4
+            ghcr.io/${{ steps.tag.outputs.owner }}/postgres-pgjwt:16.4-${{ steps.tag.outputs.hash }}
