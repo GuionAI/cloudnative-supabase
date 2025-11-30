@@ -4,15 +4,19 @@ This chart is maintained locally with modifications from the upstream [supabase-
 
 ## Changes from Upstream
 
+### Move JWT settings to cnpg-cluster chart (2025-12-01)
+- **Removed** JWT SQL from db-init hook (now handled by cnpg-cluster bootstrap.postInitApplicationSQL)
+- **Removed** `dbInit.jwtExp` from values.yaml
+- **Removed** `JWT_SECRET` and `JWT_EXP` env vars from db-init job
+- **Note**: db-init hook now only sets up grants for API roles
+
 ### Add Database Init Hook (2025-11-30)
-- **Added** `templates/hooks/db-init-job.yaml` - Post-install hook to set JWT settings
-- **Added** `templates/hooks/db-init-configmap.yaml` - Init script for JWT settings
+- **Added** `templates/hooks/db-init-job.yaml` - Post-install hook for grants setup
+- **Added** `templates/hooks/db-init-configmap.yaml` - Init script for grants
 - **Added** `dbInit` configuration section in values.yaml:
-  - `enabled`: Enable/disable the db-init hook (default: false)
   - `host`: Database host (default: supabase-pg-rw)
   - `port`: Database port (default: 5432)
-  - `jwtExp`: JWT expiration in seconds (default: 3600)
-- **Note**: Sets `app.settings.jwt_secret` and `app.settings.jwt_exp` on postgres database (required for RLS policies)
+  - `database`: Database name (default: supabase)
 
 ### Remove Built-in PostgreSQL and Sequin Init (2025-11-30)
 - **Removed** `templates/db/` directory - PostgreSQL deployment, service, volume, helpers, initdb/migration configs

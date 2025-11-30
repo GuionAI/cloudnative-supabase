@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cnpg-cluster
+description: CloudNativePG Cluster with Supabase roles and JWT initialization
+type: application
+version: 0.1.0
+icon: https://avatars.githubusercontent.com/u/54469796?s=280&v=4

@@ -56,15 +56,13 @@ secret:
 # Configure DB_HOST in each service's environment to point to your database.
 
 # Database initialization hook
-# Sets JWT settings on postgres database (required for RLS policies)
+# Sets up grants for API roles (JWT settings are in cnpg-cluster chart)
 dbInit:
   # Database host (CNPG cluster service name)
   host: "supabase-pg-rw"
   port: "5432"
   # Database name (always "supabase")
   database: "supabase"
-  # JWT expiration in seconds (default 1 hour)
-  jwtExp: "3600"
   # Secret for database admin credentials (same pattern as other services)
   secret:
     db:

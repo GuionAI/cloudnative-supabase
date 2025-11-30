@@ -21,6 +21,8 @@ data:
 
     # Note: Schemas are managed by CNPG Database CRD (database-postgres.yaml)
 
+    # Note: JWT settings are configured via cnpg-cluster chart's bootstrap.postInitApplicationSQL
+
     echo "Setting up grants for API roles..."
     psql -v ON_ERROR_STOP=1 <<-EOSQL
       -- Grant usage on public and extensions schemas to API roles
@@ -31,13 +33,6 @@ data:
       ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
       ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
       ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
-    EOSQL
-
-    echo "Setting JWT configuration on database..."
-    psql -v ON_ERROR_STOP=1 <<-EOSQL
-      -- Set JWT settings on database (required for RLS policies)
-      ALTER DATABASE $PGDATABASE SET "app.settings.jwt_secret" TO '$JWT_SECRET';
-      ALTER DATABASE $PGDATABASE SET "app.settings.jwt_exp" TO '$JWT_EXP';
     EOSQL
 
     echo "Database initialization completed successfully."

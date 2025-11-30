@@ -1,0 +1,137 @@
+# CNPG Cluster for Supabase
+# This chart deploys a CloudNativePG Cluster with Supabase roles and databases
+
+cluster:
+  name: supabase-pg
+  instances: 1
+  imageName: ghcr.io/guionai/postgres-pgjwt:16.4
+  enableSuperuserAccess: false
+
+  storage:
+    size: 10Gi
+    storageClass: local-path
+
+  postgresql:
+    shared_preload_libraries:
+      - pg_stat_statements
+    parameters:
+      # Logical replication for CDC tools
+      wal_level: logical
+      max_replication_slots: "10"
+      max_wal_senders: "10"
+      # Performance
+      shared_buffers: "256MB"
+      log_min_messages: fatal
+    # pg_hba: internal no SSL, external requires SSL
+    pg_hba:
+      - local all all trust
+      # K3s pod CIDR - no SSL required
+      - host all all 10.42.0.0/16 scram-sha-256
+      # K3s service CIDR - no SSL required
+      - host all all 10.43.0.0/16 scram-sha-256
+      # External traffic - require SSL
+      - hostssl all all 0.0.0.0/0 scram-sha-256
+      # Reject non-SSL external connections
+      - hostnossl all all 0.0.0.0/0 reject
+
+  # LoadBalancer for external access
+  loadBalancer:
+    enabled: true
+    name: supabase-pg-lb
+
+  # Bootstrap configuration - creates the main database
+  bootstrap:
+    database: supabase
+    owner: supabase_admin
+
+# === Supabase Core Roles ===
+# These are always created for Supabase to function
+# Passwords are read from Kubernetes secrets (must be created separately)
+
+supabaseRoles:
+  # Non-login roles for RLS policies
+  anon:
+    enabled: true
+  authenticated:
+    enabled: true
+  serviceRole:
+    enabled: true
+
+  # Login roles with password secrets
+  supabaseAdmin:
+    enabled: true
+    passwordSecret: cnpg-supabase-admin-password
+  authenticator:
+    enabled: true
+    passwordSecret: cnpg-authenticator-password
+  supabaseAuthAdmin:
+    enabled: true
+    passwordSecret: cnpg-supabase-auth-password
+  supabaseStorageAdmin:
+    enabled: true
+    passwordSecret: cnpg-supabase-storage-password
+  supabaseRealtimeAdmin:
+    enabled: true
+    passwordSecret: cnpg-supabase-realtime-password
+  pgbouncer:
+    enabled: true
+    passwordSecret: cnpg-pgbouncer-password
+
+# === Additional Custom Roles ===
+# Add your own roles here
+additionalRoles: []
+# - name: my_custom_role
+#   ensure: present
+#   login: true
+#   inherit: true
+#   createdb: false
+#   createrole: false
+#   bypassrls: false
+#   passwordSecret:
+#     name: my-custom-role-password
+#   inRoles: []
+
+# === Bootstrap Database Configuration ===
+# The main database is created via CNPG bootstrap.initdb
+# Extensions and schemas are configured here
+bootstrapDatabase:
+  extensions:
+    - name: uuid-ossp
+      ensure: present
+    - name: pgcrypto
+      ensure: present
+    - name: pg_stat_statements
+      ensure: present
+    - name: pgjwt
+      ensure: present
+  schemas:
+    - name: auth
+      owner: supabase_auth_admin
+    - name: storage
+      owner: supabase_storage_admin
+    - name: extensions
+      owner: supabase_admin
+    - name: _analytics
+      owner: supabase_admin
+    - name: _realtime
+      owner: supabase_realtime_admin
+
+# === Additional Databases ===
+# Created as CNPG Database CRDs (after bootstrap database)
+additionalDatabases: []
+# - name: myapp
+#   owner: supabase_admin
+#   extensions:
+#     - name: uuid-ossp
+#       ensure: present
+#   schemas: []
+
+# === JWT Configuration ===
+# Set via bootstrap.initdb.postInitApplicationSQLRefs
+# Required for Supabase RLS policies to work
+jwt:
+  # Reference to secret containing JWT
+  # Secret must have key "secret" containing the JWT signing secret
+  secretRef: ""
+  # JWT token expiration in seconds when generating tokens (1 hour default)
+  expSeconds: 3600

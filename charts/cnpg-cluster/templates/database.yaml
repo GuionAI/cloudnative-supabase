@@ -1,0 +1,49 @@
+{{- /* Bootstrap database - extensions and schemas (database itself is created by bootstrap.initdb) */}}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ .Release.Name }}-db-{{ .Values.cluster.bootstrap.database }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cnpg-cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  name: {{ .Values.cluster.bootstrap.database }}
+  owner: {{ .Values.cluster.bootstrap.owner }}
+  cluster:
+    name: {{ include "cnpg-cluster.clusterName" . }}
+  {{- if .Values.bootstrapDatabase.extensions }}
+  extensions:
+    {{- toYaml .Values.bootstrapDatabase.extensions | nindent 4 }}
+  {{- end }}
+  {{- if .Values.bootstrapDatabase.schemas }}
+  schemas:
+    {{- toYaml .Values.bootstrapDatabase.schemas | nindent 4 }}
+  {{- end }}
+
+{{- /* Additional databases */}}
+{{- range .Values.additionalDatabases }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ $.Release.Name }}-db-{{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "cnpg-cluster.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  name: {{ .name }}
+  owner: {{ .owner }}
+  cluster:
+    name: {{ include "cnpg-cluster.clusterName" $ }}
+  {{- if .extensions }}
+  extensions:
+    {{- toYaml .extensions | nindent 4 }}
+  {{- end }}
+  {{- if .schemas }}
+  schemas:
+    {{- toYaml .schemas | nindent 4 }}
+  {{- end }}
+{{- end }}

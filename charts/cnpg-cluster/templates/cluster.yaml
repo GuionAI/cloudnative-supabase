@@ -1,0 +1,181 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "cnpg-cluster.clusterName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cnpg-cluster.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.cluster.instances }}
+  imageName: {{ .Values.cluster.imageName }}
+  enableSuperuserAccess: {{ .Values.cluster.enableSuperuserAccess }}
+
+  bootstrap:
+    initdb:
+      database: {{ .Values.cluster.bootstrap.database }}
+      owner: {{ .Values.cluster.bootstrap.owner }}
+      {{- if .Values.jwt.secretRef }}
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: {{ include "cnpg-cluster.fullname" . }}-jwt-init
+            key: init.sql
+      {{- end }}
+
+  {{- if .Values.jwt.secretRef }}
+  env:
+    - name: JWT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: {{ .Values.jwt.secretRef }}
+          key: secret
+    - name: JWT_EXP
+      value: {{ .Values.jwt.expSeconds | int | quote }}
+  {{- end }}
+
+  postgresql:
+    shared_preload_libraries:
+      {{- toYaml .Values.cluster.postgresql.shared_preload_libraries | nindent 6 }}
+    parameters:
+      {{- toYaml .Values.cluster.postgresql.parameters | nindent 6 }}
+    pg_hba:
+      {{- toYaml .Values.cluster.postgresql.pg_hba | nindent 6 }}
+
+  storage:
+    size: {{ .Values.cluster.storage.size }}
+    {{- if .Values.cluster.storage.storageClass }}
+    storageClass: {{ .Values.cluster.storage.storageClass }}
+    {{- end }}
+
+  managed:
+    {{- if .Values.cluster.loadBalancer.enabled }}
+    services:
+      additional:
+        - selectorType: rw
+          serviceTemplate:
+            metadata:
+              name: {{ .Values.cluster.loadBalancer.name }}
+            spec:
+              type: LoadBalancer
+    {{- end }}
+
+    roles:
+      # === Supabase Core Roles ===
+      {{- if .Values.supabaseRoles.anon.enabled }}
+      # Non-login role for anonymous API access
+      - name: anon
+        ensure: present
+        login: false
+        inherit: false
+      {{- end }}
+
+      {{- if .Values.supabaseRoles.authenticated.enabled }}
+      # Non-login role for authenticated API access
+      - name: authenticated
+        ensure: present
+        login: false
+        inherit: false
+      {{- end }}
+
+      {{- if .Values.supabaseRoles.serviceRole.enabled }}
+      # Non-login role for service-level API access (bypasses RLS)
+      - name: service_role
+        ensure: present
+        login: false
+        inherit: false
+        bypassrls: true
+      {{- end }}
+
+      {{- if .Values.supabaseRoles.supabaseAdmin.enabled }}
+      # Supabase admin (owns schemas, manages database)
+      - name: supabase_admin
+        ensure: present
+        login: true
+        createdb: true
+        createrole: true
+        bypassrls: true
+        passwordSecret:
+          name: {{ .Values.supabaseRoles.supabaseAdmin.passwordSecret }}
+      {{- end }}
+
+      {{- if .Values.supabaseRoles.authenticator.enabled }}
+      # Authenticator (PostgREST switches to anon/authenticated/service_role)
+      - name: authenticator
+        ensure: present
+        login: true
+        inherit: false
+        passwordSecret:
+          name: {{ .Values.supabaseRoles.authenticator.passwordSecret }}
+        inRoles:
+          - anon
+          - authenticated
+          - service_role
+      {{- end }}
+
+      {{- if .Values.supabaseRoles.supabaseAuthAdmin.enabled }}
+      # Auth service admin
+      - name: supabase_auth_admin
+        ensure: present
+        login: true
+        inherit: false
+        createrole: true
+        passwordSecret:
+          name: {{ .Values.supabaseRoles.supabaseAuthAdmin.passwordSecret }}
+      {{- end }}
+
+      {{- if .Values.supabaseRoles.supabaseStorageAdmin.enabled }}
+      # Storage service admin
+      - name: supabase_storage_admin
+        ensure: present
+        login: true
+        inherit: false
+        createrole: true
+        passwordSecret:
+          name: {{ .Values.supabaseRoles.supabaseStorageAdmin.passwordSecret }}
+      {{- end }}
+
+      {{- if .Values.supabaseRoles.supabaseRealtimeAdmin.enabled }}
+      # Realtime service admin
+      - name: supabase_realtime_admin
+        ensure: present
+        login: true
+        inherit: false
+        passwordSecret:
+          name: {{ .Values.supabaseRoles.supabaseRealtimeAdmin.passwordSecret }}
+      {{- end }}
+
+      {{- if .Values.supabaseRoles.pgbouncer.enabled }}
+      # PgBouncer (connection pooling)
+      - name: pgbouncer
+        ensure: present
+        login: true
+        inherit: false
+        passwordSecret:
+          name: {{ .Values.supabaseRoles.pgbouncer.passwordSecret }}
+      {{- end }}
+
+      # === Additional Custom Roles ===
+      {{- range .Values.additionalRoles }}
+      - name: {{ .name }}
+        ensure: {{ .ensure | default "present" }}
+        login: {{ .login | default false }}
+        {{- if hasKey . "inherit" }}
+        inherit: {{ .inherit }}
+        {{- end }}
+        {{- if .createdb }}
+        createdb: {{ .createdb }}
+        {{- end }}
+        {{- if .createrole }}
+        createrole: {{ .createrole }}
+        {{- end }}
+        {{- if .bypassrls }}
+        bypassrls: {{ .bypassrls }}
+        {{- end }}
+        {{- if .passwordSecret }}
+        passwordSecret:
+          name: {{ .passwordSecret.name }}
+        {{- end }}
+        {{- if .inRoles }}
+        inRoles:
+          {{- toYaml .inRoles | nindent 10 }}
+        {{- end }}
+      {{- end }}

@@ -39,13 +39,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.dbInit.secret.db.secretRef }}
                   key: password
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secret.jwt.secretRef }}
-                  key: secret
-            - name: JWT_EXP
-              value: {{ .Values.dbInit.jwtExp | default "3600" | quote }}
           volumeMounts:
             - name: scripts
               mountPath: /scripts

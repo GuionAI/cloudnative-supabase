@@ -1,0 +1,15 @@
+{{- if .Values.jwt.secretRef }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cnpg-cluster.fullname" . }}-jwt-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cnpg-cluster.labels" . | nindent 4 }}
+data:
+  init.sql: |
+    -- Set JWT settings on database (required for RLS policies)
+    -- Variables are substituted by CNPG from env section
+    ALTER DATABASE {{ .Values.cluster.bootstrap.database }} SET "app.settings.jwt_secret" TO '$(JWT_SECRET)';
+    ALTER DATABASE {{ .Values.cluster.bootstrap.database }} SET "app.settings.jwt_exp" TO '$(JWT_EXP)';
+{{- end }}
