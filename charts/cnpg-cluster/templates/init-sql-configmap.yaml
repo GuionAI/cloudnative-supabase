@@ -66,25 +66,39 @@ data:
     GRANT ALL ON SCHEMA extensions TO supabase_admin;
 
     -- 6. Grant supabase_admin ALL privileges on objects in each schema
+    -- Also set default privileges for future objects (tables created by services later)
+
     -- auth schema
     GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_admin;
     GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_admin;
     GRANT ALL ON ALL ROUTINES IN SCHEMA auth TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_auth_admin IN SCHEMA auth GRANT ALL ON TABLES TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_auth_admin IN SCHEMA auth GRANT ALL ON SEQUENCES TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_auth_admin IN SCHEMA auth GRANT ALL ON ROUTINES TO supabase_admin;
 
     -- storage schema
     GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_admin;
     GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO supabase_admin;
     GRANT ALL ON ALL ROUTINES IN SCHEMA storage TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage GRANT ALL ON TABLES TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage GRANT ALL ON SEQUENCES TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage GRANT ALL ON ROUTINES TO supabase_admin;
 
     -- _realtime schema
     GRANT ALL ON ALL TABLES IN SCHEMA _realtime TO supabase_admin;
     GRANT ALL ON ALL SEQUENCES IN SCHEMA _realtime TO supabase_admin;
     GRANT ALL ON ALL ROUTINES IN SCHEMA _realtime TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_realtime_admin IN SCHEMA _realtime GRANT ALL ON TABLES TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_realtime_admin IN SCHEMA _realtime GRANT ALL ON SEQUENCES TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_realtime_admin IN SCHEMA _realtime GRANT ALL ON ROUTINES TO supabase_admin;
 
     -- _analytics schema
     GRANT ALL ON ALL TABLES IN SCHEMA _analytics TO supabase_admin;
     GRANT ALL ON ALL SEQUENCES IN SCHEMA _analytics TO supabase_admin;
     GRANT ALL ON ALL ROUTINES IN SCHEMA _analytics TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_analytics_admin IN SCHEMA _analytics GRANT ALL ON TABLES TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_analytics_admin IN SCHEMA _analytics GRANT ALL ON SEQUENCES TO supabase_admin;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_analytics_admin IN SCHEMA _analytics GRANT ALL ON ROUTINES TO supabase_admin;
 
     -- graphql_public schema
     GRANT ALL ON ALL TABLES IN SCHEMA graphql_public TO supabase_admin;
