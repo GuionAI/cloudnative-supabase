@@ -45,6 +45,11 @@ spec:
             {{- end }}
             - name: DB_HOSTNAME
               value: $(DB_HOST)
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.functions.secret.db.secretRef }}
+                  key: username
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:

@@ -67,6 +67,11 @@ spec:
                   key: apiKey
             {{- end }}
             {{- if .Values.studio.secret.db.secretRef }}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.studio.secret.db.secretRef }}
+                  key: username
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
