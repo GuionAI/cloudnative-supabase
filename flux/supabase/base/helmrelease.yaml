@@ -1,0 +1,103 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: supabase
+  namespace: PLACEHOLDER
+spec:
+  interval: 5m
+  releaseName: supabase
+  chart:
+    spec:
+      chart: ./charts/supabase
+      sourceRef:
+        kind: GitRepository
+        name: cloudnative-supabase
+        namespace: flux-system
+  driftDetection:
+    mode: enabled
+  valuesFrom:
+    - kind: Secret
+      name: supabase-helm-values
+      valuesKey: values.yaml
+  install:
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+    timeout: 15m
+  upgrade:
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+    timeout: 15m
+  values:
+    # Environment-specific configuration only
+    # Image tags, service enable/disable flags, and studio env vars are in chart defaults
+
+    kong:
+      ingress:
+        enabled: false
+
+    # Database init hook - creates schemas, grants, and sets JWT settings
+    dbInit:
+      enabled: true
+      host: supabase-pg-rw
+
+    # Global secrets for db-init hook (must exist before helm install)
+    secret:
+      db:
+        secretRef: cnpg-supabase-admin-password
+
+    # Per-service database credentials from CNPG-managed role secrets
+    # secretRefKey defaults to { username: "username", password: "password" }
+    studio:
+      environment:
+        POSTGRES_HOST: supabase-pg-rw
+      secret:
+        db:
+          secretRef: cnpg-supabase-admin-password
+
+    auth:
+      environment:
+        DB_HOST: supabase-pg-rw
+      secret:
+        db:
+          secretRef: cnpg-supabase-auth-password
+
+    rest:
+      environment:
+        DB_HOST: supabase-pg-rw
+      secret:
+        db:
+          secretRef: cnpg-authenticator-password
+
+    realtime:
+      environment:
+        DB_HOST: supabase-pg-rw
+      secret:
+        db:
+          secretRef: cnpg-supabase-realtime-password
+
+    meta:
+      environment:
+        DB_HOST: supabase-pg-rw
+      secret:
+        db:
+          secretRef: cnpg-supabase-admin-password
+
+    storage:
+      environment:
+        DB_HOST: supabase-pg-rw
+      secret:
+        db:
+          secretRef: cnpg-supabase-storage-password
+
+    analytics:
+      environment:
+        DB_HOST: supabase-pg-rw
+      secret:
+        db:
+          secretRef: cnpg-supabase-admin-password
+
+    functions:
+      environment:
+        DB_HOST: supabase-pg-rw

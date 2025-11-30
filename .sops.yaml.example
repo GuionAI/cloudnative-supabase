@@ -1,0 +1,16 @@
+# SOPS configuration example
+# Copy this to .sops.yaml and replace with your age public key
+#
+# Generate a new age key pair:
+#   age-keygen -o age.key
+#   cat age.key | grep "public key:" | cut -d: -f2 | tr -d ' '
+#
+# Store the private key securely and create a K8s secret:
+#   kubectl create secret generic sops-age \
+#     --namespace=flux-system \
+#     --from-file=age.agekey=age.key
+
+creation_rules:
+  - path_regex: .*\.enc\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age: YOUR_AGE_PUBLIC_KEY_HERE

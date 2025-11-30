@@ -1,0 +1,45 @@
+{{- if .Values.dbInit.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "supabase.fullname" . }}-db-init
+  labels:
+    {{- include "supabase.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": hook-succeeded
+    "helm.sh/hook-weight": "-10"
+data:
+  init.sh: |
+    #!/bin/sh
+    set -e
+
+    echo "Waiting for database to be ready..."
+    until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER"; do
+      echo "Database not ready, waiting..."
+      sleep 2
+    done
+
+    # Note: Schemas are managed by CNPG Database CRD (database-postgres.yaml)
+
+    echo "Setting up grants for API roles..."
+    psql -v ON_ERROR_STOP=1 <<-EOSQL
+      -- Grant usage on public and extensions schemas to API roles
+      GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+      GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;
+
+      -- Default privileges for future objects in public schema
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+    EOSQL
+
+    echo "Setting JWT configuration on database..."
+    psql -v ON_ERROR_STOP=1 <<-EOSQL
+      -- Set JWT settings on postgres database (required for RLS policies)
+      ALTER DATABASE postgres SET "app.settings.jwt_secret" TO '$JWT_SECRET';
+      ALTER DATABASE postgres SET "app.settings.jwt_exp" TO '$JWT_EXP';
+    EOSQL
+
+    echo "Database initialization completed successfully."
+{{- end }}
