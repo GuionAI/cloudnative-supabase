@@ -12,6 +12,7 @@ spec:
         kind: GitRepository
         name: cloudnative-supabase
         namespace: flux-system
+      reconcileStrategy: Revision
   driftDetection:
     mode: enabled
   install:
