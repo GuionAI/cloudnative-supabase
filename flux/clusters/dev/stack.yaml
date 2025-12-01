@@ -87,7 +87,7 @@ spec:
         - op: add
           path: /spec/values/additionalDatabases/-
           value:
-            name: openmeter_svix
+            name: openmeter-svix
             owner: openmeter
   healthChecks:
     - apiVersion: helm.toolkit.fluxcd.io/v2
