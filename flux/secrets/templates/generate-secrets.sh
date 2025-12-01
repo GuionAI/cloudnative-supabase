@@ -18,7 +18,7 @@ set -e
 #   labels:
 #     cnpg.io/reload: "true"
 #
-# CNPG SECRETS (see flux/database/base/cluster.yaml):
+# CNPG SECRETS (see flux/database/base/helmrelease.yaml):
 #   cnpg-supabase-admin-password:       Database owner, manages schemas
 #   cnpg-authenticator-password:        PostgREST uses this to switch roles
 #   cnpg-supabase-auth-password:        GoTrue auth service
@@ -27,6 +27,8 @@ set -e
 #   cnpg-supabase-analytics-password:   Logflare analytics service
 #   cnpg-supabase-functions-password:   Edge Functions service
 #   cnpg-pgbouncer-password:            Connection pooling
+#   cnpg-sequin-password:               Sequin app internal state
+#   cnpg-sequin-replication-password:   CDC logical replication (Sequin/PowerSync)
 #
 # SUPABASE SECRETS:
 #   supabase-jwt:       JWT signing secret and tokens (anonKey, serviceKey)
@@ -47,6 +49,8 @@ REALTIME_PASSWORD=$(openssl rand -hex 32)
 ANALYTICS_PASSWORD=$(openssl rand -hex 32)
 FUNCTIONS_PASSWORD=$(openssl rand -hex 32)
 PGBOUNCER_PASSWORD=$(openssl rand -hex 32)
+SEQUIN_PASSWORD=$(openssl rand -hex 32)
+SEQUIN_REPLICATION_PASSWORD=$(openssl rand -hex 32)
 
 # Generate Supabase application secrets
 JWT_SECRET=$(openssl rand -hex 32)
@@ -151,9 +155,57 @@ type: kubernetes.io/basic-auth
 stringData:
   username: pgbouncer
   password: "$PGBOUNCER_PASSWORD"
+---
+# Sequin/PowerSync CDC Roles
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cnpg-sequin-password
+  namespace: $NAMESPACE
+  labels:
+    cnpg.io/reload: "true"
+type: kubernetes.io/basic-auth
+stringData:
+  username: sequin
+  password: "$SEQUIN_PASSWORD"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cnpg-sequin-replication-password
+  namespace: $NAMESPACE
+  labels:
+    cnpg.io/reload: "true"
+type: kubernetes.io/basic-auth
+stringData:
+  username: sequin_replication
+  password: "$SEQUIN_REPLICATION_PASSWORD"
 EOF
 
 echo "Generated $CNPG_SECRETS_FILE"
+
+# Function to create JWT token
+create_jwt() {
+    local role=$1
+    local secret=$2
+    local iat=$(date +%s)
+    local exp=$((iat + 157680000))  # 5 years from now
+
+    # Header: {"alg":"HS256","typ":"JWT"}
+    local header=$(echo -n '{"alg":"HS256","typ":"JWT"}' | base64 | tr -d '=' | tr '/+' '_-' | tr -d '\n')
+
+    # Payload
+    local payload=$(echo -n "{\"role\":\"$role\",\"iss\":\"supabase\",\"iat\":$iat,\"exp\":$exp}" | base64 | tr -d '=' | tr '/+' '_-' | tr -d '\n')
+
+    # Signature
+    local signature=$(echo -n "$header.$payload" | openssl dgst -sha256 -hmac "$secret" -binary | base64 | tr -d '=' | tr '/+' '_-' | tr -d '\n')
+
+    echo "$header.$payload.$signature"
+}
+
+# Generate JWT tokens
+ANON_KEY=$(create_jwt "anon" "$JWT_SECRET")
+SERVICE_KEY=$(create_jwt "service_role" "$JWT_SECRET")
 
 # Generate Supabase application secrets
 cat > "$SUPABASE_SECRETS_FILE" <<EOF
@@ -166,13 +218,9 @@ metadata:
   namespace: $NAMESPACE
 type: Opaque
 stringData:
-  # JWT signing secret (used to generate anonKey and serviceKey)
   secret: "$JWT_SECRET"
-  # IMPORTANT: Generate these tokens using the secret above
-  # Use: https://supabase.com/docs/guides/self-hosting#api-keys
-  # Or run: npx @anthropic-ai/claude-code-jwt-gen (if available)
-  anonKey: "REPLACE_WITH_GENERATED_ANON_KEY"
-  serviceKey: "REPLACE_WITH_GENERATED_SERVICE_KEY"
+  anonKey: "$ANON_KEY"
+  serviceKey: "$SERVICE_KEY"
 ---
 apiVersion: v1
 kind: Secret
@@ -186,20 +234,12 @@ EOF
 
 echo "Generated $SUPABASE_SECRETS_FILE"
 echo ""
-echo "=== IMPORTANT: JWT Token Generation ==="
-echo "The JWT secret has been generated, but you must create the anonKey and serviceKey tokens."
-echo ""
 echo "JWT Secret: $JWT_SECRET"
 echo ""
-echo "Generate tokens at: https://supabase.com/docs/guides/self-hosting#api-keys"
-echo "Or use this payload for anonKey:    {\"role\": \"anon\", \"iss\": \"supabase\", \"iat\": $(date +%s), \"exp\": $(($(date +%s) + 157680000))}"
-echo "Or use this payload for serviceKey: {\"role\": \"service_role\", \"iss\": \"supabase\", \"iat\": $(date +%s), \"exp\": $(($(date +%s) + 157680000))}"
-echo ""
 echo "=== Next Steps ==="
-echo "1. Generate JWT tokens and update $SUPABASE_SECRETS_FILE"
-echo "2. Copy files to your deployment repo (e.g., flicknote-deploy/flux/secrets/dev/)"
-echo "3. Encrypt with SOPS:"
+echo "1. Copy files to your deployment repo (e.g., flicknote-deploy/flux/secrets/dev/)"
+echo "2. Encrypt with SOPS:"
 echo "   sops --encrypt $CNPG_SECRETS_FILE > cnpg-secrets.enc.yaml"
 echo "   sops --encrypt $SUPABASE_SECRETS_FILE > supabase-secrets.enc.yaml"
-echo "4. Delete unencrypted files: rm $CNPG_SECRETS_FILE $SUPABASE_SECRETS_FILE"
-echo "5. Commit the encrypted files"
+echo "3. Delete unencrypted files: rm $CNPG_SECRETS_FILE $SUPABASE_SECRETS_FILE"
+echo "4. Commit the encrypted files"

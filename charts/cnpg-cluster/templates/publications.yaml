@@ -1,0 +1,20 @@
+{{- /*
+  Create PostgreSQL Publications for CDC tools (Sequin, Debezium, PowerSync, etc.)
+  Publications define which tables are included in logical replication.
+*/ -}}
+{{- range .Values.publications }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Publication
+metadata:
+  name: {{ .name }}
+  labels:
+    {{- include "cnpg-cluster.labels" $ | nindent 4 }}
+spec:
+  cluster:
+    name: {{ include "cnpg-cluster.clusterName" $ }}
+  dbname: {{ .database | default $.Values.cluster.bootstrap.database }}
+  name: {{ .name }}
+  target:
+    {{- toYaml .target | nindent 4 }}
+{{- end }}

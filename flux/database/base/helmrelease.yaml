@@ -1,0 +1,58 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cnpg-cluster
+  namespace: PLACEHOLDER
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: ./charts/cnpg-cluster
+      sourceRef:
+        kind: GitRepository
+        name: cloudnative-supabase
+        namespace: flux-system
+  driftDetection:
+    mode: enabled
+  install:
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+    timeout: 10m
+  upgrade:
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+    timeout: 10m
+  values:
+    jwt:
+      secretRef: supabase-jwt
+    # CDC roles for Sequin/PowerSync
+    additionalRoles:
+      - name: sequin
+        ensure: present
+        login: true
+        passwordSecret:
+          name: cnpg-sequin-password
+      - name: sequin_replication
+        ensure: present
+        login: true
+        replication: true
+        bypassrls: true
+        passwordSecret:
+          name: cnpg-sequin-replication-password
+        inRoles:
+          - pg_read_all_data
+    additionalDatabases:
+      - name: sequin
+        owner: sequin
+    # Replication slot for CDC
+    extraSQL: |
+      SELECT pg_create_logical_replication_slot('sequin_slot', 'pgoutput');
+    # CDC publication for public schema
+    publications:
+      - name: sequin_pub
+        database: supabase
+        target:
+          objects:
+            - tablesInSchema: public

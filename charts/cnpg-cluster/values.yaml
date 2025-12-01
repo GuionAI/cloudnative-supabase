@@ -128,3 +128,13 @@ jwt:
   secretRef: ""
   # JWT token expiration in seconds when generating tokens (1 hour default)
   expSeconds: 3600
+
+# === CDC Publications ===
+# Create PostgreSQL publications for CDC tools (Sequin, Debezium, PowerSync, etc.)
+# These are created as CNPG Publication CRDs
+publications: []
+# - name: sequin_pub
+#   database: supabase
+#   target:
+#     objects:
+#       - tablesInSchema: public
