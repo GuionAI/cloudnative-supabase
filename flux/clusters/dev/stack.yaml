@@ -68,6 +68,27 @@ spec:
         - op: replace
           path: /metadata/namespace
           value: flicknote-dev
+        # OpenMeter role (optional - specific to this deployment)
+        - op: add
+          path: /spec/values/additionalRoles/-
+          value:
+            name: openmeter
+            ensure: present
+            login: true
+            createdb: true
+            passwordSecret:
+              name: cnpg-openmeter-password
+        # OpenMeter databases
+        - op: add
+          path: /spec/values/additionalDatabases/-
+          value:
+            name: openmeter
+            owner: openmeter
+        - op: add
+          path: /spec/values/additionalDatabases/-
+          value:
+            name: openmeter_svix
+            owner: openmeter
   healthChecks:
     - apiVersion: helm.toolkit.fluxcd.io/v2
       kind: HelmRelease
