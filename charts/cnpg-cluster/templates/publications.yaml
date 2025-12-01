@@ -1,6 +1,9 @@
 {{- /*
   Create PostgreSQL Publications for CDC tools (Sequin, Debezium, PowerSync, etc.)
   Publications define which tables are included in logical replication.
+
+  name: Kubernetes resource name (must be RFC 1123 compliant - no underscores)
+  publicationName: PostgreSQL publication name (can contain underscores), defaults to name
 */ -}}
 {{- range .Values.publications }}
 ---
@@ -14,7 +17,7 @@ spec:
   cluster:
     name: {{ include "cnpg-cluster.clusterName" $ }}
   dbname: {{ .database | default $.Values.cluster.bootstrap.database }}
-  name: {{ .name }}
+  name: {{ .publicationName | default .name }}
   target:
     {{- toYaml .target | nindent 4 }}
 {{- end }}

@@ -52,7 +52,8 @@ spec:
       SELECT pg_create_logical_replication_slot('sequin_slot', 'pgoutput');
     # CDC publication for public schema
     publications:
-      - name: sequin_pub
+      - name: sequin-pub
+        publicationName: sequin_pub
         database: supabase
         target:
           objects:
