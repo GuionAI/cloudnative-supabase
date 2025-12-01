@@ -44,21 +44,9 @@ spec:
           name: cnpg-sequin-replication-password
         inRoles:
           - pg_read_all_data
-      # OpenMeter role
-      - name: openmeter
-        ensure: present
-        login: true
-        createdb: true
-        passwordSecret:
-          name: cnpg-openmeter-password
     additionalDatabases:
       - name: sequin
         owner: sequin
-      # OpenMeter databases
-      - name: openmeter
-        owner: openmeter
-      - name: openmeter_svix
-        owner: openmeter
     # Replication slot for CDC
     extraSQL: |
       SELECT pg_create_logical_replication_slot('sequin_slot', 'pgoutput');
