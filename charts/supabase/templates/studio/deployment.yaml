@@ -57,15 +57,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secret.jwt.secretRef }}
                   key: serviceKey
-            {{- if .Values.analytics.enabled }}
-            - name: LOGFLARE_URL
-              value: http://{{ include "supabase.analytics.fullname" . }}:{{ .Values.analytics.service.port }}
-            - name: LOGFLARE_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secret.analytics.secretRef }}
-                  key: apiKey
-            {{- end }}
             {{- if .Values.studio.secret.db.secretRef }}
             - name: POSTGRES_USER
               valueFrom:

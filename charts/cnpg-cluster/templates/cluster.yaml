@@ -144,37 +144,6 @@ spec:
           name: {{ .Values.supabaseRoles.supabaseRealtimeAdmin.passwordSecret }}
       {{- end }}
 
-      {{- if .Values.supabaseRoles.supabaseAnalyticsAdmin.enabled }}
-      # Analytics service admin (Logflare, needs REPLICATION for CDC)
-      - name: supabase_analytics_admin
-        ensure: present
-        login: true
-        inherit: false
-        replication: true
-        passwordSecret:
-          name: {{ .Values.supabaseRoles.supabaseAnalyticsAdmin.passwordSecret }}
-      {{- end }}
-
-      {{- if .Values.supabaseRoles.supabaseFunctionsAdmin.enabled }}
-      # Edge Functions service admin
-      - name: supabase_functions_admin
-        ensure: present
-        login: true
-        inherit: false
-        passwordSecret:
-          name: {{ .Values.supabaseRoles.supabaseFunctionsAdmin.passwordSecret }}
-      {{- end }}
-
-      {{- if .Values.supabaseRoles.pgbouncer.enabled }}
-      # PgBouncer (connection pooling)
-      - name: pgbouncer
-        ensure: present
-        login: true
-        inherit: false
-        passwordSecret:
-          name: {{ .Values.supabaseRoles.pgbouncer.passwordSecret }}
-      {{- end }}
-
       # === Additional Custom Roles ===
       {{- range .Values.additionalRoles }}
       - name: {{ .name }}

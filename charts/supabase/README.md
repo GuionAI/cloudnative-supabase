@@ -31,11 +31,8 @@ The first deployment can take some time to complete (especially auth service). Y
 kubectl get pod -l app.kubernetes.io/instance=demo
 
 NAME                                      READY   STATUS    RESTARTS      AGE
-demo-supabase-analytics-xxxxxxxxxx-xxxxx  1/1     Running   0             47s
 demo-supabase-auth-xxxxxxxxxx-xxxxx       1/1     Running   0             47s
 demo-supabase-db-xxxxxxxxxx-xxxxx         1/1     Running   0             47s
-demo-supabase-functions-xxxxxxxxxx-xxxxx  1/1     Running   0             47s
-demo-supabase-imgproxy-xxxxxxxxxx-xxxxx   1/1     Running   0             47s
 demo-supabase-kong-xxxxxxxxxx-xxxxx       1/1     Running   0             47s
 demo-supabase-meta-xxxxxxxxxx-xxxxx       1/1     Running   0             47s
 demo-supabase-realtime-xxxxxxxxxx-xxxxx   1/1     Running   0             47s
@@ -133,16 +130,6 @@ secret:
     password: this_password_is_insecure_and_should_be_updated
 ```
 
-### Analytics secret
-
-A new logflare secret API key is required for securing communication between all of the Supabase services. To set the secret, generate a new 32 characters long secret similar to the step [above](#jwt-secret).
-
-```yaml
-secret:
-  analytics:
-    apiKey: your-super-secret-with-at-least-32-characters-long-logflare-key
-```
-
 ### S3 secret
 
 Supabase storage supports the use of S3 object-storage. To enable S3 for Supabase storage:
@@ -158,17 +145,11 @@ Supabase storage supports the use of S3 object-storage. To enable S3 for Supabas
   ```yaml
   storage:
     environment:
-      # Set S3 endpoint if using external object-storage
-      # GLOBAL_S3_ENDPOINT: http://minio:9000
       STORAGE_BACKEND: s3
+      GLOBAL_S3_ENDPOINT: http://your-s3-endpoint
       GLOBAL_S3_PROTOCOL: http
       GLOBAL_S3_FORCE_PATH_STYLE: true
-      AWS_DEFAULT_REGION: stub
-  ```
-3. (Optional) Enable internal minio deployment
-  ```yaml
-  minio:
-    enabled: true
+      AWS_DEFAULT_REGION: us-east-1
   ```
 
 ## How to use in Production
@@ -271,4 +252,3 @@ docker run -it \
 * Ingress are now limited to `kong` & `db` services. This is by design to limit entry to the stack through secure `kong` service.
 * `kong.yaml` has been modified to follow [Docker kong.yaml](https://github.com/supabase/supabase/blob/master/docker/volumes/api/kong.yml) template.
 * `supabase/storage` does not comes with pre-populated `/var/lib/storage`, therefore an `emptyDir` will be created if persistence is disabled. This might be incompatible with previous version if the persistent storage location is set to location other than specified above.
-* `supabase/vector` requires read access to the `/var/log/pods` directory. When run in a Kubernetes cluster this can be provided with a [hostPath](https://kubernetes.io/docs/concepts/storage/volumes/#hostpath) volume.

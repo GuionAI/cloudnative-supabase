@@ -83,9 +83,6 @@ Core Supabase roles (consumers can add more via patches):
 - `supabase_auth_admin` - Auth service
 - `supabase_storage_admin` - Storage service
 - `supabase_realtime_admin` - Realtime service
-- `supabase_analytics_admin` - Analytics/Logflare service
-- `supabase_functions_admin` - Edge Functions service
-- `pgbouncer` - Connection pooling
 - `anon`, `authenticated`, `service_role` - RLS policy roles
 
 ## Extension Pattern

@@ -79,15 +79,6 @@ supabaseRoles:
   supabaseRealtimeAdmin:
     enabled: true
     passwordSecret: cnpg-supabase-realtime-password
-  supabaseAnalyticsAdmin:
-    enabled: true
-    passwordSecret: cnpg-supabase-analytics-password
-  supabaseFunctionsAdmin:
-    enabled: true
-    passwordSecret: cnpg-supabase-functions-password
-  pgbouncer:
-    enabled: true
-    passwordSecret: cnpg-pgbouncer-password
 
 # === Additional Custom Roles ===
 # Add your own roles here
@@ -106,7 +97,7 @@ additionalRoles: []
 # === Bootstrap Database Configuration ===
 # The main database is created via CNPG bootstrap.initdb
 # Extensions are managed here; schemas are created in bootstrap init SQL
-# (auth, storage, _realtime, _analytics, graphql_public, extensions)
+# (auth, storage, _realtime, graphql_public, extensions)
 bootstrapDatabase:
   extensions:
     - name: uuid-ossp

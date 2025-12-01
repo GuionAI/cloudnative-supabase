@@ -4,6 +4,28 @@ This chart is maintained locally with modifications from the upstream [supabase-
 
 ## Changes from Upstream
 
+### Remove unused services (2025-12-01)
+- **Removed** Analytics (Logflare) service completely:
+  - `templates/analytics/` directory
+  - `analytics` section from values.yaml
+  - `secret.analytics` from values.yaml
+  - Analytics route from Kong config
+  - LOGFLARE_URL/LOGFLARE_API_KEY from Studio deployment
+- **Removed** Vector service completely:
+  - `templates/vector/` directory
+  - `vector` section from values.yaml
+- **Removed** Functions (Edge Runtime) service completely:
+  - `templates/functions/` directory
+  - `functions` section from values.yaml
+  - Functions route from Kong config
+- **Removed** Minio service completely:
+  - `templates/minio/` directory
+  - `minio` section from values.yaml
+- **Removed** Imgproxy service completely:
+  - `templates/imgproxy/` directory
+  - `imgproxy` section from values.yaml
+- **Updated** documentation (SECRETS.md, README.md, CLAUDE.md)
+
 ### Move JWT settings to cnpg-cluster chart (2025-12-01)
 - **Removed** JWT SQL from db-init hook (now handled by cnpg-cluster bootstrap.postInitApplicationSQL)
 - **Removed** `dbInit.jwtExp` from values.yaml

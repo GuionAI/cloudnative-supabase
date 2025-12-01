@@ -60,8 +60,6 @@ Each Supabase service requires its own database credentials. This allows fine-gr
 | Realtime | `realtime.secret.db.secretRef` | `supabase_realtime_admin` |
 | Meta | `meta.secret.db.secretRef` | `supabase_admin` |
 | Storage | `storage.secret.db.secretRef` | `supabase_storage_admin` |
-| Analytics | `analytics.secret.db.secretRef` | `supabase_admin` |
-| Functions | `functions.secret.db.secretRef` | `supabase_functions_admin` |
 | dbInit hook | `dbInit.secret.db.secretRef` | `supabase_admin` |
 
 **Example (for CNPG-managed roles):**
@@ -82,18 +80,7 @@ rest:
 
 ## Optional Secrets
 
-### 3. Analytics API Key (Required if `analytics.enabled=true`)
-
-**Values path:** `secret.analytics.secretRef`
-
-**Required keys:**
-| Key | Description |
-|-----|-------------|
-| `apiKey` | Logflare API key |
-
----
-
-### 4. SMTP Credentials (Optional - for email functionality in Auth)
+### 3. SMTP Credentials (Optional - for email functionality in Auth)
 
 **Values path:** `secret.smtp.secretRef`
 
@@ -105,7 +92,7 @@ rest:
 
 ---
 
-### 5. Dashboard Basic Auth (Optional - protect Studio with basic auth)
+### 4. Dashboard Basic Auth (Optional - protect Studio with basic auth)
 
 **Values path:** `secret.dashboard.secretRef`
 
@@ -119,7 +106,7 @@ Leave `secretRef` empty to disable dashboard authentication.
 
 ---
 
-### 6. S3 Credentials (Required if `storage.environment.STORAGE_BACKEND=s3` or `minio.enabled=true`)
+### 5. S3 Credentials (Required if `storage.environment.STORAGE_BACKEND=s3`)
 
 **Values path:** `secret.s3.secretRef`
 
@@ -137,8 +124,6 @@ Leave `secretRef` empty to disable dashboard authentication.
 secret:
   jwt:
     secretRef: supabase-jwt
-  analytics:
-    secretRef: supabase-analytics
   smtp:
     secretRef: ""  # Disabled
   dashboard:
@@ -182,11 +167,6 @@ storage:
   secret:
     db:
       secretRef: cnpg-supabase-storage-password
-
-analytics:
-  secret:
-    db:
-      secretRef: cnpg-supabase-admin-password
 ```
 
 ---
