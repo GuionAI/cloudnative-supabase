@@ -68,7 +68,7 @@ spec:
   path: ./flux/database/base
   prune: true
   # wait: true  # rely on healthChecks
-  timeout: 10m
+  timeout: 5m
   patches:
     - target:
         kind: HelmRelease
@@ -148,7 +148,7 @@ spec:
   path: ./flux/supabase/base
   prune: true
   # wait: true  # rely on healthChecks
-  timeout: 15m
+  timeout: 5m
   patches:
     - target:
         kind: HelmRelease
