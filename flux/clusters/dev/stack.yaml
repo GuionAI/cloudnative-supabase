@@ -77,7 +77,7 @@ spec:
         - op: replace
           path: /metadata/namespace
           value: flicknote-infra
-        # Sequin role and database
+        # Sequin role
         - op: add
           path: /spec/values/additionalRoles/-
           value:
@@ -87,12 +87,7 @@ spec:
             createdb: true
             passwordSecret:
               name: cnpg-sequin-password
-        - op: add
-          path: /spec/values/additionalDatabases/-
-          value:
-            name: sequin
-            owner: sequin
-        # OpenMeter role and database
+        # OpenMeter role
         - op: add
           path: /spec/values/additionalRoles/-
           value:
@@ -102,11 +97,6 @@ spec:
             createdb: true
             passwordSecret:
               name: cnpg-openmeter-password
-        - op: add
-          path: /spec/values/additionalDatabases/-
-          value:
-            name: openmeter
-            owner: openmeter
   healthChecks:
     - apiVersion: helm.toolkit.fluxcd.io/v2
       kind: HelmRelease
@@ -116,6 +106,30 @@ spec:
       kind: Cluster
       name: supabase-pg
       namespace: flicknote-infra
+---
+# Sequin database (via CNPG Database CRD)
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: sequin-db
+  namespace: flicknote-infra
+spec:
+  name: sequin
+  owner: sequin
+  cluster:
+    name: supabase-pg
+---
+# OpenMeter database (via CNPG Database CRD)
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: openmeter-db
+  namespace: flicknote-infra
+spec:
+  name: openmeter
+  owner: openmeter
+  cluster:
+    name: supabase-pg
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
