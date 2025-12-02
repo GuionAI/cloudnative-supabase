@@ -1,0 +1,7 @@
+# Namespace for Supabase services
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: supabase-dev
+  labels:
+    app.kubernetes.io/part-of: flicknote
