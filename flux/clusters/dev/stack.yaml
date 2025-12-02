@@ -34,7 +34,7 @@ spec:
     namespace: flux-system
   path: ./flux/infrastructure
   prune: true
-  wait: true
+  # wait: true  # rely on healthChecks
   timeout: 5m
   healthChecks:
     - apiVersion: helm.toolkit.fluxcd.io/v2
@@ -67,7 +67,7 @@ spec:
     namespace: flux-system
   path: ./flux/database/base
   prune: true
-  wait: true
+  # wait: true  # rely on healthChecks
   timeout: 10m
   patches:
     - target:
@@ -147,7 +147,7 @@ spec:
     namespace: flux-system
   path: ./flux/supabase/base
   prune: true
-  wait: true
+  # wait: true  # rely on healthChecks
   timeout: 15m
   patches:
     - target:
