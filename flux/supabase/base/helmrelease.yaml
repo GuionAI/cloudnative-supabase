@@ -39,58 +39,59 @@ spec:
         enabled: false
 
     # Per-service database credentials from CNPG-managed role secrets
+    # CNPG cluster is in flicknote-infra namespace, use FQDN
     studio:
       environment:
-        POSTGRES_HOST: supabase-pg-rw
+        POSTGRES_HOST: supabase-pg-rw.flicknote-infra.svc
       secret:
         db:
           secretRef: cnpg-supabase-admin-password
 
     auth:
       environment:
-        DB_HOST: supabase-pg-rw
+        DB_HOST: supabase-pg-rw.flicknote-infra.svc
       secret:
         db:
           secretRef: cnpg-supabase-auth-password
 
     rest:
       environment:
-        DB_HOST: supabase-pg-rw
+        DB_HOST: supabase-pg-rw.flicknote-infra.svc
       secret:
         db:
           secretRef: cnpg-authenticator-password
 
     realtime:
       environment:
-        DB_HOST: supabase-pg-rw
+        DB_HOST: supabase-pg-rw.flicknote-infra.svc
       secret:
         db:
           secretRef: cnpg-supabase-realtime-password
 
     meta:
       environment:
-        DB_HOST: supabase-pg-rw
+        DB_HOST: supabase-pg-rw.flicknote-infra.svc
       secret:
         db:
           secretRef: cnpg-supabase-admin-password
 
     storage:
       environment:
-        DB_HOST: supabase-pg-rw
+        DB_HOST: supabase-pg-rw.flicknote-infra.svc
       secret:
         db:
           secretRef: cnpg-supabase-storage-password
 
     analytics:
       environment:
-        DB_HOST: supabase-pg-rw
+        DB_HOST: supabase-pg-rw.flicknote-infra.svc
       secret:
         db:
           secretRef: cnpg-supabase-analytics-password
 
     functions:
       environment:
-        DB_HOST: supabase-pg-rw
+        DB_HOST: supabase-pg-rw.flicknote-infra.svc
       secret:
         db:
           secretRef: cnpg-supabase-functions-password
