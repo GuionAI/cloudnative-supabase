@@ -47,10 +47,8 @@ spec:
     additionalDatabases:
       - name: sequin
         owner: sequin
-    # Replication slot for CDC
-    extraSQL: |
-      SELECT pg_create_logical_replication_slot('sequin_slot', 'pgoutput');
     # CDC publication for public schema
+    # Note: Replication slot created by db-init migration (idempotent)
     publications:
       - name: sequin-pub
         publicationName: sequin_pub
