@@ -41,6 +41,126 @@ spec:
           value:
             name: openmeter
             owner: openmeter
+        # =================================================================
+        # PRODUCTION ROLES (all with _prod suffix)
+        # =================================================================
+        # Supabase admin for prod
+        - op: add
+          path: /spec/values/additionalRoles/-
+          value:
+            name: supabase_admin_prod
+            ensure: present
+            login: true
+            createdb: true
+            createrole: true
+            bypassrls: true
+            passwordSecret:
+              name: cnpg-supabase-admin-password-prod
+        # Authenticator for prod (PostgREST role switcher)
+        - op: add
+          path: /spec/values/additionalRoles/-
+          value:
+            name: authenticator_prod
+            ensure: present
+            login: true
+            passwordSecret:
+              name: cnpg-authenticator-password-prod
+            inRoles:
+              - anon
+              - authenticated
+              - service_role
+        # Auth admin for prod
+        - op: add
+          path: /spec/values/additionalRoles/-
+          value:
+            name: supabase_auth_admin_prod
+            ensure: present
+            login: true
+            passwordSecret:
+              name: cnpg-supabase-auth-password-prod
+        # Storage admin for prod
+        - op: add
+          path: /spec/values/additionalRoles/-
+          value:
+            name: supabase_storage_admin_prod
+            ensure: present
+            login: true
+            passwordSecret:
+              name: cnpg-supabase-storage-password-prod
+        # Realtime admin for prod
+        - op: add
+          path: /spec/values/additionalRoles/-
+          value:
+            name: supabase_realtime_admin_prod
+            ensure: present
+            login: true
+            passwordSecret:
+              name: cnpg-supabase-realtime-password-prod
+        # Analytics admin for prod
+        - op: add
+          path: /spec/values/additionalRoles/-
+          value:
+            name: supabase_analytics_admin_prod
+            ensure: present
+            login: true
+            passwordSecret:
+              name: cnpg-supabase-analytics-password-prod
+        # Functions admin for prod
+        - op: add
+          path: /spec/values/additionalRoles/-
+          value:
+            name: supabase_functions_admin_prod
+            ensure: present
+            login: true
+            passwordSecret:
+              name: cnpg-supabase-functions-password-prod
+        # Sequin for prod
+        - op: add
+          path: /spec/values/additionalRoles/-
+          value:
+            name: sequin_prod
+            ensure: present
+            login: true
+            passwordSecret:
+              name: cnpg-sequin-password-prod
+        # Sequin replication for prod
+        - op: add
+          path: /spec/values/additionalRoles/-
+          value:
+            name: sequin_replication_prod
+            ensure: present
+            login: true
+            replication: true
+            bypassrls: true
+            passwordSecret:
+              name: cnpg-sequin-replication-password-prod
+            inRoles:
+              - pg_read_all_data
+        # =================================================================
+        # PRODUCTION DATABASE
+        # =================================================================
+        # Supabase Production database
+        - op: add
+          path: /spec/values/additionalDatabases/-
+          value:
+            name: supabase_prod
+            owner: supabase_admin_prod
+        # Sequin database for prod
+        - op: add
+          path: /spec/values/additionalDatabases/-
+          value:
+            name: sequin_prod
+            owner: sequin_prod
+        # CDC publication for prod database
+        - op: add
+          path: /spec/values/publications/-
+          value:
+            name: sequin-pub-prod
+            publicationName: sequin_pub_prod
+            database: supabase_prod
+            target:
+              objects:
+                - tablesInSchema: public
   healthChecks:
     - apiVersion: helm.toolkit.fluxcd.io/v2
       kind: HelmRelease

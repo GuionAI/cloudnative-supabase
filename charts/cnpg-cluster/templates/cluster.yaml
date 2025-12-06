@@ -60,12 +60,21 @@ spec:
 
     roles:
       # === Supabase Core Roles ===
+
+      # Group role that holds API permissions (GRANT USAGE on public/extensions)
+      # anon/authenticated/service_role inherit from this
+      - name: api_access_role
+        ensure: present
+        login: false
+
       {{- if .Values.supabaseRoles.anon.enabled }}
       # Non-login role for anonymous API access
       - name: anon
         ensure: present
         login: false
-        inherit: false
+        inherit: true
+        inRoles:
+          - api_access_role
       {{- end }}
 
       {{- if .Values.supabaseRoles.authenticated.enabled }}
@@ -73,7 +82,9 @@ spec:
       - name: authenticated
         ensure: present
         login: false
-        inherit: false
+        inherit: true
+        inRoles:
+          - api_access_role
       {{- end }}
 
       {{- if .Values.supabaseRoles.serviceRole.enabled }}
@@ -81,12 +92,15 @@ spec:
       - name: service_role
         ensure: present
         login: false
-        inherit: false
+        inherit: true
         bypassrls: true
+        inRoles:
+          - api_access_role
       {{- end }}
 
       {{- if .Values.supabaseRoles.supabaseAdmin.enabled }}
       # Supabase admin (owns schemas, manages database)
+      # pg_read_all_data + pg_write_all_data replaces manual GRANT ALL on every schema
       - name: supabase_admin
         ensure: present
         login: true
@@ -95,6 +109,9 @@ spec:
         bypassrls: true
         passwordSecret:
           name: {{ .Values.supabaseRoles.supabaseAdmin.passwordSecret }}
+        inRoles:
+          - pg_read_all_data
+          - pg_write_all_data
       {{- end }}
 
       {{- if .Values.supabaseRoles.authenticator.enabled }}
