@@ -175,6 +175,9 @@ spec:
         {{- if .createrole }}
         createrole: {{ .createrole }}
         {{- end }}
+        {{- if .replication }}
+        replication: {{ .replication }}
+        {{- end }}
         {{- if .bypassrls }}
         bypassrls: {{ .bypassrls }}
         {{- end }}
