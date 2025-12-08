@@ -50,6 +50,11 @@ spec:
     auth:
       environment:
         DB_HOST: supabase-pg-rw.flicknote-infra.svc
+        # Auth URLs - GoTrue requires these for email links and redirects
+        API_EXTERNAL_URL: https://dev-auth.flicknote.app
+        GOTRUE_SITE_URL: https://dev-auth.flicknote.app
+        # Email auth is enabled by default in values.yaml
+        # GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       secret:
         db:
           secretRef: cnpg-supabase-auth-password
