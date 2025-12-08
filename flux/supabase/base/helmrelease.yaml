@@ -33,6 +33,8 @@ spec:
         secretRef: supabase-jwt
       analytics:
         secretRef: supabase-analytics
+      authProviders:
+        secretRef: supabase-auth-providers
 
     kong:
       ingress:
