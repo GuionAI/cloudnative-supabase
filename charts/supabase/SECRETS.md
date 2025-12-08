@@ -118,6 +118,52 @@ Leave `secretRef` empty to disable dashboard authentication.
 
 ---
 
+### 6. Auth Providers (Optional - for OAuth and email hooks)
+
+**Values path:** `secret.authProviders.secretRef`
+
+This secret is loaded via `envFrom` into the Auth container, so all keys become environment variables.
+
+**Available keys:**
+| Key | Description |
+|-----|-------------|
+| `GOTRUE_HOOK_SEND_EMAIL_SECRETS` | Webhook secret for email hook verification (format: `v1,whsec_<base64_secret>`) |
+| `GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `GOTRUE_EXTERNAL_GOOGLE_SECRET` | Google OAuth client secret |
+| `GOTRUE_EXTERNAL_APPLE_CLIENT_ID` | Apple service ID |
+| `GOTRUE_EXTERNAL_APPLE_KEY_ID` | Apple key ID |
+| `GOTRUE_EXTERNAL_APPLE_PRIVATE_KEY` | Apple private key (with `\n` for newlines) |
+
+**Email Hook Secret Format:**
+
+The secret must be in the standard-webhooks format: `v1,whsec_<base64_secret>`
+
+Generate using:
+```bash
+# Generate 32 random bytes and base64 encode
+SECRET=$(openssl rand -base64 32)
+echo "v1,whsec_${SECRET}"
+```
+
+**Example:**
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: supabase-auth-providers
+type: Opaque
+stringData:
+  GOTRUE_HOOK_SEND_EMAIL_SECRETS: "v1,whsec_dGhpcyBpcyBhIHNlY3JldCBmb3Igd2ViaG9vayB2ZXJpZmljYXRpb24="
+  GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: "your-client-id.apps.googleusercontent.com"
+  GOTRUE_EXTERNAL_GOOGLE_SECRET: "your-google-secret"
+```
+
+**Note:** When configuring the email hook, you also need to set these environment variables in `auth.environment`:
+- `GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true"`
+- `GOTRUE_HOOK_SEND_EMAIL_URI: https://your-api.example.com/api/webhook/email`
+
+---
+
 ## Example HelmRelease Values
 
 ```yaml

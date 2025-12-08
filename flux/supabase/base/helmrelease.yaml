@@ -57,6 +57,9 @@ spec:
         GOTRUE_SITE_URL: https://dev-app.flicknote.app
         # OTP flow: autoconfirm=true because OTP entry proves email ownership
         GOTRUE_MAILER_AUTOCONFIRM: "true"
+        # Send Email Hook - routes emails through external webhook endpoint
+        GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true"
+        GOTRUE_HOOK_SEND_EMAIL_URI: https://dev-api.flicknote.app/api/webhook/email
       secret:
         db:
           secretRef: cnpg-supabase-auth-password
