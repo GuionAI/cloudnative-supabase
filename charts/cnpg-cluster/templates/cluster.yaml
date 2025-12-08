@@ -87,14 +87,19 @@ spec:
 
       {{- if .Values.supabaseRoles.supabaseAdmin.enabled }}
       # Supabase admin (owns schemas, manages database)
+      # pg_read_all_data + pg_write_all_data provide access to all data
       - name: supabase_admin
         ensure: present
         login: true
         createdb: true
         createrole: true
         bypassrls: true
+        replication: true
         passwordSecret:
           name: {{ .Values.supabaseRoles.supabaseAdmin.passwordSecret }}
+        inRoles:
+          - pg_read_all_data
+          - pg_write_all_data
       {{- end }}
 
       {{- if .Values.supabaseRoles.authenticator.enabled }}
