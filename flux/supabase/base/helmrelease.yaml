@@ -52,7 +52,7 @@ spec:
         DB_HOST: supabase-pg-rw.flicknote-infra.svc
         # Auth URLs - GoTrue uses these for building callback/redirect URLs
         API_EXTERNAL_URL: https://dev-auth.flicknote.app
-        GOTRUE_SITE_URL: https://dev-auth.flicknote.app
+        GOTRUE_SITE_URL: https://dev-app.flicknote.app
         # OTP flow: autoconfirm=true because OTP entry proves email ownership
         GOTRUE_MAILER_AUTOCONFIRM: "true"
       secret:
