@@ -1,4 +1,4 @@
-{{- /* Bootstrap database - extensions only (schemas created in bootstrap init SQL) */}}
+{{- /* Bootstrap database - extensions and schemas managed by CNPG */}}
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Database
@@ -16,6 +16,10 @@ spec:
   {{- if .Values.bootstrapDatabase.extensions }}
   extensions:
     {{- toYaml .Values.bootstrapDatabase.extensions | nindent 4 }}
+  {{- end }}
+  {{- if .Values.bootstrapDatabase.schemas }}
+  schemas:
+    {{- toYaml .Values.bootstrapDatabase.schemas | nindent 4 }}
   {{- end }}
 
 {{- /* Additional databases */}}
