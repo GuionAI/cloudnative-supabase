@@ -41,6 +41,17 @@ secret:
   s3:
     secretRef: ""
 
+  # Auth Providers Secret (OPTIONAL - for OAuth and email hooks)
+  # Contains environment variables for auth configuration:
+  # - GOTRUE_HOOK_SEND_EMAIL_SECRETS: Secret for email hook verification
+  # - GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: Google OAuth client ID
+  # - GOTRUE_EXTERNAL_GOOGLE_SECRET: Google OAuth client secret
+  # - GOTRUE_EXTERNAL_APPLE_CLIENT_ID: Apple service ID
+  # - GOTRUE_EXTERNAL_APPLE_KEY_ID: Apple key ID
+  # - GOTRUE_EXTERNAL_APPLE_PRIVATE_KEY: Apple private key (with \n for newlines)
+  authProviders:
+    secretRef: ""
+
 # Note: Database (db) and Sequin CDC initialization have been removed.
 # This chart now expects an external PostgreSQL database (e.g., CNPG).
 # Configure DB_HOST in each service's environment to point to your database.
@@ -206,6 +217,8 @@ auth:
     GOTRUE_JWT_EXP: "3600"
     GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
     GOTRUE_MAILER_AUTOCONFIRM: "true"
+    GOTRUE_MAILER_OTP_EXP: "3600"    # OTP expiration in seconds (max 86400)
+    GOTRUE_MAILER_OTP_LENGTH: "6"    # OTP length (6-10 digits)
     # GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED: true
     # GOTRUE_SMTP_MAX_FREQUENCY: 1s
     GOTRUE_SMTP_ADMIN_EMAIL: "SMTP_ADMIN_MAIL"

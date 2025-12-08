@@ -99,10 +99,14 @@ spec:
                   name: {{ .Values.secret.smtp.secretRef }}
                   key: password
             {{- end }}
-          {{- with .Values.auth.envFrom }}
           envFrom:
+            {{- if .Values.secret.authProviders.secretRef }}
+            - secretRef:
+                name: {{ .Values.secret.authProviders.secretRef }}
+            {{- end }}
+            {{- with .Values.auth.envFrom }}
             {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- end }}
           {{- with .Values.auth.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}

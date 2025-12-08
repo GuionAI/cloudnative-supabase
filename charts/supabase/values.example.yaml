@@ -13,6 +13,9 @@ secret:
     username: postgres
     password: example123456
     database: postgres
+  # Auth providers secret - create with generate-supabase-auth-secrets.sh
+  # authProviders:
+  #   secretRef: supabase-auth-providers
 
 db:
   enabled: true
