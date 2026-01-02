@@ -193,25 +193,25 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/api/profile",
+										Path: "/api/platform/profile",
 										Port: intstr.FromInt(StudioPort),
 									},
 								},
 								InitialDelaySeconds: 15,
 								PeriodSeconds:       10,
-								TimeoutSeconds:      5,
+								TimeoutSeconds:      10,
 								FailureThreshold:    3,
 							},
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/api/profile",
+										Path: "/api/platform/profile",
 										Port: intstr.FromInt(StudioPort),
 									},
 								},
 								InitialDelaySeconds: 10,
 								PeriodSeconds:       5,
-								TimeoutSeconds:      3,
+								TimeoutSeconds:      10,
 								FailureThreshold:    3,
 							},
 							Resources: spec.Resources,
