@@ -392,10 +392,6 @@ type KongSpec struct {
 	// +optional
 	Ingress *IngressSpec `json:"ingress,omitempty"`
 
-	// DashboardAuth enables basic auth for Studio access via Kong
-	// +optional
-	DashboardAuth *DashboardAuthSpec `json:"dashboardAuth,omitempty"`
-
 	// Resources for Kong pods
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
@@ -426,15 +422,6 @@ type IngressSpec struct {
 	// Annotations for the ingress
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
-}
-
-// DashboardAuthSpec defines dashboard authentication
-type DashboardAuthSpec struct {
-	// Enabled enables basic auth for dashboard
-	Enabled bool `json:"enabled"`
-
-	// SecretRef references a secret with username/password keys
-	SecretRef string `json:"secretRef"`
 }
 
 // SupabaseProjectStatus defines the observed state of SupabaseProject

@@ -387,21 +387,6 @@ spec:
               kong:
                 description: Kong API gateway configuration
                 properties:
-                  dashboardAuth:
-                    description: DashboardAuth enables basic auth for Studio access
-                      via Kong
-                    properties:
-                      enabled:
-                        description: Enabled enables basic auth for dashboard
-                        type: boolean
-                      secretRef:
-                        description: SecretRef references a secret with username/password
-                          keys
-                        type: string
-                    required:
-                    - enabled
-                    - secretRef
-                    type: object
                   imageTag:
                     default: 2.8.1
                     description: ImageTag for kong
