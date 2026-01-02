@@ -122,6 +122,14 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 		cluster.Spec.Resources = spec.Resources
 	}
 
+	// Enable pod anti-affinity for HA when multiple instances
+	// Uses soft anti-affinity (preferred) so pods still schedule on single-node clusters
+	if spec.Instances > 1 {
+		cluster.Spec.Affinity = cnpgv1.AffinityConfiguration{
+			EnablePodAntiAffinity: ptr.To(true),
+		}
+	}
+
 	// Add backup configuration if enabled
 	if spec.Backup != nil && spec.Backup.Enabled {
 		cluster.Spec.Plugins = []cnpgv1.PluginConfiguration{
