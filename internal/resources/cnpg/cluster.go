@@ -33,9 +33,6 @@ const (
 	// DefaultPostgresImage is the default PostgreSQL image for CNPG
 	DefaultPostgresImage = "ghcr.io/cloudnative-pg/postgresql:17"
 
-	// DatabaseName is the default database name
-	DatabaseName = "supabase"
-
 	// OwnerRole is the database owner role
 	OwnerRole = "supabase_admin"
 )
@@ -74,7 +71,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 
 			Bootstrap: &cnpgv1.BootstrapConfiguration{
 				InitDB: &cnpgv1.BootstrapInitDB{
-					Database: DatabaseName,
+					Database: common.DatabaseName,
 					Owner:    OwnerRole,
 					Secret: &cnpgv1.LocalObjectReference{
 						Name: secretNames.SupabaseAdmin,
@@ -107,7 +104,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 				},
 				{
 					Name:  "JWT_EXP",
-					Value: fmt.Sprintf("%d", getJWTExpiration(project)),
+					Value: fmt.Sprintf("%d", common.GetJWTExpiration(project)),
 				},
 			},
 
@@ -262,13 +259,6 @@ func mergeParameters(defaults, custom map[string]string) map[string]string {
 	return result
 }
 
-// getJWTExpiration returns the JWT expiration in seconds
-func getJWTExpiration(project *supabasev1alpha1.SupabaseProject) int {
-	if project.Spec.JWT != nil && project.Spec.JWT.ExpirationSeconds > 0 {
-		return project.Spec.JWT.ExpirationSeconds
-	}
-	return 3600 // Default 1 hour
-}
 
 // ptrStringOrNil returns a pointer to the string if non-empty, nil otherwise
 func ptrStringOrNil(s string) *string {

@@ -87,7 +87,7 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 		// Database configuration
 		{Name: "POSTGRES_HOST", Value: dbHost},
 		{Name: "POSTGRES_PORT", Value: "5432"},
-		{Name: "POSTGRES_DB", Value: cnpg.DatabaseName},
+		{Name: "POSTGRES_DB", Value: common.DatabaseName},
 
 		// Organization configuration
 		{Name: "STUDIO_DEFAULT_ORGANIZATION", Value: orgName},

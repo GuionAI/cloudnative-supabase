@@ -174,7 +174,7 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 		{Name: "DB_PORT", Value: "5432"},
 		{Name: "DB_DRIVER", Value: "postgres"},
 		{Name: "DB_SSL", Value: "disable"},
-		{Name: "DB_NAME", Value: cnpg.DatabaseName},
+		{Name: "DB_NAME", Value: common.DatabaseName},
 
 		// API configuration
 		{Name: "GOTRUE_API_HOST", Value: "0.0.0.0"},
@@ -187,7 +187,7 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 		{Name: "GOTRUE_JWT_DEFAULT_GROUP_NAME", Value: "authenticated"},
 		{Name: "GOTRUE_JWT_ADMIN_ROLES", Value: "service_role"},
 		{Name: "GOTRUE_JWT_AUD", Value: "authenticated"},
-		{Name: "GOTRUE_JWT_EXP", Value: fmt.Sprintf("%d", getJWTExp(project))},
+		{Name: "GOTRUE_JWT_EXP", Value: fmt.Sprintf("%d", common.GetJWTExpiration(project))},
 
 		// Signup configuration
 		{Name: "GOTRUE_DISABLE_SIGNUP", Value: fmt.Sprintf("%t", spec.DisableSignup)},
@@ -309,10 +309,3 @@ echo "Database is ready"`,
 	}
 }
 
-// getJWTExp returns JWT expiration seconds
-func getJWTExp(project *supabasev1alpha1.SupabaseProject) int {
-	if project.Spec.JWT != nil && project.Spec.JWT.ExpirationSeconds > 0 {
-		return project.Spec.JWT.ExpirationSeconds
-	}
-	return 3600
-}

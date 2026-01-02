@@ -38,6 +38,9 @@ const (
 
 	// ManagerName is the value for LabelManagedBy
 	ManagerName = "cloudnative-supabase"
+
+	// DatabaseName is the default database name for Supabase
+	DatabaseName = "supabase"
 )
 
 // CommonLabels returns the common labels for all resources

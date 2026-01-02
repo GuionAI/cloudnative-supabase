@@ -137,7 +137,7 @@ func InitSQLConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
 
 // BuildInitSQLConfigMap creates the ConfigMap containing init SQL for CNPG bootstrap
 func BuildInitSQLConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.ConfigMap {
-	dbName := "supabase" // Default database name
+	dbName := common.DatabaseName
 
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{

@@ -78,13 +78,13 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		{Name: "DB_PORT", Value: "5432"},
 		{Name: "DB_DRIVER", Value: "postgres"},
 		{Name: "DB_SSL", Value: "disable"},
-		{Name: "DB_NAME", Value: cnpg.DatabaseName},
+		{Name: "DB_NAME", Value: common.DatabaseName},
 
 		// PostgREST configuration
 		{Name: "PGRST_DB_SCHEMAS", Value: strings.Join(schemas, ",")},
 		{Name: "PGRST_DB_ANON_ROLE", Value: "anon"},
 		{Name: "PGRST_DB_USE_LEGACY_GUCS", Value: "false"},
-		{Name: "PGRST_APP_SETTINGS_JWT_EXP", Value: fmt.Sprintf("%d", getJWTExp(project))},
+		{Name: "PGRST_APP_SETTINGS_JWT_EXP", Value: fmt.Sprintf("%d", common.GetJWTExpiration(project))},
 
 		// Database credentials
 		{

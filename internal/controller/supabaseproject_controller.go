@@ -111,6 +111,7 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// All phases complete
 	project.Status.Phase = supabasev1alpha1.PhaseRunning
+	project.Status.ObservedGeneration = project.Generation
 	r.setCondition(project, supabasev1alpha1.ConditionTypeReady, metav1.ConditionTrue, "AllComponentsReady", "All Supabase components are running")
 
 	if err := r.Status().Update(ctx, project); err != nil {
@@ -350,6 +351,10 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 	// Create service
 	service := services.BuildAuthService(project)
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -375,6 +380,10 @@ func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *
 	// Create service
 	service := services.BuildRestService(project)
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -400,6 +409,10 @@ func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project
 	// Create service
 	service := services.BuildStudioService(project)
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -425,6 +438,10 @@ func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *
 	// Create service
 	service := services.BuildMetaService(project)
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -440,6 +457,10 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 	// Create Kong config ConfigMap
 	kongConfig := configmaps.BuildKongConfigMap(project)
 	if err := r.createOrUpdateConfigMap(ctx, project, kongConfig); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -456,6 +477,10 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 	// Create service
 	service := services.BuildKongService(project)
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
 		return ctrl.Result{}, err
 	}
 
