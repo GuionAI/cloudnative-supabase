@@ -28,7 +28,7 @@ jobs:
         run: go test ./pkg/... -v
 
       - name: Build
-        run: go build -o manager cmd/main.go
+        run: go build -o bin/manager cmd/main.go
 
       - name: Generate manifests
         run: make generate manifests
@@ -56,7 +56,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v2.0.2
           args: --timeout=5m
 
   docker:
