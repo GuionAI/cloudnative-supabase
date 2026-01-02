@@ -17,6 +17,8 @@ limitations under the License.
 package secrets
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -33,7 +35,7 @@ func GenerateSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secre
 	// Generate JWT secret
 	jwtSecret, jwtSecretName, err := generateJWTSecret(project)
 	if err != nil {
-		return nil, secretNames, err
+		return nil, secretNames, fmt.Errorf("failed to generate JWT secret: %w", err)
 	}
 	if jwtSecret != nil {
 		secrets = append(secrets, jwtSecret)
@@ -43,21 +45,21 @@ func GenerateSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secre
 	// Generate database role secrets
 	supabaseAdminSecret, supabaseAdminName, err := generateRoleSecret(project, "supabase-admin", "supabase_admin")
 	if err != nil {
-		return nil, secretNames, err
+		return nil, secretNames, fmt.Errorf("failed to generate supabase-admin secret: %w", err)
 	}
 	secrets = append(secrets, supabaseAdminSecret)
 	secretNames.SupabaseAdmin = supabaseAdminName
 
 	authenticatorSecret, authenticatorName, err := generateRoleSecret(project, "authenticator", "authenticator")
 	if err != nil {
-		return nil, secretNames, err
+		return nil, secretNames, fmt.Errorf("failed to generate authenticator secret: %w", err)
 	}
 	secrets = append(secrets, authenticatorSecret)
 	secretNames.Authenticator = authenticatorName
 
 	authAdminSecret, authAdminName, err := generateRoleSecret(project, "auth-admin", "supabase_auth_admin")
 	if err != nil {
-		return nil, secretNames, err
+		return nil, secretNames, fmt.Errorf("failed to generate auth-admin secret: %w", err)
 	}
 	secrets = append(secrets, authAdminSecret)
 	secretNames.AuthAdmin = authAdminName
@@ -77,7 +79,7 @@ func generateJWTSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secre
 	// Generate new JWT secret
 	jwtSecret, err := crypto.GenerateHex(32)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("generating secret key: %w", err)
 	}
 
 	// Determine expiration
@@ -89,12 +91,12 @@ func generateJWTSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secre
 	// Generate tokens
 	anonKey, err := crypto.CreateAnonKey(jwtSecret, expSeconds)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("generating anon key: %w", err)
 	}
 
 	serviceKey, err := crypto.CreateServiceKey(jwtSecret, expSeconds)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("generating service key: %w", err)
 	}
 
 	secret := &corev1.Secret{
@@ -120,7 +122,7 @@ func generateRoleSecret(project *supabasev1alpha1.SupabaseProject, nameSuffix, u
 
 	password, err := crypto.GeneratePassword()
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("generating password: %w", err)
 	}
 
 	secret := &corev1.Secret{

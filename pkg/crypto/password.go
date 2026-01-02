@@ -20,13 +20,18 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 )
 
 // GenerateHex generates n random bytes as a hex string (2n characters)
 func GenerateHex(n int) (string, error) {
 	bytes := make([]byte, n)
-	if _, err := rand.Read(bytes); err != nil {
+	bytesRead, err := rand.Read(bytes)
+	if err != nil {
 		return "", err
+	}
+	if bytesRead != n {
+		return "", fmt.Errorf("insufficient random bytes: got %d, want %d", bytesRead, n)
 	}
 	return hex.EncodeToString(bytes), nil
 }
@@ -34,8 +39,12 @@ func GenerateHex(n int) (string, error) {
 // GenerateBase64 generates n random bytes as a base64 string
 func GenerateBase64(n int) (string, error) {
 	bytes := make([]byte, n)
-	if _, err := rand.Read(bytes); err != nil {
+	bytesRead, err := rand.Read(bytes)
+	if err != nil {
 		return "", err
+	}
+	if bytesRead != n {
+		return "", fmt.Errorf("insufficient random bytes: got %d, want %d", bytesRead, n)
 	}
 	return base64.StdEncoding.EncodeToString(bytes), nil
 }

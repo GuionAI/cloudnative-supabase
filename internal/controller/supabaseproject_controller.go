@@ -340,6 +340,11 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 
 	// Create deployment
 	deployment := deployments.BuildAuthDeployment(project, secretNames)
+	log.V(1).Info("Built Auth deployment",
+		"image", fmt.Sprintf("%s:%s", "supabase/gotrue", project.Spec.Auth.ImageTag),
+		"replicas", project.Spec.Auth.Replicas,
+		"hasProviders", project.Spec.Auth.Providers != nil,
+		"hasEmailHook", project.Spec.Auth.EmailHook != nil && project.Spec.Auth.EmailHook.Enabled)
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
@@ -369,6 +374,9 @@ func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *
 
 	// Create deployment
 	deployment := deployments.BuildRestDeployment(project, secretNames)
+	log.V(1).Info("Built REST deployment",
+		"image", fmt.Sprintf("%s:%s", "postgrest/postgrest", project.Spec.Rest.ImageTag),
+		"schemas", project.Spec.Rest.Schemas)
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
@@ -398,6 +406,9 @@ func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project
 
 	// Create deployment
 	deployment := deployments.BuildStudioDeployment(project, secretNames)
+	log.V(1).Info("Built Studio deployment",
+		"image", fmt.Sprintf("%s:%s", "supabase/studio", project.Spec.Studio.ImageTag),
+		"publicURL", project.Spec.Studio.PublicURL)
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
@@ -427,6 +438,8 @@ func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *
 
 	// Create deployment
 	deployment := deployments.BuildMetaDeployment(project, secretNames)
+	log.V(1).Info("Built Meta deployment",
+		"image", fmt.Sprintf("%s:%s", "supabase/postgres-meta", project.Spec.Meta.ImageTag))
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
@@ -456,6 +469,7 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 
 	// Create Kong config ConfigMap
 	kongConfig := configmaps.BuildKongConfigMap(project)
+	log.V(1).Info("Built Kong ConfigMap", "name", kongConfig.Name)
 	if err := r.createOrUpdateConfigMap(ctx, project, kongConfig); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
@@ -466,6 +480,8 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 
 	// Create deployment
 	deployment := deployments.BuildKongDeployment(project, secretNames)
+	log.V(1).Info("Built Kong deployment",
+		"image", fmt.Sprintf("%s:%s", "kong", project.Spec.Kong.ImageTag))
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
@@ -535,8 +551,9 @@ func (r *SupabaseProjectReconciler) createOrUpdateConfigMap(ctx context.Context,
 }
 
 func (r *SupabaseProjectReconciler) createOrUpdateDeployment(ctx context.Context, project *supabasev1alpha1.SupabaseProject, deployment *appsv1.Deployment) error {
+	log := logf.FromContext(ctx)
 	if deployment == nil {
-		logf.FromContext(ctx).V(1).Info("Skipping nil deployment - service may be disabled")
+		log.V(1).Info("Skipping nil deployment - service may be disabled")
 		return nil
 	}
 
@@ -550,13 +567,16 @@ func (r *SupabaseProjectReconciler) createOrUpdateDeployment(ctx context.Context
 	err := r.Get(ctx, types.NamespacedName{Name: deployment.Name, Namespace: deployment.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			log.V(1).Info("Creating deployment", "name", deployment.Name)
 			return r.Create(ctx, deployment)
 		}
 		return err
 	}
 
-	// Update existing
-	existing.Spec = deployment.Spec
+	// Update existing - only update operator-owned fields
+	log.V(1).Info("Updating deployment", "name", deployment.Name)
+	existing.Spec.Replicas = deployment.Spec.Replicas
+	existing.Spec.Template = deployment.Spec.Template
 	return r.Update(ctx, existing)
 }
 
