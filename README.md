@@ -27,6 +27,7 @@ CloudNative Supabase provides a single `SupabaseProject` Custom Resource that ma
 - Kubernetes v1.11.3+
 - [CloudNativePG operator](https://cloudnative-pg.io/documentation/current/installation_upgrade/) installed
 - kubectl v1.11.3+
+- (Optional) [Reloader](https://github.com/stakater/Reloader) - for automatic pod restarts on secret/configmap changes
 
 ## Installation
 
