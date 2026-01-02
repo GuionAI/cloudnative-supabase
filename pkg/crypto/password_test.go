@@ -43,7 +43,7 @@ func TestGenerateHex(t *testing.T) {
 			}
 			// Verify hex characters only
 			for _, c := range got {
-				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 					t.Errorf("GenerateHex() contains non-hex character: %c", c)
 				}
 			}

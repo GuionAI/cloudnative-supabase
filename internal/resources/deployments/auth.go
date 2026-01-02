@@ -108,7 +108,7 @@ func BuildAuthDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 				},
 				Spec: corev1.PodSpec{
 					InitContainers: []corev1.Container{
-						buildDBInitContainer(project, secretNames, dbHost),
+						buildDBInitContainer(secretNames, dbHost),
 					},
 					Containers: []corev1.Container{
 						{
@@ -278,7 +278,7 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 }
 
 // buildDBInitContainer creates the init container that waits for the database
-func buildDBInitContainer(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, dbHost string) corev1.Container {
+func buildDBInitContainer(secretNames *supabasev1alpha1.SecretNamesStatus, dbHost string) corev1.Container {
 	return corev1.Container{
 		Name:            "init-db",
 		Image:           "postgres:15-alpine",
@@ -308,4 +308,3 @@ echo "Database is ready"`,
 		},
 	}
 }
-

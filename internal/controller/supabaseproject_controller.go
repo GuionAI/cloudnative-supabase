@@ -85,28 +85,28 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	// Phase 1: Ensure secrets exist
-	if result, err := r.reconcileSecrets(ctx, project); err != nil || result.Requeue {
-		return result, err
+	if err := r.reconcileSecrets(ctx, project); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Phase 2: Ensure init SQL ConfigMap exists
-	if result, err := r.reconcileInitSQL(ctx, project); err != nil || result.Requeue {
-		return result, err
+	if err := r.reconcileInitSQL(ctx, project); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Phase 3: Ensure CNPG Cluster exists
-	if result, err := r.reconcileCNPGCluster(ctx, project); err != nil || result.Requeue {
+	if result, err := r.reconcileCNPGCluster(ctx, project); err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
 
 	// Phase 4: Wait for database to be ready
-	if result, err := r.waitForDatabase(ctx, project); err != nil || result.Requeue {
+	if result, err := r.waitForDatabase(ctx, project); err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
 
 	// Phase 5: Deploy Supabase services
-	if result, err := r.reconcileServices(ctx, project); err != nil || result.Requeue {
-		return result, err
+	if err := r.reconcileServices(ctx, project); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// All phases complete
@@ -123,7 +123,7 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 // reconcileSecrets ensures all required secrets exist
-func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling secrets")
 
@@ -156,7 +156,7 @@ func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, projec
 					allExist = false
 					break
 				}
-				return ctrl.Result{}, err
+				return err
 			}
 		}
 
@@ -165,12 +165,12 @@ func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, projec
 			project.Status.SecretNames = secretNames
 			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionTrue, "SecretsExist", "All secrets exist")
 			if err := r.Status().Update(ctx, project); err != nil {
-				return ctrl.Result{}, err
+				return err
 			}
-			return ctrl.Result{}, nil
+			return nil
 		}
 	} else if !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Secrets don't exist - generate them
@@ -179,9 +179,9 @@ func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, projec
 	if err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "GenerationFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Create or update each secret
@@ -189,9 +189,9 @@ func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, projec
 		if err := r.createOrUpdateSecret(ctx, project, secret); err != nil {
 			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "CreateFailed", err.Error())
 			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-				return ctrl.Result{}, statusErr
+				return statusErr
 			}
-			return ctrl.Result{}, err
+			return err
 		}
 	}
 
@@ -200,23 +200,19 @@ func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, projec
 
 	r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionTrue, "SecretsCreated", "All secrets have been created")
 	if err := r.Status().Update(ctx, project); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // reconcileInitSQL ensures the init SQL ConfigMap exists
-func (r *SupabaseProjectReconciler) reconcileInitSQL(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+func (r *SupabaseProjectReconciler) reconcileInitSQL(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling init SQL ConfigMap")
 
 	configMap := configmaps.BuildInitSQLConfigMap(project)
-	if err := r.createOrUpdateConfigMap(ctx, project, configMap); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	return ctrl.Result{}, nil
+	return r.createOrUpdateConfigMap(ctx, project, configMap)
 }
 
 // reconcileCNPGCluster ensures the CNPG Cluster exists
@@ -299,42 +295,42 @@ func (r *SupabaseProjectReconciler) waitForDatabase(ctx context.Context, project
 }
 
 // reconcileServices deploys all Supabase services
-func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling Supabase services")
 
 	secretNames := &project.Status.SecretNames
 
 	// Deploy Auth (GoTrue)
-	if result, err := r.reconcileAuth(ctx, project, secretNames); err != nil || result.Requeue {
-		return result, err
+	if err := r.reconcileAuth(ctx, project, secretNames); err != nil {
+		return err
 	}
 
 	// Deploy REST (PostgREST)
-	if result, err := r.reconcileRest(ctx, project, secretNames); err != nil || result.Requeue {
-		return result, err
+	if err := r.reconcileRest(ctx, project, secretNames); err != nil {
+		return err
 	}
 
 	// Deploy Studio
-	if result, err := r.reconcileStudio(ctx, project, secretNames); err != nil || result.Requeue {
-		return result, err
+	if err := r.reconcileStudio(ctx, project, secretNames); err != nil {
+		return err
 	}
 
 	// Deploy Meta (postgres-meta)
-	if result, err := r.reconcileMeta(ctx, project, secretNames); err != nil || result.Requeue {
-		return result, err
+	if err := r.reconcileMeta(ctx, project, secretNames); err != nil {
+		return err
 	}
 
 	// Deploy Kong
-	if result, err := r.reconcileKong(ctx, project, secretNames); err != nil || result.Requeue {
-		return result, err
+	if err := r.reconcileKong(ctx, project, secretNames); err != nil {
+		return err
 	}
 
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // reconcileAuth deploys the Auth service
-func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
+func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling Auth service")
 
@@ -348,9 +344,9 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Create service
@@ -358,17 +354,17 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionTrue, "Ready", "Auth service is running")
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // reconcileRest deploys the REST service
-func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
+func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling REST service")
 
@@ -380,9 +376,9 @@ func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Create service
@@ -390,17 +386,17 @@ func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionTrue, "Ready", "REST service is running")
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // reconcileStudio deploys the Studio service
-func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
+func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling Studio service")
 
@@ -412,9 +408,9 @@ func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Create service
@@ -422,17 +418,17 @@ func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionTrue, "Ready", "Studio service is running")
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // reconcileMeta deploys the Meta service
-func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
+func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling Meta service")
 
@@ -443,9 +439,9 @@ func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Create service
@@ -453,17 +449,17 @@ func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionTrue, "Ready", "Meta service is running")
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // reconcileKong deploys the Kong API gateway
-func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
+func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling Kong service")
 
@@ -473,9 +469,9 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 	if err := r.createOrUpdateConfigMap(ctx, project, kongConfig); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Create deployment
@@ -485,9 +481,9 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Create service
@@ -495,16 +491,16 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
+			return statusErr
 		}
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Update API endpoint in status
 	project.Status.Endpoints.API = fmt.Sprintf("%s-kong:8000", project.Name)
 
 	r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionTrue, "Ready", "Kong gateway is running")
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // Helper methods

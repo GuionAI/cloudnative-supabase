@@ -123,7 +123,7 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 				},
 				Spec: corev1.PodSpec{
 					InitContainers: []corev1.Container{
-						buildMetaDBInitContainer(project, secretNames, dbHost),
+						buildMetaDBInitContainer(secretNames, dbHost),
 					},
 					Containers: []corev1.Container{
 						{
@@ -179,7 +179,7 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 }
 
 // buildMetaDBInitContainer creates the init container that waits for the database
-func buildMetaDBInitContainer(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, dbHost string) corev1.Container {
+func buildMetaDBInitContainer(secretNames *supabasev1alpha1.SecretNamesStatus, dbHost string) corev1.Container {
 	return corev1.Container{
 		Name:            "init-db",
 		Image:           "postgres:15-alpine",

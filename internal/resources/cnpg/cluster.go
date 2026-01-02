@@ -112,7 +112,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 			},
 
 			Managed: &cnpgv1.ManagedConfiguration{
-				Roles: buildRoles(project, secretNames),
+				Roles: buildRoles(secretNames),
 			},
 		},
 	}
@@ -139,7 +139,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 }
 
 // buildRoles creates the managed roles for Supabase
-func buildRoles(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
+func buildRoles(secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
 	return []cnpgv1.RoleConfiguration{
 		// Group role for API permissions
 		{
@@ -236,7 +236,6 @@ func mergeParameters(defaults, custom map[string]string) map[string]string {
 	}
 	return result
 }
-
 
 // ptrStringOrNil returns a pointer to the string if non-empty, nil otherwise
 func ptrStringOrNil(s string) *string {

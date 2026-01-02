@@ -153,7 +153,7 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 				},
 				Spec: corev1.PodSpec{
 					InitContainers: []corev1.Container{
-						buildRestDBInitContainer(project, secretNames, dbHost),
+						buildRestDBInitContainer(secretNames, dbHost),
 					},
 					Containers: []corev1.Container{
 						{
@@ -209,7 +209,7 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 }
 
 // buildRestDBInitContainer creates the init container that waits for the database
-func buildRestDBInitContainer(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, dbHost string) corev1.Container {
+func buildRestDBInitContainer(secretNames *supabasev1alpha1.SecretNamesStatus, dbHost string) corev1.Container {
 	return corev1.Container{
 		Name:            "init-db",
 		Image:           "postgres:15-alpine",

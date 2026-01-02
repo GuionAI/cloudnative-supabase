@@ -37,7 +37,7 @@ func TestGenerateJWTSecret(t *testing.T) {
 
 	// Should only contain hex characters
 	for _, c := range secret {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Errorf("GenerateJWTSecret() contains non-hex character: %c", c)
 		}
 	}
@@ -148,7 +148,9 @@ func TestCreateAnonKey(t *testing.T) {
 	parts := strings.Split(token, ".")
 	claimsJSON, _ := base64URLDecode(parts[1])
 	var claims JWTClaims
-	json.Unmarshal(claimsJSON, &claims)
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
 
 	if claims.Role != "anon" {
 		t.Errorf("CreateAnonKey() role = %s, want anon", claims.Role)
@@ -165,7 +167,9 @@ func TestCreateServiceKey(t *testing.T) {
 	parts := strings.Split(token, ".")
 	claimsJSON, _ := base64URLDecode(parts[1])
 	var claims JWTClaims
-	json.Unmarshal(claimsJSON, &claims)
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
 
 	if claims.Role != "service_role" {
 		t.Errorf("CreateServiceKey() role = %s, want service_role", claims.Role)
