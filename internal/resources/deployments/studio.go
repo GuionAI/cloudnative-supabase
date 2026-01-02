@@ -27,6 +27,7 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
 )
 
 const (
@@ -35,12 +36,6 @@ const (
 
 	// StudioPort is the port Studio listens on
 	StudioPort = 3000
-
-	// DefaultStudioImage is the default Studio image
-	DefaultStudioImage = "supabase/studio"
-
-	// DefaultStudioTag is the default Studio image tag
-	DefaultStudioTag = "2025.12.17-sha-43f4f7f"
 )
 
 // StudioDeploymentName returns the studio deployment name
@@ -55,7 +50,7 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 	dbHost := cnpg.ClusterRWServiceName(project)
 
 	// Determine image tag
-	imageTag := DefaultStudioTag
+	imageTag := defaults.StudioTag
 	if spec.ImageTag != "" {
 		imageTag = spec.ImageTag
 	}
@@ -185,7 +180,7 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 					Containers: []corev1.Container{
 						{
 							Name:            StudioComponentName,
-							Image:           fmt.Sprintf("%s:%s", DefaultStudioImage, imageTag),
+							Image:           fmt.Sprintf("%s:%s", defaults.StudioImage, imageTag),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Env:             env,
 							Ports: []corev1.ContainerPort{

@@ -28,6 +28,7 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
 )
 
 const (
@@ -36,12 +37,6 @@ const (
 
 	// RestPort is the port PostgREST listens on
 	RestPort = 3000
-
-	// DefaultRestImage is the default PostgREST image
-	DefaultRestImage = "postgrest/postgrest"
-
-	// DefaultRestTag is the default PostgREST image tag
-	DefaultRestTag = "v12.2.3"
 )
 
 // RestDeploymentName returns the rest deployment name
@@ -56,7 +51,7 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 	dbHost := cnpg.ClusterRWServiceName(project)
 
 	// Determine image tag
-	imageTag := DefaultRestTag
+	imageTag := defaults.RestTag
 	if spec.ImageTag != "" {
 		imageTag = spec.ImageTag
 	}
@@ -158,7 +153,7 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 					Containers: []corev1.Container{
 						{
 							Name:            RestComponentName,
-							Image:           fmt.Sprintf("%s:%s", DefaultRestImage, imageTag),
+							Image:           fmt.Sprintf("%s:%s", defaults.RestImage, imageTag),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Env:             env,
 							Ports: []corev1.ContainerPort{

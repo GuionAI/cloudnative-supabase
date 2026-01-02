@@ -233,8 +233,7 @@ type SecretsSpec struct {
 
 // AuthSpec defines GoTrue auth service configuration
 type AuthSpec struct {
-	// Image tag for supabase/gotrue
-	// +kubebuilder:default="v2.184.0"
+	// Image tag for supabase/gotrue (defaults to operator version if empty)
 	// +optional
 	ImageTag string `json:"imageTag,omitempty"`
 
@@ -343,8 +342,7 @@ type SMTPSpec struct {
 
 // RestSpec defines PostgREST configuration
 type RestSpec struct {
-	// ImageTag for postgrest/postgrest
-	// +kubebuilder:default="v12.2.3"
+	// ImageTag for postgrest/postgrest (defaults to operator version if empty)
 	// +optional
 	ImageTag string `json:"imageTag,omitempty"`
 
@@ -365,8 +363,7 @@ type RestSpec struct {
 
 // StudioSpec defines Supabase Studio configuration
 type StudioSpec struct {
-	// ImageTag for supabase/studio
-	// +kubebuilder:default="2025.12.17-sha-43f4f7f"
+	// ImageTag for supabase/studio (defaults to operator version if empty)
 	// +optional
 	ImageTag string `json:"imageTag,omitempty"`
 
@@ -396,8 +393,7 @@ type StudioSpec struct {
 
 // MetaSpec defines postgres-meta configuration
 type MetaSpec struct {
-	// ImageTag for supabase/postgres-meta
-	// +kubebuilder:default="v0.84.2"
+	// ImageTag for supabase/postgres-meta (defaults to operator version if empty)
 	// +optional
 	ImageTag string `json:"imageTag,omitempty"`
 
@@ -413,8 +409,7 @@ type MetaSpec struct {
 
 // KongSpec defines Kong API gateway configuration
 type KongSpec struct {
-	// ImageTag for kong
-	// +kubebuilder:default="2.8.1"
+	// ImageTag for kong (defaults to operator version if empty)
 	// +optional
 	ImageTag string `json:"imageTag,omitempty"`
 

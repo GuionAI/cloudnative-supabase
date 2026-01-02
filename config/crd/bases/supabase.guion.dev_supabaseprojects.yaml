@@ -79,8 +79,8 @@ spec:
                     description: ExternalURL is the public URL of the auth service
                     type: string
                   imageTag:
-                    default: v2.184.0
-                    description: Image tag for supabase/gotrue
+                    description: Image tag for supabase/gotrue (defaults to operator
+                      version if empty)
                     type: string
                   providers:
                     description: Providers configuration for OAuth
@@ -715,8 +715,8 @@ spec:
                 description: Kong API gateway configuration
                 properties:
                   imageTag:
-                    default: 2.8.1
-                    description: ImageTag for kong
+                    description: ImageTag for kong (defaults to operator version if
+                      empty)
                     type: string
                   ingress:
                     description: Ingress configuration
@@ -816,8 +816,8 @@ spec:
                 description: Meta service configuration (postgres-meta)
                 properties:
                   imageTag:
-                    default: v0.84.2
-                    description: ImageTag for supabase/postgres-meta
+                    description: ImageTag for supabase/postgres-meta (defaults to
+                      operator version if empty)
                     type: string
                   replicas:
                     default: 1
@@ -888,8 +888,8 @@ spec:
                 description: Rest service configuration (PostgREST)
                 properties:
                   imageTag:
-                    default: v12.2.3
-                    description: ImageTag for postgrest/postgrest
+                    description: ImageTag for postgrest/postgrest (defaults to operator
+                      version if empty)
                     type: string
                   replicas:
                     default: 1
@@ -1009,8 +1009,8 @@ spec:
                 description: Studio dashboard configuration
                 properties:
                   imageTag:
-                    default: 2025.12.17-sha-43f4f7f
-                    description: ImageTag for supabase/studio
+                    description: ImageTag for supabase/studio (defaults to operator
+                      version if empty)
                     type: string
                   organizationName:
                     default: Default Organization

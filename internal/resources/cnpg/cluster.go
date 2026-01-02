@@ -17,6 +17,8 @@ limitations under the License.
 package cnpg
 
 import (
+	"fmt"
+
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -24,12 +26,10 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/configmaps"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
 )
 
 const (
-	// DefaultPostgresImage is the default PostgreSQL image for CNPG
-	DefaultPostgresImage = "ghcr.io/cloudnative-pg/postgresql:17"
-
 	// OwnerRole is the database owner role
 	OwnerRole = "supabase_admin"
 )
@@ -50,7 +50,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 	spec := project.Spec.Database
 
 	// Determine image
-	image := DefaultPostgresImage
+	image := fmt.Sprintf("%s:%s", defaults.PostgresImage, defaults.PostgresTag)
 	if spec.Image != "" {
 		image = spec.Image
 	}

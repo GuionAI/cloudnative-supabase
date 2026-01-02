@@ -27,6 +27,7 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
 )
 
 const (
@@ -35,12 +36,6 @@ const (
 
 	// MetaPort is the port postgres-meta listens on
 	MetaPort = 8080
-
-	// DefaultMetaImage is the default postgres-meta image
-	DefaultMetaImage = "supabase/postgres-meta"
-
-	// DefaultMetaTag is the default postgres-meta image tag
-	DefaultMetaTag = "v0.84.2"
 )
 
 // MetaDeploymentName returns the meta deployment name
@@ -55,7 +50,7 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 	dbHost := cnpg.ClusterRWServiceName(project)
 
 	// Determine image tag
-	imageTag := DefaultMetaTag
+	imageTag := defaults.MetaTag
 	if spec.ImageTag != "" {
 		imageTag = spec.ImageTag
 	}
@@ -125,7 +120,7 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 					Containers: []corev1.Container{
 						{
 							Name:            MetaComponentName,
-							Image:           fmt.Sprintf("%s:%s", DefaultMetaImage, imageTag),
+							Image:           fmt.Sprintf("%s:%s", defaults.MetaImage, imageTag),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Env:             env,
 							Ports: []corev1.ContainerPort{

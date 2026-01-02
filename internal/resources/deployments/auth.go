@@ -27,6 +27,7 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
 )
 
 const (
@@ -35,12 +36,6 @@ const (
 
 	// AuthPort is the port GoTrue listens on
 	AuthPort = 9999
-
-	// DefaultAuthImage is the default GoTrue image
-	DefaultAuthImage = "supabase/gotrue"
-
-	// DefaultAuthTag is the default GoTrue image tag
-	DefaultAuthTag = "v2.184.0"
 )
 
 // AuthDeploymentName returns the auth deployment name
@@ -60,7 +55,7 @@ func BuildAuthDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 	dbHost := cnpg.ClusterRWServiceName(project)
 
 	// Determine image tag
-	imageTag := DefaultAuthTag
+	imageTag := defaults.AuthTag
 	if spec.ImageTag != "" {
 		imageTag = spec.ImageTag
 	}
@@ -110,7 +105,7 @@ func BuildAuthDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 					Containers: []corev1.Container{
 						{
 							Name:            AuthComponentName,
-							Image:           fmt.Sprintf("%s:%s", DefaultAuthImage, imageTag),
+							Image:           fmt.Sprintf("%s:%s", defaults.AuthImage, imageTag),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Env:             env,
 							EnvFrom:         envFrom,

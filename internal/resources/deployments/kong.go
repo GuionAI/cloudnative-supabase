@@ -26,6 +26,7 @@ import (
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
 )
 
 const (
@@ -40,12 +41,6 @@ const (
 
 	// KongAdminPort is the admin API port
 	KongAdminPort = 8001
-
-	// DefaultKongImage is the default Kong image
-	DefaultKongImage = "kong"
-
-	// DefaultKongTag is the default Kong image tag
-	DefaultKongTag = "2.8.1"
 )
 
 // KongDeploymentName returns the kong deployment name
@@ -64,7 +59,7 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 	name := KongDeploymentName(project)
 
 	// Determine image tag
-	imageTag := DefaultKongTag
+	imageTag := defaults.KongTag
 	if spec.ImageTag != "" {
 		imageTag = spec.ImageTag
 	}
@@ -143,7 +138,7 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 					Containers: []corev1.Container{
 						{
 							Name:            KongComponentName,
-							Image:           fmt.Sprintf("%s:%s", DefaultKongImage, imageTag),
+							Image:           fmt.Sprintf("%s:%s", defaults.KongImage, imageTag),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Env:             env,
 							Ports: []corev1.ContainerPort{
