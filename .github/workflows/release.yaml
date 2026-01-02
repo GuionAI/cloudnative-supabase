@@ -65,3 +65,23 @@ jobs:
           generate_release_notes: true
           files: |
             config/crd/bases/*.yaml
+
+      - name: Update chart version
+        run: |
+          # Extract version without 'v' prefix
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # Update Chart.yaml
+          sed -i "s/^version: .*/version: ${VERSION}/" charts/cloudnative-supabase/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: ${VERSION}/" charts/cloudnative-supabase/Chart.yaml
+
+          # Update values.yaml image tag
+          sed -i "s/^  tag: .*/  tag: \"${VERSION}\"/" charts/cloudnative-supabase/values.yaml
+
+      - name: Commit and push chart version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add charts/cloudnative-supabase/Chart.yaml charts/cloudnative-supabase/values.yaml
+          git commit -m "chore(chart): bump to ${GITHUB_REF_NAME#v}" || exit 0
+          git push origin HEAD:main
