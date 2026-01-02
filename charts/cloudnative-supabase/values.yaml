@@ -2,8 +2,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/guionai/cloudnative-supabase
-  # Defaults to appVersion if not set
-  tag: ""
+  tag: "0.1.1"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
