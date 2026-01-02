@@ -224,32 +224,7 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling CNPG Cluster")
 
-	secretNames := &project.Status.SecretNames
-
-	// Validate JWT secret exists and has required key before creating cluster
-	// This prevents cryptic CNPG errors when the secret is missing
-	jwtSecret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Name: secretNames.JWT, Namespace: project.Namespace}, jwtSecret); err != nil {
-		if apierrors.IsNotFound(err) {
-			err = fmt.Errorf("JWT secret %q not found - required for CNPG cluster env vars", secretNames.JWT)
-			r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "JWTSecretMissing", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-				return ctrl.Result{}, statusErr
-			}
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
-		}
-		return ctrl.Result{}, err
-	}
-	if _, ok := jwtSecret.Data["secret"]; !ok {
-		err := fmt.Errorf("JWT secret %q missing 'secret' key - required for database JWT settings", secretNames.JWT)
-		r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "JWTSecretInvalid", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
-		}
-		return ctrl.Result{}, err
-	}
-
-	cluster := cnpg.BuildCluster(project, secretNames)
+	cluster := cnpg.BuildCluster(project, &project.Status.SecretNames)
 
 	// Check if cluster exists
 	existing := &cnpgv1.Cluster{}

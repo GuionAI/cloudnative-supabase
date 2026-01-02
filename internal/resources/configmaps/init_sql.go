@@ -28,18 +28,11 @@ import (
 
 // InitSQLTemplate is the database initialization SQL for Supabase
 // This runs during CNPG bootstrap BEFORE managed.roles are created
-//
-// IMPORTANT: This SQL uses environment variable substitution via $(VAR) syntax.
-// The CNPG cluster must have JWT_SECRET and JWT_EXP env vars set, which are
-// validated in reconcileCNPGCluster before cluster creation.
 const InitSQLTemplate = `-- ============================================
 -- Supabase Database Initialization SQL
 -- ============================================
 -- This runs during bootstrap BEFORE managed.roles.
 -- Creates roles, schemas, and sets up all grants.
---
--- NOTE: $(JWT_SECRET) and $(JWT_EXP) are substituted from
--- environment variables set on the CNPG cluster pods.
 -- ============================================
 
 -- 1. Create api_access_role (group role for API permissions)
