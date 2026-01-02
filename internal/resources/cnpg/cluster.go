@@ -253,9 +253,9 @@ func defaultParameters() map[string]string {
 }
 
 // mergeParameters merges default parameters with user-provided parameters
-func mergeParameters(defaults, custom map[string]string) map[string]string {
+func mergeParameters(base, custom map[string]string) map[string]string {
 	result := make(map[string]string)
-	for k, v := range defaults {
+	for k, v := range base {
 		result[k] = v
 	}
 	for k, v := range custom {
