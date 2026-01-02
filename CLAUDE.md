@@ -7,11 +7,13 @@ This file provides guidance to Claude Code when working with code in this reposi
 CloudNative Supabase is a Kubernetes operator that deploys Supabase using CloudNativePG (CNPG) as the PostgreSQL backend. It creates a single `SupabaseProject` CRD that manages:
 
 - CNPG PostgreSQL cluster with managed roles
-- GoTrue (Auth service)
-- PostgREST (REST API)
-- Studio (Dashboard)
-- postgres-meta (Database introspection)
-- Kong (API Gateway)
+- GoTrue (Auth service) - always enabled
+- PostgREST (REST API) - always enabled
+- Studio (Dashboard) - always enabled
+- postgres-meta (Database introspection) - always enabled
+- Kong (API Gateway) - always enabled
+
+**Note**: All services are always deployed. There are no `enabled` flags - the operator deploys the full Supabase stack.
 
 ## Project Structure
 

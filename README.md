@@ -16,6 +16,7 @@ CloudNative Supabase provides a single `SupabaseProject` Custom Resource that ma
 ## Features
 
 - Single CRD deploys entire Supabase stack
+- All services always enabled (Auth, REST, Studio, Meta, Kong)
 - Auto-generates JWT secrets and database passwords
 - Integrates with CNPG for production-grade PostgreSQL
 - Owner references for automatic cleanup
@@ -64,7 +65,6 @@ spec:
       size: 10Gi
 
   auth:
-    enabled: true
     siteURL: https://app.example.com
     externalURL: https://auth.example.com
 ```
@@ -86,7 +86,6 @@ spec:
     enableSuperuserAccess: false
 
   auth:
-    enabled: true
     siteURL: https://app.example.com
     externalURL: https://auth.example.com
     autoConfirmEmail: true
@@ -99,21 +98,15 @@ spec:
       secretRef: auth-providers
 
   rest:
-    enabled: true
     schemas:
       - public
 
   studio:
-    enabled: true
     publicURL: https://studio.example.com
     organizationName: My Org
     projectName: My Project
 
-  meta:
-    enabled: true
-
-  kong:
-    enabled: true
+  # meta and kong use defaults
 ```
 
 ### Check Status
@@ -149,7 +142,6 @@ Status conditions:
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `enabled` | Enable auth service | Required |
 | `siteURL` | Application URL | Required |
 | `externalURL` | Auth service URL | Required |
 | `autoConfirmEmail` | Skip email confirmation | false |
@@ -159,15 +151,15 @@ Status conditions:
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `enabled` | Enable REST API | - |
 | `schemas` | Exposed schemas | `[public]` |
 
 ### Studio
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `enabled` | Enable Studio dashboard | - |
 | `publicURL` | Studio public URL | - |
+| `organizationName` | Organization name in UI | Default Organization |
+| `projectName` | Project name in UI | Default Project |
 
 ## Generated Secrets
 
