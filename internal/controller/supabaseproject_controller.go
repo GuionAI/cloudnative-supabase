@@ -305,17 +305,6 @@ func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, proje
 
 	secretNames := &project.Status.SecretNames
 
-	// Validate required secrets are initialized
-	if secretNames.JWT == "" || secretNames.SupabaseAdmin == "" || secretNames.Authenticator == "" || secretNames.AuthAdmin == "" {
-		err := fmt.Errorf("secrets not properly initialized: jwt=%q, supabaseAdmin=%q, authenticator=%q, authAdmin=%q",
-			secretNames.JWT, secretNames.SupabaseAdmin, secretNames.Authenticator, secretNames.AuthAdmin)
-		r.setCondition(project, supabasev1alpha1.ConditionTypeReady, metav1.ConditionFalse, "SecretsNotReady", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return ctrl.Result{}, statusErr
-		}
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, err
-	}
-
 	// Deploy Auth (GoTrue)
 	if result, err := r.reconcileAuth(ctx, project, secretNames); err != nil || result.Requeue {
 		return result, err
