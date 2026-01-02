@@ -1,0 +1,45 @@
+apiVersion: supabase.guion.dev/v1alpha1
+kind: SupabaseProject
+metadata:
+  labels:
+    app.kubernetes.io/name: cloudnative-supabase
+    app.kubernetes.io/managed-by: kustomize
+  name: example
+  namespace: example
+spec:
+  database:
+    instances: 1
+    storage:
+      size: 10Gi
+      storageClass: local-path
+    enableSuperuserAccess: false
+
+  auth:
+    enabled: true
+    siteURL: https://app.example.com
+    externalURL: https://auth.example.com
+    autoConfirmEmail: true
+    providers:
+      google:
+        enabled: true
+        skipNonceCheck: true
+      apple:
+        enabled: true
+      secretRef: auth-providers
+
+  rest:
+    enabled: true
+    schemas:
+      - public
+
+  studio:
+    enabled: true
+    publicURL: https://studio.example.com
+    organizationName: Example Org
+    projectName: Example Project
+
+  meta:
+    enabled: true
+
+  kong:
+    enabled: true

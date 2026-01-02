@@ -1,0 +1,566 @@
+/*
+Copyright 2026 GuionAI.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/configmaps"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/deployments"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/secrets"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/services"
+)
+
+const (
+	// RequeueDelay is the delay before requeueing when waiting for resources
+	RequeueDelay = 10 * time.Second
+)
+
+// SupabaseProjectReconciler reconciles a SupabaseProject object
+type SupabaseProjectReconciler struct {
+	client.Client
+	Scheme *runtime.Scheme
+}
+
+// +kubebuilder:rbac:groups=supabase.guion.dev,resources=supabaseprojects,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=supabase.guion.dev,resources=supabaseprojects/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=supabase.guion.dev,resources=supabaseprojects/finalizers,verbs=update
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+
+// Reconcile is part of the main kubernetes reconciliation loop which aims to
+// move the current state of the cluster closer to the desired state.
+func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	// Fetch the SupabaseProject instance
+	project := &supabasev1alpha1.SupabaseProject{}
+	if err := r.Get(ctx, req.NamespacedName, project); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("SupabaseProject resource not found, ignoring")
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Reconciling SupabaseProject", "phase", project.Status.Phase)
+
+	// Initialize status if needed
+	if project.Status.Phase == "" {
+		project.Status.Phase = supabasev1alpha1.PhasePending
+	}
+
+	// Phase 1: Ensure secrets exist
+	if result, err := r.reconcileSecrets(ctx, project); err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Phase 2: Ensure init SQL ConfigMap exists
+	if result, err := r.reconcileInitSQL(ctx, project); err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Phase 3: Ensure CNPG Cluster exists
+	if result, err := r.reconcileCNPGCluster(ctx, project); err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Phase 4: Wait for database to be ready
+	if result, err := r.waitForDatabase(ctx, project); err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Phase 5: Deploy Supabase services
+	if result, err := r.reconcileServices(ctx, project); err != nil || result.Requeue {
+		return result, err
+	}
+
+	// All phases complete
+	project.Status.Phase = supabasev1alpha1.PhaseRunning
+	r.setCondition(project, supabasev1alpha1.ConditionTypeReady, metav1.ConditionTrue, "AllComponentsReady", "All Supabase components are running")
+
+	if err := r.Status().Update(ctx, project); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Reconciliation complete")
+	return ctrl.Result{}, nil
+}
+
+// reconcileSecrets ensures all required secrets exist
+func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Reconciling secrets")
+
+	project.Status.Phase = supabasev1alpha1.PhaseProvisioning
+
+	// Check if secrets are already populated in status
+	if project.Status.SecretNames.JWT != "" {
+		log.Info("Secrets already exist, skipping generation")
+		return ctrl.Result{}, nil
+	}
+
+	// Generate all secrets
+	generatedSecrets, secretNames, err := secrets.GenerateSecrets(project)
+	if err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "GenerationFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Create or update each secret
+	for _, secret := range generatedSecrets {
+		if err := r.createOrUpdateSecret(ctx, project, secret); err != nil {
+			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "CreateFailed", err.Error())
+			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				return ctrl.Result{}, statusErr
+			}
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Update status with secret names
+	project.Status.SecretNames = secretNames
+
+	r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionTrue, "SecretsCreated", "All secrets have been created")
+	if err := r.Status().Update(ctx, project); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileInitSQL ensures the init SQL ConfigMap exists
+func (r *SupabaseProjectReconciler) reconcileInitSQL(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Reconciling init SQL ConfigMap")
+
+	configMap := configmaps.BuildInitSQLConfigMap(project)
+	if err := r.createOrUpdateConfigMap(ctx, project, configMap); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileCNPGCluster ensures the CNPG Cluster exists
+func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Reconciling CNPG Cluster")
+
+	cluster := cnpg.BuildCluster(project, &project.Status.SecretNames)
+
+	// Check if cluster exists
+	existing := &cnpgv1.Cluster{}
+	err := r.Get(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Set owner reference
+			if err := controllerutil.SetControllerReference(project, cluster, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			log.Info("Creating CNPG Cluster", "name", cluster.Name)
+			if err := r.Create(ctx, cluster); err != nil {
+				r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "CreateFailed", err.Error())
+				if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+					return ctrl.Result{}, statusErr
+				}
+				return ctrl.Result{}, err
+			}
+
+			r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "Creating", "CNPG Cluster is being created")
+			if err := r.Status().Update(ctx, project); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// waitForDatabase waits for the CNPG Cluster to be ready
+func (r *SupabaseProjectReconciler) waitForDatabase(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Checking database status")
+
+	cluster := &cnpgv1.Cluster{}
+	clusterName := cnpg.ClusterName(project)
+	err := r.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: project.Namespace}, cluster)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Check if cluster is ready
+	if cluster.Status.ReadyInstances < cluster.Spec.Instances {
+		log.Info("Waiting for database to be ready",
+			"ready", cluster.Status.ReadyInstances,
+			"expected", cluster.Spec.Instances)
+
+		r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "WaitingForInstances",
+			fmt.Sprintf("Waiting for database instances: %d/%d ready", cluster.Status.ReadyInstances, cluster.Spec.Instances))
+		if err := r.Status().Update(ctx, project); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+	}
+
+	// Update endpoints
+	project.Status.Endpoints = supabasev1alpha1.EndpointsStatus{
+		Database: fmt.Sprintf("%s:5432", cnpg.ClusterRWServiceName(project)),
+	}
+
+	r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionTrue, "Ready", "Database is ready")
+	if err := r.Status().Update(ctx, project); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileServices deploys all Supabase services
+func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Reconciling Supabase services")
+
+	secretNames := &project.Status.SecretNames
+
+	// Deploy Auth (GoTrue)
+	if result, err := r.reconcileAuth(ctx, project, secretNames); err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Deploy REST (PostgREST)
+	if result, err := r.reconcileRest(ctx, project, secretNames); err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Deploy Studio (if enabled)
+	if result, err := r.reconcileStudio(ctx, project, secretNames); err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Deploy Meta (postgres-meta, if enabled)
+	if result, err := r.reconcileMeta(ctx, project, secretNames); err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Deploy Kong (if enabled)
+	if result, err := r.reconcileKong(ctx, project, secretNames); err != nil || result.Requeue {
+		return result, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileAuth deploys the Auth service
+func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Reconciling Auth service")
+
+	// Create deployment
+	deployment := deployments.BuildAuthDeployment(project, secretNames)
+	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Create service
+	service := services.BuildAuthService(project)
+	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionTrue, "Ready", "Auth service is running")
+	return ctrl.Result{}, nil
+}
+
+// reconcileRest deploys the REST service
+func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	if project.Spec.Rest == nil {
+		return ctrl.Result{}, nil
+	}
+
+	log.Info("Reconciling REST service")
+
+	// Create deployment
+	deployment := deployments.BuildRestDeployment(project, secretNames)
+	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Create service
+	service := services.BuildRestService(project)
+	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionTrue, "Ready", "REST service is running")
+	return ctrl.Result{}, nil
+}
+
+// reconcileStudio deploys the Studio service
+func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	if project.Spec.Studio == nil {
+		return ctrl.Result{}, nil
+	}
+
+	log.Info("Reconciling Studio service")
+
+	// Create deployment
+	deployment := deployments.BuildStudioDeployment(project, secretNames)
+	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Create service
+	service := services.BuildStudioService(project)
+	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionTrue, "Ready", "Studio service is running")
+	return ctrl.Result{}, nil
+}
+
+// reconcileMeta deploys the Meta service
+func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	if project.Spec.Meta == nil {
+		return ctrl.Result{}, nil
+	}
+
+	log.Info("Reconciling Meta service")
+
+	// Create deployment
+	deployment := deployments.BuildMetaDeployment(project, secretNames)
+	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Create service
+	service := services.BuildMetaService(project)
+	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionTrue, "Ready", "Meta service is running")
+	return ctrl.Result{}, nil
+}
+
+// reconcileKong deploys the Kong API gateway
+func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	if project.Spec.Kong == nil {
+		return ctrl.Result{}, nil
+	}
+
+	log.Info("Reconciling Kong service")
+
+	// Create Kong config ConfigMap
+	kongConfig := configmaps.BuildKongConfigMap(project)
+	if err := r.createOrUpdateConfigMap(ctx, project, kongConfig); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Create deployment
+	deployment := deployments.BuildKongDeployment(project, secretNames)
+	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Create service
+	service := services.BuildKongService(project)
+	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Update API endpoint in status
+	project.Status.Endpoints.API = fmt.Sprintf("%s-kong:8000", project.Name)
+
+	r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionTrue, "Ready", "Kong gateway is running")
+	return ctrl.Result{}, nil
+}
+
+// Helper methods
+
+func (r *SupabaseProjectReconciler) createOrUpdateSecret(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secret *corev1.Secret) error {
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(project, secret, r.Scheme); err != nil {
+		return err
+	}
+
+	// Check if exists
+	existing := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: secret.Name, Namespace: secret.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return r.Create(ctx, secret)
+		}
+		return err
+	}
+
+	// Secret exists - don't overwrite data (preserve generated passwords)
+	return nil
+}
+
+func (r *SupabaseProjectReconciler) createOrUpdateConfigMap(ctx context.Context, project *supabasev1alpha1.SupabaseProject, configMap *corev1.ConfigMap) error {
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(project, configMap, r.Scheme); err != nil {
+		return err
+	}
+
+	// Check if exists
+	existing := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return r.Create(ctx, configMap)
+		}
+		return err
+	}
+
+	// Update existing
+	existing.Data = configMap.Data
+	return r.Update(ctx, existing)
+}
+
+func (r *SupabaseProjectReconciler) createOrUpdateDeployment(ctx context.Context, project *supabasev1alpha1.SupabaseProject, deployment *appsv1.Deployment) error {
+	if deployment == nil {
+		return nil
+	}
+
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(project, deployment, r.Scheme); err != nil {
+		return err
+	}
+
+	// Check if exists
+	existing := &appsv1.Deployment{}
+	err := r.Get(ctx, types.NamespacedName{Name: deployment.Name, Namespace: deployment.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return r.Create(ctx, deployment)
+		}
+		return err
+	}
+
+	// Update existing
+	existing.Spec = deployment.Spec
+	return r.Update(ctx, existing)
+}
+
+func (r *SupabaseProjectReconciler) createOrUpdateService(ctx context.Context, project *supabasev1alpha1.SupabaseProject, service *corev1.Service) error {
+	if service == nil {
+		return nil
+	}
+
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(project, service, r.Scheme); err != nil {
+		return err
+	}
+
+	// Check if exists
+	existing := &corev1.Service{}
+	err := r.Get(ctx, types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return r.Create(ctx, service)
+		}
+		return err
+	}
+
+	// Update existing (preserve ClusterIP)
+	existing.Spec.Ports = service.Spec.Ports
+	existing.Spec.Selector = service.Spec.Selector
+	return r.Update(ctx, existing)
+}
+
+func (r *SupabaseProjectReconciler) setCondition(project *supabasev1alpha1.SupabaseProject, conditionType string, status metav1.ConditionStatus, reason, message string) {
+	condition := metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		LastTransitionTime: metav1.Now(),
+		Reason:             reason,
+		Message:            message,
+	}
+	meta.SetStatusCondition(&project.Status.Conditions, condition)
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *SupabaseProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&supabasev1alpha1.SupabaseProject{}).
+		Owns(&corev1.Secret{}).
+		Owns(&corev1.ConfigMap{}).
+		Owns(&corev1.Service{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&cnpgv1.Cluster{}).
+		Named("supabaseproject").
+		Complete(r)
+}
