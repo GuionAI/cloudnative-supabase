@@ -1,135 +1,218 @@
-# cloudnative-supabase
-// TODO(user): Add simple overview of use/purpose
+# CloudNative Supabase
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A Kubernetes operator that deploys [Supabase](https://supabase.com) using [CloudNativePG](https://cloudnative-pg.io) as the PostgreSQL backend.
 
-## Getting Started
+## Overview
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+CloudNative Supabase provides a single `SupabaseProject` Custom Resource that manages the complete Supabase stack:
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+- **Database**: CloudNativePG PostgreSQL cluster with managed roles and replication
+- **Auth**: GoTrue authentication service
+- **REST**: PostgREST API service
+- **Studio**: Supabase Studio dashboard
+- **Meta**: postgres-meta database introspection service
+- **Kong**: API gateway with declarative routing
 
-```sh
-make docker-build docker-push IMG=<some-registry>/cloudnative-supabase:tag
+## Features
+
+- Single CRD deploys entire Supabase stack
+- Auto-generates JWT secrets and database passwords
+- Integrates with CNPG for production-grade PostgreSQL
+- Owner references for automatic cleanup
+- Status conditions for observability
+
+## Prerequisites
+
+- Kubernetes v1.11.3+
+- [CloudNativePG operator](https://cloudnative-pg.io/documentation/current/installation_upgrade/) installed
+- kubectl v1.11.3+
+
+## Installation
+
+### Install CRDs
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/GuionAI/cloudnative-supabase/main/config/crd/bases/supabase.guion.dev_supabaseprojects.yaml
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+### Deploy Operator
 
-**Install the CRDs into the cluster:**
-
-```sh
-make install
+```bash
+kubectl apply -f https://raw.githubusercontent.com/GuionAI/cloudnative-supabase/main/dist/install.yaml
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+Or using the Makefile:
 
-```sh
-make deploy IMG=<some-registry>/cloudnative-supabase:tag
+```bash
+make deploy IMG=ghcr.io/guionai/cloudnative-supabase:latest
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+## Usage
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+### Minimal Example
 
-```sh
-kubectl apply -k config/samples/
+```yaml
+apiVersion: supabase.guion.dev/v1alpha1
+kind: SupabaseProject
+metadata:
+  name: my-project
+  namespace: my-namespace
+spec:
+  database:
+    instances: 1
+    storage:
+      size: 10Gi
+
+  auth:
+    enabled: true
+    siteURL: https://app.example.com
+    externalURL: https://auth.example.com
 ```
 
->**NOTE**: Ensure that the samples has default values to test it out.
+### Full Example
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
+```yaml
+apiVersion: supabase.guion.dev/v1alpha1
+kind: SupabaseProject
+metadata:
+  name: my-project
+  namespace: my-namespace
+spec:
+  database:
+    instances: 1
+    storage:
+      size: 10Gi
+      storageClass: local-path
+    enableSuperuserAccess: false
 
-```sh
-kubectl delete -k config/samples/
+  auth:
+    enabled: true
+    siteURL: https://app.example.com
+    externalURL: https://auth.example.com
+    autoConfirmEmail: true
+    providers:
+      google:
+        enabled: true
+        skipNonceCheck: true
+      apple:
+        enabled: true
+      secretRef: auth-providers
+
+  rest:
+    enabled: true
+    schemas:
+      - public
+
+  studio:
+    enabled: true
+    publicURL: https://studio.example.com
+    organizationName: My Org
+    projectName: My Project
+
+  meta:
+    enabled: true
+
+  kong:
+    enabled: true
 ```
 
-**Delete the APIs(CRDs) from the cluster:**
+### Check Status
 
-```sh
+```bash
+kubectl get supabaseproject my-project -o yaml
+```
+
+Status conditions:
+
+- `Ready` - Overall readiness
+- `SecretsReady` - JWT and database secrets generated
+- `DatabaseReady` - CNPG cluster is ready
+- `AuthReady` - GoTrue is running
+- `RestReady` - PostgREST is running
+- `StudioReady` - Studio is running
+- `MetaReady` - postgres-meta is running
+- `KongReady` - Kong gateway is running
+
+## Configuration
+
+### Database
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `instances` | Number of PostgreSQL instances | 1 |
+| `storage.size` | Storage size | Required |
+| `storage.storageClass` | Storage class | Cluster default |
+| `image` | PostgreSQL image | `ghcr.io/guionai/postgres-pgjwt:17.6` |
+| `enableSuperuserAccess` | Enable superuser access | false |
+
+### Auth (GoTrue)
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `enabled` | Enable auth service | Required |
+| `siteURL` | Application URL | Required |
+| `externalURL` | Auth service URL | Required |
+| `autoConfirmEmail` | Skip email confirmation | false |
+| `providers.secretRef` | Secret with OAuth credentials | - |
+
+### REST (PostgREST)
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `enabled` | Enable REST API | - |
+| `schemas` | Exposed schemas | `[public]` |
+
+### Studio
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `enabled` | Enable Studio dashboard | - |
+| `publicURL` | Studio public URL | - |
+
+## Generated Secrets
+
+The operator auto-generates these secrets:
+
+| Secret | Keys |
+|--------|------|
+| `{name}-jwt` | `secret`, `anonKey`, `serviceKey` |
+| `{name}-supabase-admin-password` | `username`, `password` |
+| `{name}-authenticator-password` | `username`, `password` |
+| `{name}-auth-admin-password` | `username`, `password` |
+
+To use an existing JWT secret, set `spec.jwt.secretRef`.
+
+## Development
+
+```bash
+# Run tests
+go test ./... -v
+
+# Generate manifests
+make generate manifests
+
+# Run locally
+make run
+
+# Build image
+make docker-build IMG=my-registry/cloudnative-supabase:dev
+```
+
+## Uninstall
+
+```bash
+# Delete SupabaseProject resources
+kubectl delete supabaseproject --all -A
+
+# Uninstall operator
+make undeploy
+
+# Remove CRDs
 make uninstall
 ```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/cloudnative-supabase:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/cloudnative-supabase/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
 
 Copyright 2026 GuionAI.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
