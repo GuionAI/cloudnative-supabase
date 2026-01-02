@@ -244,10 +244,10 @@ func defaultParameters() map[string]string {
 		"pgaudit.log_statement":      "on",
 		"pgaudit.log_statement_once": "off",
 		// auto_explain settings (log slow queries)
-		"auto_explain.log_min_duration":     "1s",
-		"auto_explain.log_analyze":          "on",
-		"auto_explain.log_buffers":          "on",
-		"auto_explain.log_timing":           "on",
+		"auto_explain.log_min_duration":      "1s",
+		"auto_explain.log_analyze":           "on",
+		"auto_explain.log_buffers":           "on",
+		"auto_explain.log_timing":            "on",
 		"auto_explain.log_nested_statements": "on",
 	}
 }
