@@ -1,0 +1,75 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cloudnative-supabase.fullname" . }}-manager
+  labels:
+    {{- include "cloudnative-supabase.labels" . | nindent 4 }}
+rules:
+  # Core resources
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - secrets
+      - services
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Deployments
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # CNPG Clusters
+  - apiGroups:
+      - postgresql.cnpg.io
+    resources:
+      - clusters
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # SupabaseProject resources
+  - apiGroups:
+      - supabase.guion.dev
+    resources:
+      - supabaseprojects
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - supabase.guion.dev
+    resources:
+      - supabaseprojects/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - supabase.guion.dev
+    resources:
+      - supabaseprojects/status
+    verbs:
+      - get
+      - patch
+      - update
