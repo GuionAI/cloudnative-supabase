@@ -17,8 +17,6 @@ limitations under the License.
 package configmaps
 
 import (
-	"fmt"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -45,11 +43,7 @@ CREATE ROLE supabase_auth_admin NOINHERIT LOGIN CREATEROLE;
 CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION supabase_auth_admin;
 CREATE SCHEMA IF NOT EXISTS extensions AUTHORIZATION supabase_admin;
 
--- 4. JWT settings (required for RLS policies)
-ALTER DATABASE %s SET "app.settings.jwt_secret" TO '$(JWT_SECRET)';
-ALTER DATABASE %s SET "app.settings.jwt_exp" TO '$(JWT_EXP)';
-
--- 5. Grant API access via group role (anon/authenticated/service_role inherit later)
+-- 4. Grant API access via group role (anon/authenticated/service_role inherit later)
 GRANT USAGE ON SCHEMA public TO api_access_role;
 GRANT USAGE ON SCHEMA extensions TO api_access_role;
 
@@ -59,15 +53,15 @@ ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON T
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON FUNCTIONS TO api_access_role;
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON SEQUENCES TO api_access_role;
 
--- 6. Grant supabase_admin access to auth schema (extensions already owned by supabase_admin)
+-- 5. Grant supabase_admin access to auth schema (extensions already owned by supabase_admin)
 GRANT ALL ON SCHEMA auth TO supabase_admin;
 
--- 7. Default privileges for future objects in auth schema (created by supabase_auth_admin)
+-- 6. Default privileges for future objects in auth schema (created by supabase_auth_admin)
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_auth_admin IN SCHEMA auth GRANT ALL ON TABLES TO supabase_admin;
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_auth_admin IN SCHEMA auth GRANT ALL ON SEQUENCES TO supabase_admin;
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_auth_admin IN SCHEMA auth GRANT ALL ON ROUTINES TO supabase_admin;
 
--- 8. PostgREST DDL watch functions (notify PostgREST to reload schema on DDL changes)
+-- 7. PostgREST DDL watch functions (notify PostgREST to reload schema on DDL changes)
 CREATE FUNCTION extensions.pgrst_ddl_watch() RETURNS event_trigger
     LANGUAGE plpgsql
     AS $$
@@ -137,8 +131,6 @@ func InitSQLConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
 
 // BuildInitSQLConfigMap creates the ConfigMap containing init SQL for CNPG bootstrap
 func BuildInitSQLConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.ConfigMap {
-	dbName := common.DatabaseName
-
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      InitSQLConfigMapName(project),
@@ -146,7 +138,7 @@ func BuildInitSQLConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.Co
 			Labels:    common.ComponentLabels(project, "init-sql"),
 		},
 		Data: map[string]string{
-			"init.sql": fmt.Sprintf(InitSQLTemplate, dbName, dbName),
+			"init.sql": InitSQLTemplate,
 		},
 	}
 }

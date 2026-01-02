@@ -17,10 +17,7 @@ limitations under the License.
 package cnpg
 
 import (
-	"fmt"
-
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -86,25 +83,6 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 							},
 						},
 					},
-				},
-			},
-
-			// Environment variables for JWT substitution in init SQL
-			Env: []corev1.EnvVar{
-				{
-					Name: "JWT_SECRET",
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: secretNames.JWT,
-							},
-							Key: "secret",
-						},
-					},
-				},
-				{
-					Name:  "JWT_EXP",
-					Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project)),
 				},
 			},
 
