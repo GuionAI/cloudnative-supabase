@@ -67,8 +67,8 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 
 	env := []corev1.EnvVar{
 		// Database configuration
-		{Name: "PG_META_HOST", Value: dbHost},
-		{Name: "PG_META_PORT", Value: "5432"},
+		{Name: "PG_META_DB_HOST", Value: dbHost},
+		{Name: "PG_META_DB_PORT", Value: "5432"},
 		{Name: "PG_META_DB_NAME", Value: common.DatabaseName},
 		{Name: "PG_META_DB_SSL_MODE", Value: "disable"},
 

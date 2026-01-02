@@ -84,7 +84,7 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		{Name: "PGRST_DB_SCHEMAS", Value: strings.Join(schemas, ",")},
 		{Name: "PGRST_DB_ANON_ROLE", Value: "anon"},
 		{Name: "PGRST_DB_USE_LEGACY_GUCS", Value: "false"},
-		{Name: "PGRST_APP_SETTINGS_JWT_EXP", Value: fmt.Sprintf("%d", common.GetJWTExpiration(project))},
+		{Name: "PGRST_APP_SETTINGS_JWT_EXP", Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project))},
 
 		// Database credentials
 		{

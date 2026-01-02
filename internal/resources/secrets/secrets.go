@@ -82,19 +82,15 @@ func generateJWTSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secre
 		return nil, "", fmt.Errorf("generating secret key: %w", err)
 	}
 
-	// Determine expiration
-	expSeconds := 3600
-	if project.Spec.JWT != nil && project.Spec.JWT.ExpirationSeconds > 0 {
-		expSeconds = project.Spec.JWT.ExpirationSeconds
-	}
-
-	// Generate tokens
-	anonKey, err := crypto.CreateAnonKey(jwtSecret, expSeconds)
+	// Generate API keys (anon/service_role) with 5-year expiration.
+	// Note: JWT.ExpirationSeconds controls access token expiration in GoTrue,
+	// NOT the API keys. API keys are embedded in client apps and must be long-lived.
+	anonKey, err := crypto.CreateAnonKey(jwtSecret, crypto.DefaultTokenExpiration)
 	if err != nil {
 		return nil, "", fmt.Errorf("generating anon key: %w", err)
 	}
 
-	serviceKey, err := crypto.CreateServiceKey(jwtSecret, expSeconds)
+	serviceKey, err := crypto.CreateServiceKey(jwtSecret, crypto.DefaultTokenExpiration)
 	if err != nil {
 		return nil, "", fmt.Errorf("generating service key: %w", err)
 	}

@@ -104,7 +104,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 				},
 				{
 					Name:  "JWT_EXP",
-					Value: fmt.Sprintf("%d", common.GetJWTExpiration(project)),
+					Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project)),
 				},
 			},
 

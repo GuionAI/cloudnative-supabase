@@ -21,14 +21,17 @@ import (
 )
 
 const (
-	// DefaultJWTExpiration is the default JWT expiration in seconds (1 hour)
-	DefaultJWTExpiration = 3600
+	// DefaultAccessTokenExpiration is the default expiration for user access tokens (1 hour).
+	// This is passed to GoTrue via GOTRUE_JWT_EXP.
+	// Note: API keys (anon/service_role) use a separate 5-year expiration.
+	DefaultAccessTokenExpiration = 3600
 )
 
-// GetJWTExpiration returns the JWT expiration in seconds from the project spec
-func GetJWTExpiration(project *supabasev1alpha1.SupabaseProject) int {
+// GetAccessTokenExpiration returns the access token expiration in seconds.
+// Used for GOTRUE_JWT_EXP - controls how long user sessions last.
+func GetAccessTokenExpiration(project *supabasev1alpha1.SupabaseProject) int {
 	if project.Spec.JWT != nil && project.Spec.JWT.ExpirationSeconds > 0 {
 		return project.Spec.JWT.ExpirationSeconds
 	}
-	return DefaultJWTExpiration
+	return DefaultAccessTokenExpiration
 }
