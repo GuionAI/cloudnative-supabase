@@ -153,8 +153,8 @@ type StorageSpec struct {
 }
 
 // BackupSpec defines backup configuration
-// +kubebuilder:validation:XValidation:rule="!self.enabled || self.destinationPath != ''",message="destinationPath is required when backup is enabled"
-// +kubebuilder:validation:XValidation:rule="!self.enabled || self.s3CredentialsSecret != ''",message="s3CredentialsSecret is required when backup is enabled"
+// +kubebuilder:validation:XValidation:rule="!self.enabled || self.destinationPath != ”",message="destinationPath is required when backup is enabled"
+// +kubebuilder:validation:XValidation:rule="!self.enabled || self.s3CredentialsSecret != ”",message="s3CredentialsSecret is required when backup is enabled"
 type BackupSpec struct {
 	// Enabled enables scheduled backups
 	// +kubebuilder:default=false
@@ -398,7 +398,7 @@ type KongSpec struct {
 }
 
 // IngressSpec defines ingress configuration
-// +kubebuilder:validation:XValidation:rule="!self.enabled || self.host != ''",message="host is required when ingress is enabled"
+// +kubebuilder:validation:XValidation:rule="!self.enabled || self.host != ”",message="host is required when ingress is enabled"
 type IngressSpec struct {
 	// Enabled enables ingress creation
 	Enabled bool `json:"enabled"`
