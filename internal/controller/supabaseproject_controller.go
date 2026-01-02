@@ -128,13 +128,52 @@ func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, projec
 
 	project.Status.Phase = supabasev1alpha1.PhaseProvisioning
 
-	// Check if secrets are already populated in status
-	if project.Status.SecretNames.JWT != "" {
-		log.Info("Secrets already exist, skipping generation")
-		return ctrl.Result{}, nil
+	// Check if secrets already exist in the cluster (not just in status)
+	// This prevents regenerating secrets if the operator restarts after creating
+	// secrets but before updating status
+	jwtSecretName := project.Name + "-jwt"
+	if project.Spec.JWT != nil && project.Spec.JWT.SecretRef != "" {
+		jwtSecretName = project.Spec.JWT.SecretRef
 	}
 
-	// Generate all secrets
+	existingJWTSecret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: jwtSecretName, Namespace: project.Namespace}, existingJWTSecret)
+	if err == nil {
+		// JWT secret exists - check if all other secrets exist too
+		secretNames := supabasev1alpha1.SecretNamesStatus{
+			JWT:           jwtSecretName,
+			SupabaseAdmin: project.Name + "-supabase-admin-password",
+			Authenticator: project.Name + "-authenticator-password",
+			AuthAdmin:     project.Name + "-auth-admin-password",
+		}
+
+		allExist := true
+		for _, name := range []string{secretNames.SupabaseAdmin, secretNames.Authenticator, secretNames.AuthAdmin} {
+			existing := &corev1.Secret{}
+			if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: project.Namespace}, existing); err != nil {
+				if apierrors.IsNotFound(err) {
+					allExist = false
+					break
+				}
+				return ctrl.Result{}, err
+			}
+		}
+
+		if allExist {
+			log.Info("Secrets already exist in cluster, syncing status")
+			project.Status.SecretNames = secretNames
+			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionTrue, "SecretsExist", "All secrets exist")
+			if err := r.Status().Update(ctx, project); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+
+	// Secrets don't exist - generate them
+	log.Info("Generating new secrets")
 	generatedSecrets, secretNames, err := secrets.GenerateSecrets(project)
 	if err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "GenerationFailed", err.Error())
@@ -492,6 +531,7 @@ func (r *SupabaseProjectReconciler) createOrUpdateConfigMap(ctx context.Context,
 
 func (r *SupabaseProjectReconciler) createOrUpdateDeployment(ctx context.Context, project *supabasev1alpha1.SupabaseProject, deployment *appsv1.Deployment) error {
 	if deployment == nil {
+		logf.FromContext(ctx).V(1).Info("Skipping nil deployment - service may be disabled")
 		return nil
 	}
 
@@ -517,6 +557,7 @@ func (r *SupabaseProjectReconciler) createOrUpdateDeployment(ctx context.Context
 
 func (r *SupabaseProjectReconciler) createOrUpdateService(ctx context.Context, project *supabasev1alpha1.SupabaseProject, service *corev1.Service) error {
 	if service == nil {
+		logf.FromContext(ctx).V(1).Info("Skipping nil service - service may be disabled")
 		return nil
 	}
 
