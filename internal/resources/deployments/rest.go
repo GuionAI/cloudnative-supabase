@@ -51,11 +51,7 @@ func RestDeploymentName(project *supabasev1alpha1.SupabaseProject) string {
 
 // BuildRestDeployment creates the PostgREST deployment
 func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) *appsv1.Deployment {
-	spec := project.Spec.Rest
-	if spec == nil {
-		return nil
-	}
-
+	spec := &project.Spec.Rest
 	name := RestDeploymentName(project)
 	dbHost := cnpg.ClusterRWServiceName(project)
 

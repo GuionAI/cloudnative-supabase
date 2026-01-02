@@ -486,26 +486,10 @@ func (in *SupabaseProjectSpec) DeepCopyInto(out *SupabaseProjectSpec) {
 		**out = **in
 	}
 	in.Auth.DeepCopyInto(&out.Auth)
-	if in.Rest != nil {
-		in, out := &in.Rest, &out.Rest
-		*out = new(RestSpec)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.Studio != nil {
-		in, out := &in.Studio, &out.Studio
-		*out = new(StudioSpec)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.Meta != nil {
-		in, out := &in.Meta, &out.Meta
-		*out = new(MetaSpec)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.Kong != nil {
-		in, out := &in.Kong, &out.Kong
-		*out = new(KongSpec)
-		(*in).DeepCopyInto(*out)
-	}
+	in.Rest.DeepCopyInto(&out.Rest)
+	in.Studio.DeepCopyInto(&out.Studio)
+	in.Meta.DeepCopyInto(&out.Meta)
+	in.Kong.DeepCopyInto(&out.Kong)
 	if in.ImagePullSecrets != nil {
 		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
 		*out = make([]v1.LocalObjectReference, len(*in))

@@ -75,10 +75,6 @@ spec:
                     - enabled
                     - uri
                     type: object
-                  enabled:
-                    default: true
-                    description: Enabled determines if Auth is deployed
-                    type: boolean
                   externalURL:
                     description: ExternalURL is the public URL of the auth service
                     type: string
@@ -213,7 +209,6 @@ spec:
                     - user
                     type: object
                 required:
-                - enabled
                 - externalURL
                 - siteURL
                 type: object
@@ -401,10 +396,6 @@ spec:
                     - enabled
                     - secretRef
                     type: object
-                  enabled:
-                    default: true
-                    description: Enabled determines if Kong is deployed
-                    type: boolean
                   imageTag:
                     default: 2.8.1
                     description: ImageTag for kong
@@ -500,16 +491,10 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
-                required:
-                - enabled
                 type: object
               meta:
                 description: Meta service configuration (postgres-meta)
                 properties:
-                  enabled:
-                    default: true
-                    description: Enabled determines if Meta is deployed
-                    type: boolean
                   imageTag:
                     default: v0.84.2
                     description: ImageTag for supabase/postgres-meta
@@ -578,16 +563,10 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
-                required:
-                - enabled
                 type: object
               rest:
                 description: Rest service configuration (PostgREST)
                 properties:
-                  enabled:
-                    default: true
-                    description: Enabled determines if REST is deployed
-                    type: boolean
                   imageTag:
                     default: v12.2.3
                     description: ImageTag for postgrest/postgrest
@@ -663,16 +642,10 @@ spec:
                     items:
                       type: string
                     type: array
-                required:
-                - enabled
                 type: object
               studio:
                 description: Studio dashboard configuration
                 properties:
-                  enabled:
-                    default: true
-                    description: Enabled determines if Studio is deployed
-                    type: boolean
                   imageTag:
                     default: 2024.12.09-sha-434634f
                     description: ImageTag for supabase/studio
@@ -752,8 +725,6 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
-                required:
-                - enabled
                 type: object
             required:
             - auth

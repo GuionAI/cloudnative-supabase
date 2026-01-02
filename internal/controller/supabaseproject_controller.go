@@ -314,17 +314,17 @@ func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, proje
 		return result, err
 	}
 
-	// Deploy Studio (if enabled)
+	// Deploy Studio
 	if result, err := r.reconcileStudio(ctx, project, secretNames); err != nil || result.Requeue {
 		return result, err
 	}
 
-	// Deploy Meta (postgres-meta, if enabled)
+	// Deploy Meta (postgres-meta)
 	if result, err := r.reconcileMeta(ctx, project, secretNames); err != nil || result.Requeue {
 		return result, err
 	}
 
-	// Deploy Kong (if enabled)
+	// Deploy Kong
 	if result, err := r.reconcileKong(ctx, project, secretNames); err != nil || result.Requeue {
 		return result, err
 	}
@@ -360,11 +360,6 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 // reconcileRest deploys the REST service
 func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-
-	if project.Spec.Rest == nil {
-		return ctrl.Result{}, nil
-	}
-
 	log.Info("Reconciling REST service")
 
 	// Create deployment
@@ -390,11 +385,6 @@ func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *
 // reconcileStudio deploys the Studio service
 func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-
-	if project.Spec.Studio == nil {
-		return ctrl.Result{}, nil
-	}
-
 	log.Info("Reconciling Studio service")
 
 	// Create deployment
@@ -420,11 +410,6 @@ func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project
 // reconcileMeta deploys the Meta service
 func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-
-	if project.Spec.Meta == nil {
-		return ctrl.Result{}, nil
-	}
-
 	log.Info("Reconciling Meta service")
 
 	// Create deployment
@@ -450,11 +435,6 @@ func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *
 // reconcileKong deploys the Kong API gateway
 func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-
-	if project.Spec.Kong == nil {
-		return ctrl.Result{}, nil
-	}
-
 	log.Info("Reconciling Kong service")
 
 	// Create Kong config ConfigMap

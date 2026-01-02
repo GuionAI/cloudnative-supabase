@@ -60,11 +60,7 @@ func KongConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
 
 // BuildKongDeployment creates the Kong API gateway deployment
 func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) *appsv1.Deployment {
-	spec := project.Spec.Kong
-	if spec == nil {
-		return nil
-	}
-
+	spec := &project.Spec.Kong
 	name := KongDeploymentName(project)
 
 	// Determine image tag

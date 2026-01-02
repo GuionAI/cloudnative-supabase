@@ -50,11 +50,7 @@ func StudioDeploymentName(project *supabasev1alpha1.SupabaseProject) string {
 
 // BuildStudioDeployment creates the Supabase Studio deployment
 func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) *appsv1.Deployment {
-	spec := project.Spec.Studio
-	if spec == nil {
-		return nil
-	}
-
+	spec := &project.Spec.Studio
 	name := StudioDeploymentName(project)
 	dbHost := cnpg.ClusterRWServiceName(project)
 

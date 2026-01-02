@@ -33,14 +33,11 @@ func KongConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
 
 // BuildKongConfigMap creates the Kong declarative configuration ConfigMap
 func BuildKongConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.ConfigMap {
-	if project.Spec.Kong == nil {
-		return nil
-	}
-
 	// Build service names
 	authService := project.Name + "-auth"
 	restService := project.Name + "-rest"
 	metaService := project.Name + "-meta"
+	studioService := project.Name + "-studio"
 
 	config := fmt.Sprintf(`_format_version: "2.1"
 _transform: true
@@ -49,7 +46,6 @@ _transform: true
 ### Consumers / Credentials
 ###
 consumers:
-  - username: DASHBOARD
   - username: anon
     keyauth_credentials:
       - key: ${SUPABASE_ANON_KEY}
@@ -61,8 +57,6 @@ consumers:
 ### Access Control Lists
 ###
 acls:
-  - consumer: DASHBOARD
-    group: admin
   - consumer: anon
     group: anon
   - consumer: service_role
@@ -172,7 +166,7 @@ services:
     url: http://%s:8080
     routes:
       - name: meta
-        strip_path: false
+        strip_path: true
         paths:
           - /pg/
     plugins:
@@ -184,7 +178,18 @@ services:
           hide_groups_header: true
           allow:
             - admin
-`, authService, authService, authService, authService, restService, restService, metaService)
+
+  ## Studio Dashboard (catch-all)
+  - name: dashboard
+    url: http://%s:3000
+    routes:
+      - name: dashboard
+        strip_path: true
+        paths:
+          - /
+    plugins:
+      - name: cors
+`, authService, authService, authService, authService, restService, restService, metaService, studioService)
 
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{

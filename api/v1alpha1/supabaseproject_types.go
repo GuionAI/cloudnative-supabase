@@ -85,19 +85,19 @@ type SupabaseProjectSpec struct {
 
 	// Rest service configuration (PostgREST)
 	// +optional
-	Rest *RestSpec `json:"rest,omitempty"`
+	Rest RestSpec `json:"rest,omitempty"`
 
 	// Studio dashboard configuration
 	// +optional
-	Studio *StudioSpec `json:"studio,omitempty"`
+	Studio StudioSpec `json:"studio,omitempty"`
 
 	// Meta service configuration (postgres-meta)
 	// +optional
-	Meta *MetaSpec `json:"meta,omitempty"`
+	Meta MetaSpec `json:"meta,omitempty"`
 
 	// Kong API gateway configuration
 	// +optional
-	Kong *KongSpec `json:"kong,omitempty"`
+	Kong KongSpec `json:"kong,omitempty"`
 
 	// ImagePullSecrets for all deployments
 	// +optional
@@ -196,10 +196,6 @@ type JWTSpec struct {
 
 // AuthSpec defines GoTrue auth service configuration
 type AuthSpec struct {
-	// Enabled determines if Auth is deployed
-	// +kubebuilder:default=true
-	Enabled bool `json:"enabled"`
-
 	// Image tag for supabase/gotrue
 	// +kubebuilder:default="v2.184.0"
 	// +optional
@@ -308,10 +304,6 @@ type SMTPSpec struct {
 
 // RestSpec defines PostgREST configuration
 type RestSpec struct {
-	// Enabled determines if REST is deployed
-	// +kubebuilder:default=true
-	Enabled bool `json:"enabled"`
-
 	// ImageTag for postgrest/postgrest
 	// +kubebuilder:default="v12.2.3"
 	// +optional
@@ -334,10 +326,6 @@ type RestSpec struct {
 
 // StudioSpec defines Supabase Studio configuration
 type StudioSpec struct {
-	// Enabled determines if Studio is deployed
-	// +kubebuilder:default=true
-	Enabled bool `json:"enabled"`
-
 	// ImageTag for supabase/studio
 	// +kubebuilder:default="2024.12.09-sha-434634f"
 	// +optional
@@ -369,10 +357,6 @@ type StudioSpec struct {
 
 // MetaSpec defines postgres-meta configuration
 type MetaSpec struct {
-	// Enabled determines if Meta is deployed
-	// +kubebuilder:default=true
-	Enabled bool `json:"enabled"`
-
 	// ImageTag for supabase/postgres-meta
 	// +kubebuilder:default="v0.84.2"
 	// +optional
@@ -390,10 +374,6 @@ type MetaSpec struct {
 
 // KongSpec defines Kong API gateway configuration
 type KongSpec struct {
-	// Enabled determines if Kong is deployed
-	// +kubebuilder:default=true
-	Enabled bool `json:"enabled"`
-
 	// ImageTag for kong
 	// +kubebuilder:default="2.8.1"
 	// +optional

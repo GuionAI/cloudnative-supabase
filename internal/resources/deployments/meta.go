@@ -50,11 +50,7 @@ func MetaDeploymentName(project *supabasev1alpha1.SupabaseProject) string {
 
 // BuildMetaDeployment creates the postgres-meta deployment
 func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) *appsv1.Deployment {
-	spec := project.Spec.Meta
-	if spec == nil {
-		return nil
-	}
-
+	spec := &project.Spec.Meta
 	name := MetaDeploymentName(project)
 	dbHost := cnpg.ClusterRWServiceName(project)
 

@@ -15,7 +15,6 @@ spec:
     enableSuperuserAccess: false
 
   auth:
-    enabled: true
     siteURL: https://app.example.com
     externalURL: https://auth.example.com
     autoConfirmEmail: true
@@ -28,18 +27,12 @@ spec:
       secretRef: auth-providers
 
   rest:
-    enabled: true
     schemas:
       - public
 
   studio:
-    enabled: true
     publicURL: https://studio.example.com
     organizationName: Example Org
     projectName: Example Project
 
-  meta:
-    enabled: true
-
-  kong:
-    enabled: true
+  # meta and kong use defaults (always enabled)
