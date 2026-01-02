@@ -28,3 +28,21 @@ go.work
 
 # Kubeconfig might contain secrets
 *.kubeconfig
+
+# Environment files with secrets
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# Coverage
+cover.out
+coverage.html
+
+# envtest binaries
+testbin/
+
+# goreleaser
+dist/
