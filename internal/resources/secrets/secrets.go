@@ -27,6 +27,12 @@ import (
 	"github.com/GuionAI/cloudnative-supabase/pkg/crypto"
 )
 
+// RequiredJWTKeys are the required keys in a JWT secret
+var RequiredJWTKeys = []string{"secret", "anonKey", "serviceKey"}
+
+// RequiredRoleKeys are the required keys in a database role secret
+var RequiredRoleKeys = []string{"username", "password"}
+
 // GenerateSecrets generates all required secrets for a SupabaseProject
 func GenerateSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secret, supabasev1alpha1.SecretNamesStatus, error) {
 	var secrets []*corev1.Secret
@@ -135,4 +141,34 @@ func generateRoleSecret(project *supabasev1alpha1.SupabaseProject, nameSuffix, u
 	}
 
 	return secret, secretName, nil
+}
+
+// ValidateJWTSecret validates that a secret contains all required JWT keys
+func ValidateJWTSecret(secret *corev1.Secret) error {
+	for _, key := range RequiredJWTKeys {
+		if _, ok := secret.Data[key]; !ok {
+			return fmt.Errorf("JWT secret %s/%s missing required key: %s", secret.Namespace, secret.Name, key)
+		}
+	}
+	return nil
+}
+
+// ValidateRoleSecret validates that a secret contains all required role keys
+func ValidateRoleSecret(secret *corev1.Secret, secretName string) error {
+	for _, key := range RequiredRoleKeys {
+		if _, ok := secret.Data[key]; !ok {
+			return fmt.Errorf("role secret %s/%s missing required key: %s", secret.Namespace, secretName, key)
+		}
+	}
+	return nil
+}
+
+// GetSecretNamesFromSpec extracts secret names from user-specified secrets configuration
+func GetSecretNamesFromSpec(spec *supabasev1alpha1.SecretsSpec) supabasev1alpha1.SecretNamesStatus {
+	return supabasev1alpha1.SecretNamesStatus{
+		JWT:           spec.JWT,
+		SupabaseAdmin: spec.SupabaseAdmin,
+		Authenticator: spec.Authenticator,
+		AuthAdmin:     spec.AuthAdmin,
+	}
 }

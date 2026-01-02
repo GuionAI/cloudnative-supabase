@@ -372,7 +372,9 @@ spec:
                   x-kubernetes-map-type: atomic
                 type: array
               jwt:
-                description: JWT configuration (auto-generated if not provided)
+                description: |-
+                  JWT configuration (auto-generated if not provided)
+                  Deprecated: Use secrets.jwt instead
                 properties:
                   expirationSeconds:
                     default: 3600
@@ -636,6 +638,48 @@ spec:
                       type: string
                     type: array
                 type: object
+              secrets:
+                description: |-
+                  Secrets configuration for migration support
+                  When autoGenerate is false, user must provide all secret references
+                properties:
+                  authAdmin:
+                    description: |-
+                      AuthAdmin references an existing secret containing 'username' and 'password' keys
+                      for the supabase_auth_admin database role (used by GoTrue).
+                      Required when autoGenerate is false.
+                    type: string
+                  authenticator:
+                    description: |-
+                      Authenticator references an existing secret containing 'username' and 'password' keys
+                      for the authenticator database role (used by PostgREST).
+                      Required when autoGenerate is false.
+                    type: string
+                  autoGenerate:
+                    default: true
+                    description: |-
+                      AutoGenerate controls whether the operator generates secrets automatically.
+                      Set to false when migrating from an existing cluster with pre-existing secrets.
+                    type: boolean
+                  jwt:
+                    description: |-
+                      JWT references an existing JWT secret containing 'secret', 'anonKey', and 'serviceKey' keys.
+                      Required when autoGenerate is false.
+                    type: string
+                  supabaseAdmin:
+                    description: |-
+                      SupabaseAdmin references an existing secret containing 'username' and 'password' keys
+                      for the supabase_admin database role.
+                      Required when autoGenerate is false.
+                    type: string
+                required:
+                - autoGenerate
+                type: object
+                x-kubernetes-validations:
+                - message: all secret refs are required when autoGenerate is false
+                  rule: self.autoGenerate || (self.jwt.size() > 0 && self.supabaseAdmin.size()
+                    > 0 && self.authenticator.size() > 0 && self.authAdmin.size()
+                    > 0)
               studio:
                 description: Studio dashboard configuration
                 properties:

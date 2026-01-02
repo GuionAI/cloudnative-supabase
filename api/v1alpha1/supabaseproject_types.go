@@ -75,7 +75,13 @@ type SupabaseProjectSpec struct {
 	// +required
 	Database DatabaseSpec `json:"database"`
 
+	// Secrets configuration for migration support
+	// When autoGenerate is false, user must provide all secret references
+	// +optional
+	Secrets *SecretsSpec `json:"secrets,omitempty"`
+
 	// JWT configuration (auto-generated if not provided)
+	// Deprecated: Use secrets.jwt instead
 	// +optional
 	JWT *JWTSpec `json:"jwt,omitempty"`
 
@@ -196,6 +202,38 @@ type JWTSpec struct {
 	// +kubebuilder:default=3600
 	// +optional
 	ExpirationSeconds int `json:"expirationSeconds,omitempty"`
+}
+
+// SecretsSpec defines secrets configuration for migration support
+// +kubebuilder:validation:XValidation:rule="self.autoGenerate || (self.jwt.size() > 0 && self.supabaseAdmin.size() > 0 && self.authenticator.size() > 0 && self.authAdmin.size() > 0)",message="all secret refs are required when autoGenerate is false"
+type SecretsSpec struct {
+	// AutoGenerate controls whether the operator generates secrets automatically.
+	// Set to false when migrating from an existing cluster with pre-existing secrets.
+	// +kubebuilder:default=true
+	AutoGenerate bool `json:"autoGenerate"`
+
+	// JWT references an existing JWT secret containing 'secret', 'anonKey', and 'serviceKey' keys.
+	// Required when autoGenerate is false.
+	// +optional
+	JWT string `json:"jwt,omitempty"`
+
+	// SupabaseAdmin references an existing secret containing 'username' and 'password' keys
+	// for the supabase_admin database role.
+	// Required when autoGenerate is false.
+	// +optional
+	SupabaseAdmin string `json:"supabaseAdmin,omitempty"`
+
+	// Authenticator references an existing secret containing 'username' and 'password' keys
+	// for the authenticator database role (used by PostgREST).
+	// Required when autoGenerate is false.
+	// +optional
+	Authenticator string `json:"authenticator,omitempty"`
+
+	// AuthAdmin references an existing secret containing 'username' and 'password' keys
+	// for the supabase_auth_admin database role (used by GoTrue).
+	// Required when autoGenerate is false.
+	// +optional
+	AuthAdmin string `json:"authAdmin,omitempty"`
 }
 
 // AuthSpec defines GoTrue auth service configuration

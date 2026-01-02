@@ -1,0 +1,55 @@
+# Example: Migrating from an existing Supabase deployment
+# Use this when you have existing secrets and want to preserve them.
+#
+# Prerequisites:
+# 1. Create your secrets before applying this CR
+# 2. Ensure secrets have the required keys:
+#    - JWT secret: 'secret', 'anonKey', 'serviceKey'
+#    - Role secrets: 'username', 'password'
+apiVersion: supabase.guion.dev/v1alpha1
+kind: SupabaseProject
+metadata:
+  labels:
+    app.kubernetes.io/name: cloudnative-supabase
+    app.kubernetes.io/managed-by: kustomize
+  name: flicknote
+  namespace: flicknote
+spec:
+  # Disable automatic secret generation and use existing secrets
+  secrets:
+    autoGenerate: false
+    jwt: supabase-jwt
+    supabaseAdmin: cnpg-supabase-admin-password
+    authenticator: cnpg-authenticator-password
+    authAdmin: cnpg-supabase-auth-password
+
+  database:
+    instances: 1
+    storage:
+      size: 20Gi
+      storageClass: local-path
+    enableSuperuserAccess: false
+
+  auth:
+    siteURL: https://app.flicknote.app
+    externalURL: https://auth.flicknote.app
+    autoConfirmEmail: true
+    providers:
+      google:
+        enabled: true
+        skipNonceCheck: true
+      apple:
+        enabled: true
+      secretRef: supabase-auth-providers
+    emailHook:
+      enabled: true
+      uri: https://email.flicknote.app/api/v1/gotrue
+
+  rest:
+    schemas:
+      - public
+
+  studio:
+    publicURL: https://studio.flicknote.app
+    organizationName: FlickNote
+    projectName: FlickNote
