@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -118,9 +119,9 @@ type DatabaseSpec struct {
 	// +kubebuilder:validation:Maximum=10
 	Instances int32 `json:"instances"`
 
-	// Storage configuration
+	// Storage configuration (uses CNPG StorageConfiguration directly)
 	// +required
-	Storage StorageSpec `json:"storage"`
+	Storage cnpgv1.StorageConfiguration `json:"storage"`
 
 	// Image is the PostgreSQL image (default: ghcr.io/cloudnative-pg/postgresql:17)
 	// +optional
@@ -145,17 +146,11 @@ type DatabaseSpec struct {
 	// Backup configuration
 	// +optional
 	Backup *BackupSpec `json:"backup,omitempty"`
-}
 
-// StorageSpec defines storage configuration
-type StorageSpec struct {
-	// Size of the storage volume (e.g., "10Gi")
-	// +required
-	Size string `json:"size"`
-
-	// StorageClass name
+	// AdditionalRoles beyond the standard Supabase roles (e.g., sequin_replication)
+	// Uses CNPG RoleConfiguration directly for full compatibility
 	// +optional
-	StorageClass string `json:"storageClass,omitempty"`
+	AdditionalRoles []cnpgv1.RoleConfiguration `json:"additionalRoles,omitempty"`
 }
 
 // BackupSpec defines backup configuration

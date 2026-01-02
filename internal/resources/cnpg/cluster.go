@@ -107,13 +107,10 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 				},
 			},
 
-			StorageConfiguration: cnpgv1.StorageConfiguration{
-				Size:         spec.Storage.Size,
-				StorageClass: ptrStringOrNil(spec.Storage.StorageClass),
-			},
+			StorageConfiguration: spec.Storage,
 
 			Managed: &cnpgv1.ManagedConfiguration{
-				Roles: buildRoles(secretNames),
+				Roles: buildRoles(&spec, secretNames),
 			},
 		},
 	}
@@ -148,8 +145,8 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 }
 
 // buildRoles creates the managed roles for Supabase
-func buildRoles(secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
-	return []cnpgv1.RoleConfiguration{
+func buildRoles(spec *supabasev1alpha1.DatabaseSpec, secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
+	roles := []cnpgv1.RoleConfiguration{
 		// Group role for API permissions
 		{
 			Name:    "api_access_role",
@@ -217,6 +214,11 @@ func buildRoles(secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleCo
 			Comment: "GoTrue auth service admin role",
 		},
 	}
+
+	// Add additional custom roles (directly from CNPG RoleConfiguration)
+	roles = append(roles, spec.AdditionalRoles...)
+
+	return roles
 }
 
 // defaultParameters returns the default PostgreSQL parameters
@@ -260,12 +262,4 @@ func mergeParameters(defaults, custom map[string]string) map[string]string {
 		result[k] = v
 	}
 	return result
-}
-
-// ptrStringOrNil returns a pointer to the string if non-empty, nil otherwise
-func ptrStringOrNil(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }

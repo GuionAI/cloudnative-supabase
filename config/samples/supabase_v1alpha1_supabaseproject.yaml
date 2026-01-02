@@ -13,6 +13,15 @@ spec:
       size: 10Gi
       storageClass: local-path
     enableSuperuserAccess: false
+    # Additional roles for CDC tools like Sequin/PowerSync
+    # Uses CNPG RoleConfiguration format directly
+    # additionalRoles:
+    #   - name: sequin_replication
+    #     login: true
+    #     replication: true
+    #     bypassRLS: true
+    #     passwordSecret:
+    #       name: sequin-replication-password
 
   auth:
     siteURL: https://app.example.com
