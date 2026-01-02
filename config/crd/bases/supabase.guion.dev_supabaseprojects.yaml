@@ -225,7 +225,9 @@ spec:
                     description: Backup configuration
                     properties:
                       destinationPath:
-                        description: DestinationPath is the S3/R2 bucket path (s3://bucket/path/)
+                        description: |-
+                          DestinationPath is the S3/R2 bucket path (s3://bucket/path/)
+                          Required when backup is enabled
                         type: string
                       enabled:
                         default: false
@@ -239,18 +241,22 @@ spec:
                         description: RetentionPolicy defines how long to keep backups
                         type: string
                       s3CredentialsSecret:
-                        description: S3CredentialsSecret references a secret with
-                          ACCESS_KEY_ID and SECRET_ACCESS_KEY
+                        description: |-
+                          S3CredentialsSecret references a secret with ACCESS_KEY_ID and SECRET_ACCESS_KEY
+                          Required when backup is enabled
                         type: string
                       schedule:
                         default: 0 0 2 * * *
                         description: Schedule in cron format (6 fields including seconds)
                         type: string
                     required:
-                    - destinationPath
                     - enabled
-                    - s3CredentialsSecret
                     type: object
+                    x-kubernetes-validations:
+                    - message: destinationPath is required when backup is enabled
+                      rule: '!self.enabled || self.destinationPath != '''''
+                    - message: s3CredentialsSecret is required when backup is enabled
+                      rule: '!self.enabled || self.s3CredentialsSecret != '''''
                   enableSuperuserAccess:
                     default: false
                     description: EnableSuperuserAccess allows connecting as postgres

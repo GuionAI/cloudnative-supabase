@@ -153,6 +153,8 @@ type StorageSpec struct {
 }
 
 // BackupSpec defines backup configuration
+// +kubebuilder:validation:XValidation:rule="!self.enabled || self.destinationPath != ''",message="destinationPath is required when backup is enabled"
+// +kubebuilder:validation:XValidation:rule="!self.enabled || self.s3CredentialsSecret != ''",message="s3CredentialsSecret is required when backup is enabled"
 type BackupSpec struct {
 	// Enabled enables scheduled backups
 	// +kubebuilder:default=false
@@ -169,16 +171,18 @@ type BackupSpec struct {
 	RetentionPolicy string `json:"retentionPolicy,omitempty"`
 
 	// DestinationPath is the S3/R2 bucket path (s3://bucket/path/)
-	// +required
-	DestinationPath string `json:"destinationPath"`
+	// Required when backup is enabled
+	// +optional
+	DestinationPath string `json:"destinationPath,omitempty"`
 
 	// EndpointURL for S3-compatible storage
 	// +optional
 	EndpointURL string `json:"endpointURL,omitempty"`
 
 	// S3CredentialsSecret references a secret with ACCESS_KEY_ID and SECRET_ACCESS_KEY
-	// +required
-	S3CredentialsSecret string `json:"s3CredentialsSecret"`
+	// Required when backup is enabled
+	// +optional
+	S3CredentialsSecret string `json:"s3CredentialsSecret,omitempty"`
 }
 
 // JWTSpec defines JWT configuration
