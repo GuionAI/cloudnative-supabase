@@ -33,6 +33,19 @@ tolerations: []
 
 affinity: {}
 
+# Topology spread constraints for multi-AZ deployments
+topologySpreadConstraints: []
+# Example:
+# - maxSkew: 1
+#   topologyKey: topology.kubernetes.io/zone
+#   whenUnsatisfiable: ScheduleAnyway
+#   labelSelector:
+#     matchLabels:
+#       control-plane: controller-manager
+
+# Priority class for critical workloads
+priorityClassName: ""
+
 # Leader election configuration
 leaderElection:
   enabled: true

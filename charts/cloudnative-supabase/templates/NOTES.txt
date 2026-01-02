@@ -1,0 +1,33 @@
+CloudNative Supabase Operator installed successfully!
+
+Namespace: {{ .Release.Namespace }}
+
+To verify the operator is running:
+
+  kubectl -n {{ .Release.Namespace }} get deployment {{ include "cloudnative-supabase.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} logs -l control-plane=controller-manager -f
+
+To create a Supabase project:
+
+  cat <<EOF | kubectl apply -f -
+  apiVersion: supabase.guion.dev/v1alpha1
+  kind: SupabaseProject
+  metadata:
+    name: my-project
+    namespace: my-namespace
+  spec:
+    database:
+      instances: 1
+      storage:
+        size: 10Gi
+    auth:
+      siteURL: https://app.example.com
+      externalURL: https://auth.example.com
+  EOF
+
+To check project status:
+
+  kubectl get supabaseprojects -A
+
+For more information:
+  https://github.com/GuionAI/cloudnative-supabase
