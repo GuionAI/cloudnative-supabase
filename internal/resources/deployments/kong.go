@@ -45,7 +45,7 @@ const (
 	DefaultKongImage = "kong"
 
 	// DefaultKongTag is the default Kong image tag
-	DefaultKongTag = "3.9"
+	DefaultKongTag = "2.8.1"
 )
 
 // KongDeploymentName returns the kong deployment name

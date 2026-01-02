@@ -122,9 +122,6 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 					},
 				},
 				Spec: corev1.PodSpec{
-					InitContainers: []corev1.Container{
-						buildMetaDBInitContainer(secretNames, dbHost),
-					},
 					Containers: []corev1.Container{
 						{
 							Name:            MetaComponentName,
@@ -176,36 +173,4 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 	}
 
 	return deployment
-}
-
-// buildMetaDBInitContainer creates the init container that waits for the database
-func buildMetaDBInitContainer(secretNames *supabasev1alpha1.SecretNamesStatus, dbHost string) corev1.Container {
-	return corev1.Container{
-		Name:            "init-db",
-		Image:           "postgres:15-alpine",
-		ImagePullPolicy: corev1.PullIfNotPresent,
-		Env: []corev1.EnvVar{
-			{Name: "DB_HOST", Value: dbHost},
-			{Name: "DB_PORT", Value: "5432"},
-			{
-				Name: "DB_USER",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: secretNames.SupabaseAdmin,
-						},
-						Key: "username",
-					},
-				},
-			},
-		},
-		Command: []string{"/bin/sh", "-c"},
-		Args: []string{
-			`until pg_isready -h $(DB_HOST) -p $(DB_PORT) -U $(DB_USER); do
-echo "Waiting for database to start..."
-sleep 2
-done
-echo "Database is ready"`,
-		},
-	}
 }

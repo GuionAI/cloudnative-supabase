@@ -284,6 +284,7 @@ type AuthSpec struct {
 }
 
 // AuthProvidersSpec defines OAuth provider configuration
+// +kubebuilder:validation:XValidation:rule="((!has(self.google) || !self.google.enabled) && (!has(self.apple) || !self.apple.enabled)) || self.secretRef.size() > 0",message="secretRef is required when Google or Apple provider is enabled"
 type AuthProvidersSpec struct {
 	// Google OAuth configuration
 	// +optional
@@ -294,6 +295,7 @@ type AuthProvidersSpec struct {
 	Apple *AppleProviderSpec `json:"apple,omitempty"`
 
 	// SecretRef for provider credentials (contains env vars like GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID)
+	// Required when Google or Apple provider is enabled.
 	// +optional
 	SecretRef string `json:"secretRef,omitempty"`
 }

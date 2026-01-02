@@ -107,10 +107,16 @@ spec:
                         - enabled
                         type: object
                       secretRef:
-                        description: SecretRef for provider credentials (contains
-                          env vars like GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID)
+                        description: |-
+                          SecretRef for provider credentials (contains env vars like GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID)
+                          Required when Google or Apple provider is enabled.
                         type: string
                     type: object
+                    x-kubernetes-validations:
+                    - message: secretRef is required when Google or Apple provider
+                        is enabled
+                      rule: ((!has(self.google) || !self.google.enabled) && (!has(self.apple)
+                        || !self.apple.enabled)) || self.secretRef.size() > 0
                   replicas:
                     default: 1
                     description: Replicas count
