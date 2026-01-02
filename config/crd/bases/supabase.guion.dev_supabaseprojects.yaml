@@ -254,9 +254,9 @@ spec:
                     type: object
                     x-kubernetes-validations:
                     - message: destinationPath is required when backup is enabled
-                      rule: '!self.enabled || self.destinationPath != '''''
+                      rule: '!self.enabled || self.destinationPath.size() > 0'
                     - message: s3CredentialsSecret is required when backup is enabled
-                      rule: '!self.enabled || self.s3CredentialsSecret != '''''
+                      rule: '!self.enabled || self.s3CredentialsSecret.size() > 0'
                   enableSuperuserAccess:
                     default: false
                     description: EnableSuperuserAccess allows connecting as postgres
@@ -419,7 +419,7 @@ spec:
                     type: object
                     x-kubernetes-validations:
                     - message: host is required when ingress is enabled
-                      rule: '!self.enabled || self.host != '''''
+                      rule: '!self.enabled || self.host.size() > 0'
                   replicas:
                     default: 1
                     description: Replicas count
