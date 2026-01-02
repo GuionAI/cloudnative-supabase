@@ -90,6 +90,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 				AdditionalLibraries: []string{
 					"pg_stat_statements",
 					"pgaudit",
+					"auto_explain",
 				},
 				Parameters: mergeParameters(defaultParameters(), spec.Parameters),
 				PgHBA: []string{
@@ -230,6 +231,22 @@ func defaultParameters() map[string]string {
 		// Performance
 		"shared_buffers":   "256MB",
 		"log_min_messages": "fatal",
+		// pgaudit settings (matching Supabase Cloud)
+		"pgaudit.log":                "function, ddl, role",
+		"pgaudit.log_catalog":        "on",
+		"pgaudit.log_client":         "off",
+		"pgaudit.log_level":          "log",
+		"pgaudit.log_parameter":      "off",
+		"pgaudit.log_relation":       "off",
+		"pgaudit.log_rows":           "off",
+		"pgaudit.log_statement":      "on",
+		"pgaudit.log_statement_once": "off",
+		// auto_explain settings (log slow queries)
+		"auto_explain.log_min_duration":     "1s",
+		"auto_explain.log_analyze":          "on",
+		"auto_explain.log_buffers":          "on",
+		"auto_explain.log_timing":           "on",
+		"auto_explain.log_nested_statements": "on",
 	}
 }
 
