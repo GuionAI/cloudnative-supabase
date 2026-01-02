@@ -366,7 +366,7 @@ type RestSpec struct {
 // StudioSpec defines Supabase Studio configuration
 type StudioSpec struct {
 	// ImageTag for supabase/studio
-	// +kubebuilder:default="2024.12.09-sha-434634f"
+	// +kubebuilder:default="2025.12.17-sha-43f4f7f"
 	// +optional
 	ImageTag string `json:"imageTag,omitempty"`
 

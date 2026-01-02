@@ -40,7 +40,7 @@ const (
 	DefaultStudioImage = "supabase/studio"
 
 	// DefaultStudioTag is the default Studio image tag
-	DefaultStudioTag = "2024.12.09-sha-434634f"
+	DefaultStudioTag = "2025.12.17-sha-43f4f7f"
 )
 
 // StudioDeploymentName returns the studio deployment name
