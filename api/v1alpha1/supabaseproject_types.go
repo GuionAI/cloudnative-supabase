@@ -398,6 +398,7 @@ type KongSpec struct {
 }
 
 // IngressSpec defines ingress configuration
+// +kubebuilder:validation:XValidation:rule="!self.enabled || self.host != ''",message="host is required when ingress is enabled"
 type IngressSpec struct {
 	// Enabled enables ingress creation
 	Enabled bool `json:"enabled"`
@@ -406,8 +407,9 @@ type IngressSpec struct {
 	// +optional
 	ClassName string `json:"className,omitempty"`
 
-	// Host is the ingress hostname
-	Host string `json:"host"`
+	// Host is the ingress hostname (required when enabled)
+	// +optional
+	Host string `json:"host,omitempty"`
 
 	// TLS enables TLS termination
 	// +optional

@@ -415,7 +415,7 @@ spec:
                         description: Enabled enables ingress creation
                         type: boolean
                       host:
-                        description: Host is the ingress hostname
+                        description: Host is the ingress hostname (required when enabled)
                         type: string
                       tls:
                         description: TLS enables TLS termination
@@ -425,8 +425,10 @@ spec:
                         type: string
                     required:
                     - enabled
-                    - host
                     type: object
+                    x-kubernetes-validations:
+                    - message: host is required when ingress is enabled
+                      rule: '!self.enabled || self.host != '''''
                   replicas:
                     default: 1
                     description: Replicas count
