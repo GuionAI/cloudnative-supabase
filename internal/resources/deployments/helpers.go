@@ -24,13 +24,19 @@ import (
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
 )
 
-// ProbeConfig holds configuration for building HTTP probes
+// ProbeConfig holds configuration for building HTTP probes.
+// All time-related fields are in seconds.
 type ProbeConfig struct {
-	Path                string
-	Port                int32
+	// Path is the HTTP endpoint to probe (e.g., "/health", "/ready")
+	Path string
+	// Port is the container port to probe (must be > 0)
+	Port int32
+	// InitialDelaySeconds is how long to wait before first probe (typically 5-30s)
 	InitialDelaySeconds int32
-	PeriodSeconds       int32
-	TimeoutSeconds      int32
+	// PeriodSeconds is how often to perform the probe (typically 5-15s)
+	PeriodSeconds int32
+	// TimeoutSeconds is how long to wait for probe response (typically 1-5s)
+	TimeoutSeconds int32
 }
 
 // DefaultLivenessConfig returns default liveness probe settings

@@ -63,22 +63,16 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 
 	replicas := NormalizeReplicas(spec.Replicas)
 
-	env := []corev1.EnvVar{
-		// Database configuration
-		{Name: "DB_HOST", Value: dbHost},
-		{Name: "DB_PORT", Value: "5432"},
-		{Name: "DB_DRIVER", Value: "postgres"},
-		{Name: "DB_SSL", Value: "disable"},
-		{Name: "DB_NAME", Value: common.DatabaseName},
-
+	env := BuildDatabaseEnv(dbHost)
+	env = append(env,
 		// PostgREST configuration
-		{Name: "PGRST_DB_SCHEMAS", Value: strings.Join(schemas, ",")},
-		{Name: "PGRST_DB_ANON_ROLE", Value: "anon"},
-		{Name: "PGRST_DB_USE_LEGACY_GUCS", Value: "false"},
-		{Name: "PGRST_APP_SETTINGS_JWT_EXP", Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project))},
+		corev1.EnvVar{Name: "PGRST_DB_SCHEMAS", Value: strings.Join(schemas, ",")},
+		corev1.EnvVar{Name: "PGRST_DB_ANON_ROLE", Value: "anon"},
+		corev1.EnvVar{Name: "PGRST_DB_USE_LEGACY_GUCS", Value: "false"},
+		corev1.EnvVar{Name: "PGRST_APP_SETTINGS_JWT_EXP", Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project))},
 
 		// Database credentials
-		{
+		corev1.EnvVar{
 			Name: "DB_USER",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -89,7 +83,7 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 				},
 			},
 		},
-		{
+		corev1.EnvVar{
 			Name: "DB_PASSWORD",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -102,7 +96,7 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		},
 
 		// JWT secret
-		{
+		corev1.EnvVar{
 			Name: "PGRST_JWT_SECRET",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -115,11 +109,11 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		},
 
 		// Database URI (constructed from env vars)
-		{
+		corev1.EnvVar{
 			Name:  "PGRST_DB_URI",
 			Value: "$(DB_DRIVER)://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSL)",
 		},
-	}
+	)
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{

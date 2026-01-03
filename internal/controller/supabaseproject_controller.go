@@ -47,14 +47,32 @@ const (
 	RequeueDelay = 10 * time.Second
 )
 
-// serviceReconcileConfig holds configuration for reconciling a service component
+// serviceReconcileConfig holds configuration for reconciling a service component.
 type serviceReconcileConfig struct {
 	name            string
 	conditionType   string
 	buildDeployment func() *appsv1.Deployment
 	buildService    func() *corev1.Service
 	setStatus       func(ready bool)
-	logFields       []any
+	logFields       []any // optional
+}
+
+// newServiceReconcileConfig creates a serviceReconcileConfig with required fields as parameters.
+// This ensures callers cannot forget to provide required values (compile-time enforcement).
+func newServiceReconcileConfig(
+	name string,
+	conditionType string,
+	buildDeployment func() *appsv1.Deployment,
+	buildService func() *corev1.Service,
+	setStatus func(ready bool),
+) serviceReconcileConfig {
+	return serviceReconcileConfig{
+		name:            name,
+		conditionType:   conditionType,
+		buildDeployment: buildDeployment,
+		buildService:    buildService,
+		setStatus:       setStatus,
+	}
 }
 
 // SupabaseProjectReconciler reconciles a SupabaseProject object
@@ -462,87 +480,67 @@ func (r *SupabaseProjectReconciler) reconcileServiceComponent(ctx context.Contex
 
 // reconcileAuth deploys the Auth service
 func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
-	return r.reconcileServiceComponent(ctx, project, serviceReconcileConfig{
-		name:          "Auth",
-		conditionType: supabasev1alpha1.ConditionTypeAuthReady,
-		buildDeployment: func() *appsv1.Deployment {
-			return deployments.BuildAuthDeployment(project, secretNames)
-		},
-		buildService: func() *corev1.Service {
-			return services.BuildAuthService(project)
-		},
-		setStatus: func(ready bool) {
-			project.Status.Services.Auth = supabasev1alpha1.ServiceStatus{Ready: ready}
-		},
-		logFields: []any{
-			"image", fmt.Sprintf("%s:%s", "supabase/gotrue", project.Spec.Auth.ImageTag),
-			"replicas", project.Spec.Auth.Replicas,
-			"hasProviders", project.Spec.Auth.Providers != nil,
-			"hasEmailHook", project.Spec.Auth.EmailHook != nil && project.Spec.Auth.EmailHook.Enabled,
-		},
-	})
+	config := newServiceReconcileConfig(
+		"Auth",
+		supabasev1alpha1.ConditionTypeAuthReady,
+		func() *appsv1.Deployment { return deployments.BuildAuthDeployment(project, secretNames) },
+		func() *corev1.Service { return services.BuildAuthService(project) },
+		func(ready bool) { project.Status.Services.Auth = supabasev1alpha1.ServiceStatus{Ready: ready} },
+	)
+	config.logFields = []any{
+		"image", fmt.Sprintf("%s:%s", "supabase/gotrue", project.Spec.Auth.ImageTag),
+		"replicas", project.Spec.Auth.Replicas,
+		"hasProviders", project.Spec.Auth.Providers != nil,
+		"hasEmailHook", project.Spec.Auth.EmailHook != nil && project.Spec.Auth.EmailHook.Enabled,
+	}
+	return r.reconcileServiceComponent(ctx, project, config)
 }
 
 // reconcileRest deploys the REST service
 func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
-	return r.reconcileServiceComponent(ctx, project, serviceReconcileConfig{
-		name:          "REST",
-		conditionType: supabasev1alpha1.ConditionTypeRestReady,
-		buildDeployment: func() *appsv1.Deployment {
-			return deployments.BuildRestDeployment(project, secretNames)
-		},
-		buildService: func() *corev1.Service {
-			return services.BuildRestService(project)
-		},
-		setStatus: func(ready bool) {
-			project.Status.Services.Rest = supabasev1alpha1.ServiceStatus{Ready: ready}
-		},
-		logFields: []any{
-			"image", fmt.Sprintf("%s:%s", "postgrest/postgrest", project.Spec.Rest.ImageTag),
-			"schemas", project.Spec.Rest.Schemas,
-		},
-	})
+	config := newServiceReconcileConfig(
+		"REST",
+		supabasev1alpha1.ConditionTypeRestReady,
+		func() *appsv1.Deployment { return deployments.BuildRestDeployment(project, secretNames) },
+		func() *corev1.Service { return services.BuildRestService(project) },
+		func(ready bool) { project.Status.Services.Rest = supabasev1alpha1.ServiceStatus{Ready: ready} },
+	)
+	config.logFields = []any{
+		"image", fmt.Sprintf("%s:%s", "postgrest/postgrest", project.Spec.Rest.ImageTag),
+		"schemas", project.Spec.Rest.Schemas,
+	}
+	return r.reconcileServiceComponent(ctx, project, config)
 }
 
 // reconcileStudio deploys the Studio service
 func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
-	return r.reconcileServiceComponent(ctx, project, serviceReconcileConfig{
-		name:          "Studio",
-		conditionType: supabasev1alpha1.ConditionTypeStudioReady,
-		buildDeployment: func() *appsv1.Deployment {
-			return deployments.BuildStudioDeployment(project, secretNames)
-		},
-		buildService: func() *corev1.Service {
-			return services.BuildStudioService(project)
-		},
-		setStatus: func(ready bool) {
-			project.Status.Services.Studio = supabasev1alpha1.ServiceStatus{Ready: ready}
-		},
-		logFields: []any{
-			"image", fmt.Sprintf("%s:%s", "supabase/studio", project.Spec.Studio.ImageTag),
-			"publicURL", project.Spec.Studio.PublicURL,
-		},
-	})
+	config := newServiceReconcileConfig(
+		"Studio",
+		supabasev1alpha1.ConditionTypeStudioReady,
+		func() *appsv1.Deployment { return deployments.BuildStudioDeployment(project, secretNames) },
+		func() *corev1.Service { return services.BuildStudioService(project) },
+		func(ready bool) { project.Status.Services.Studio = supabasev1alpha1.ServiceStatus{Ready: ready} },
+	)
+	config.logFields = []any{
+		"image", fmt.Sprintf("%s:%s", "supabase/studio", project.Spec.Studio.ImageTag),
+		"publicURL", project.Spec.Studio.PublicURL,
+	}
+	return r.reconcileServiceComponent(ctx, project, config)
 }
 
 // reconcileMeta deploys the Meta service
 func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
-	return r.reconcileServiceComponent(ctx, project, serviceReconcileConfig{
-		name:          "Meta",
-		conditionType: supabasev1alpha1.ConditionTypeMetaReady,
-		buildDeployment: func() *appsv1.Deployment {
-			return deployments.BuildMetaDeployment(project, secretNames)
-		},
-		buildService: func() *corev1.Service {
-			return services.BuildMetaService(project)
-		},
-		setStatus: func(ready bool) {
-			project.Status.Services.Meta = supabasev1alpha1.ServiceStatus{Ready: ready}
-		},
-		logFields: []any{
-			"image", fmt.Sprintf("%s:%s", "supabase/postgres-meta", project.Spec.Meta.ImageTag),
-		},
-	})
+	config := newServiceReconcileConfig(
+		"Meta",
+		supabasev1alpha1.ConditionTypeMetaReady,
+		func() *appsv1.Deployment { return deployments.BuildMetaDeployment(project, secretNames) },
+		func() *corev1.Service { return services.BuildMetaService(project) },
+		func(ready bool) { project.Status.Services.Meta = supabasev1alpha1.ServiceStatus{Ready: ready} },
+	)
+	config.logFields = []any{
+		"image", fmt.Sprintf("%s:%s", "supabase/postgres-meta", project.Spec.Meta.ImageTag),
+	}
+	return r.reconcileServiceComponent(ctx, project, config)
 }
 
 // reconcileKong deploys the Kong API gateway
