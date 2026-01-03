@@ -118,6 +118,24 @@ Builder functions in `internal/resources/` take the project and return Kubernete
 
 See [GitHub Issue #1](https://github.com/GuionAI/cloudnative-supabase/issues/1) for the comprehensive code review findings and action items.
 
+## Releasing
+
+To release a new version:
+
+```bash
+# 1. Ensure changes are pushed to main
+git push
+
+# 2. Create and push a version tag
+git tag v0.1.X && git push origin v0.1.X
+```
+
+The GitHub Actions release workflow (`.github/workflows/release.yaml`) will automatically:
+- Run tests
+- Build and push Docker image to `ghcr.io/guionai/cloudnative-supabase:<version>`
+- Create a GitHub Release with auto-generated release notes
+- Update Helm chart version in `charts/cloudnative-supabase/`
+
 ## Dependencies
 
 - CloudNativePG (CNPG) operator must be installed in the cluster
