@@ -22,6 +22,7 @@ import (
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	barmancloudv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -85,6 +86,8 @@ type SupabaseProjectReconciler struct {
 // +kubebuilder:rbac:groups=supabase.guion.dev,resources=supabaseprojects/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=supabase.guion.dev,resources=supabaseprojects/finalizers,verbs=update
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=scheduledbackups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=barmancloud.cnpg.io,resources=objectstores,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
@@ -125,6 +128,11 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Phase 3: Ensure CNPG Cluster exists
 	if result, err := r.reconcileCNPGCluster(ctx, project); err != nil || result.RequeueAfter > 0 {
 		return result, err
+	}
+
+	// Phase 3.5: Ensure backup infrastructure exists (ObjectStore, ScheduledBackup)
+	if err := r.reconcileBackupInfrastructure(ctx, project); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Phase 4: Wait for database to be ready
@@ -689,6 +697,100 @@ func (r *SupabaseProjectReconciler) createOrUpdateService(ctx context.Context, p
 	return r.Update(ctx, existing)
 }
 
+// reconcileBackupInfrastructure ensures ObjectStore and ScheduledBackup resources exist
+func (r *SupabaseProjectReconciler) reconcileBackupInfrastructure(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	log := logf.FromContext(ctx)
+
+	// Reconcile backup ObjectStore if backup is enabled
+	if project.Spec.Database.Backup != nil && project.Spec.Database.Backup.Enabled {
+		objectStore := cnpg.BuildObjectStore(project)
+		if objectStore != nil {
+			if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
+				return fmt.Errorf("failed to set owner reference on ObjectStore: %w", err)
+			}
+
+			existing := &barmancloudv1.ObjectStore{}
+			err := r.Get(ctx, types.NamespacedName{Name: objectStore.Name, Namespace: objectStore.Namespace}, existing)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					log.Info("Creating ObjectStore", "name", objectStore.Name)
+					if err := r.Create(ctx, objectStore); err != nil {
+						return fmt.Errorf("failed to create ObjectStore: %w", err)
+					}
+				} else {
+					return fmt.Errorf("failed to get ObjectStore: %w", err)
+				}
+			} else {
+				// Update existing ObjectStore
+				existing.Spec = objectStore.Spec
+				if err := r.Update(ctx, existing); err != nil {
+					return fmt.Errorf("failed to update ObjectStore: %w", err)
+				}
+			}
+		}
+
+		// Reconcile ScheduledBackup
+		scheduledBackup := cnpg.BuildScheduledBackup(project)
+		if scheduledBackup != nil {
+			if err := controllerutil.SetControllerReference(project, scheduledBackup, r.Scheme); err != nil {
+				return fmt.Errorf("failed to set owner reference on ScheduledBackup: %w", err)
+			}
+
+			existing := &cnpgv1.ScheduledBackup{}
+			err := r.Get(ctx, types.NamespacedName{Name: scheduledBackup.Name, Namespace: scheduledBackup.Namespace}, existing)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					log.Info("Creating ScheduledBackup", "name", scheduledBackup.Name)
+					if err := r.Create(ctx, scheduledBackup); err != nil {
+						return fmt.Errorf("failed to create ScheduledBackup: %w", err)
+					}
+				} else {
+					return fmt.Errorf("failed to get ScheduledBackup: %w", err)
+				}
+			} else {
+				// Update existing ScheduledBackup
+				existing.Spec = scheduledBackup.Spec
+				if err := r.Update(ctx, existing); err != nil {
+					return fmt.Errorf("failed to update ScheduledBackup: %w", err)
+				}
+			}
+		}
+
+		r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionTrue, "BackupConfigured", "Backup infrastructure is ready")
+	}
+
+	// Reconcile recovery ObjectStore if recovery is enabled
+	if project.Spec.Database.Recovery != nil && project.Spec.Database.Recovery.Enabled {
+		objectStore := cnpg.BuildRecoveryObjectStore(project)
+		if objectStore != nil {
+			if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
+				return fmt.Errorf("failed to set owner reference on recovery ObjectStore: %w", err)
+			}
+
+			existing := &barmancloudv1.ObjectStore{}
+			err := r.Get(ctx, types.NamespacedName{Name: objectStore.Name, Namespace: objectStore.Namespace}, existing)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					log.Info("Creating recovery ObjectStore", "name", objectStore.Name)
+					if err := r.Create(ctx, objectStore); err != nil {
+						return fmt.Errorf("failed to create recovery ObjectStore: %w", err)
+					}
+				} else {
+					return fmt.Errorf("failed to get recovery ObjectStore: %w", err)
+				}
+			} else {
+				// Update existing ObjectStore
+				existing.Spec = objectStore.Spec
+				if err := r.Update(ctx, existing); err != nil {
+					return fmt.Errorf("failed to update recovery ObjectStore: %w", err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 func (r *SupabaseProjectReconciler) setCondition(project *supabasev1alpha1.SupabaseProject, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	condition := metav1.Condition{
 		Type:               conditionType,
@@ -709,6 +811,8 @@ func (r *SupabaseProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&cnpgv1.Cluster{}).
+		Owns(&cnpgv1.ScheduledBackup{}).
+		Owns(&barmancloudv1.ObjectStore{}).
 		Named("supabaseproject").
 		Complete(r)
 }
