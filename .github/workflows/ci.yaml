@@ -36,19 +36,18 @@ jobs:
         run: |
           cp config/crd/bases/*.yaml charts/cloudnative-supabase/crds/
 
+          if [ -z "$(git status --porcelain charts/cloudnative-supabase/crds/)" ]; then
+            echo "Helm chart CRDs already in sync"
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add charts/cloudnative-supabase/crds/
-
-          if git diff --cached --quiet; then
-            echo "Helm chart CRDs already in sync"
-          else
-            git fetch origin main
-            git pull --rebase origin main
-            git commit -m "chore(chart): sync CRDs from generated manifests"
-            git push origin main
-          fi
+          git commit -m "chore(chart): sync CRDs from generated manifests"
+          git pull --rebase origin main
+          git push origin main
 
   lint:
     runs-on: ubuntu-latest
