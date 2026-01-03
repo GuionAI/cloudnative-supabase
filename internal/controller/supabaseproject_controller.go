@@ -22,6 +22,7 @@ import (
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	barmancloudv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -85,6 +86,8 @@ type SupabaseProjectReconciler struct {
 // +kubebuilder:rbac:groups=supabase.guion.dev,resources=supabaseprojects/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=supabase.guion.dev,resources=supabaseprojects/finalizers,verbs=update
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=scheduledbackups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=barmancloud.cnpg.io,resources=objectstores,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
@@ -119,6 +122,12 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Phase 2: Ensure init SQL ConfigMap exists
 	if err := r.reconcileInitSQL(ctx, project); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Phase 2.5: Ensure backup infrastructure exists (ObjectStore, ScheduledBackup)
+	// This must happen BEFORE cluster creation because the Cluster references the ObjectStore
+	if err := r.reconcileBackupInfrastructure(ctx, project); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -689,6 +698,246 @@ func (r *SupabaseProjectReconciler) createOrUpdateService(ctx context.Context, p
 	return r.Update(ctx, existing)
 }
 
+// reconcileBackupInfrastructure ensures ObjectStore and ScheduledBackup resources exist
+func (r *SupabaseProjectReconciler) reconcileBackupInfrastructure(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	if err := r.reconcileBackup(ctx, project); err != nil {
+		return err
+	}
+	return r.reconcileRecovery(ctx, project)
+}
+
+// reconcileBackup handles backup ObjectStore and ScheduledBackup creation
+func (r *SupabaseProjectReconciler) reconcileBackup(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	log := logf.FromContext(ctx)
+
+	// If backup is disabled, clean up any existing backup resources
+	if project.Spec.Database.Backup == nil || !project.Spec.Database.Backup.Enabled {
+		return r.cleanupBackupResources(ctx, project)
+	}
+
+	log.Info("Reconciling backup infrastructure")
+
+	backup := project.Spec.Database.Backup
+
+	// Validate S3 credentials secret exists
+	if err := r.validateS3Secret(ctx, project.Namespace, backup.S3CredentialsSecret); err != nil {
+		return r.failBackup(ctx, project, "SecretError", err)
+	}
+
+	// Build and create/update ObjectStore
+	objectStore := cnpg.BuildObjectStore(project)
+	if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
+		return r.failBackup(ctx, project, "OwnerRefError", fmt.Errorf("failed to set owner reference on ObjectStore: %w", err))
+	}
+
+	if err := r.createOrUpdateObjectStore(ctx, objectStore); err != nil {
+		return r.failBackup(ctx, project, "ObjectStoreFailed", err)
+	}
+
+	// Build and create/update ScheduledBackup
+	scheduledBackup := cnpg.BuildScheduledBackup(project)
+	if err := controllerutil.SetControllerReference(project, scheduledBackup, r.Scheme); err != nil {
+		return r.failBackup(ctx, project, "OwnerRefError", fmt.Errorf("failed to set owner reference on ScheduledBackup: %w", err))
+	}
+
+	if err := r.createOrUpdateScheduledBackup(ctx, scheduledBackup); err != nil {
+		return r.failBackup(ctx, project, "ScheduledBackupFailed", err)
+	}
+
+	// Success
+	r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionTrue, "BackupConfigured", "Backup infrastructure is ready")
+	return r.Status().Update(ctx, project)
+}
+
+// cleanupBackupResources removes ObjectStore and ScheduledBackup when backup is disabled
+func (r *SupabaseProjectReconciler) cleanupBackupResources(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	// Skip cleanup if backup was never configured (no BackupReady condition)
+	if meta.FindStatusCondition(project.Status.Conditions, supabasev1alpha1.ConditionTypeBackupReady) == nil {
+		return nil
+	}
+
+	log := logf.FromContext(ctx)
+
+	// Delete ScheduledBackup if exists
+	scheduledBackup := &cnpgv1.ScheduledBackup{}
+	scheduledBackupName := cnpg.ScheduledBackupName(project)
+	err := r.Get(ctx, types.NamespacedName{Name: scheduledBackupName, Namespace: project.Namespace}, scheduledBackup)
+	if err == nil {
+		log.Info("Deleting ScheduledBackup (backup disabled)", "name", scheduledBackupName)
+		if err := r.Delete(ctx, scheduledBackup); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete ScheduledBackup: %w", err)
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get ScheduledBackup: %w", err)
+	}
+
+	// Delete ObjectStore if exists
+	objectStore := &barmancloudv1.ObjectStore{}
+	objectStoreName := cnpg.ObjectStoreName(project)
+	err = r.Get(ctx, types.NamespacedName{Name: objectStoreName, Namespace: project.Namespace}, objectStore)
+	if err == nil {
+		log.Info("Deleting ObjectStore (backup disabled)", "name", objectStoreName)
+		if err := r.Delete(ctx, objectStore); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete ObjectStore: %w", err)
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get ObjectStore: %w", err)
+	}
+
+	// Remove stale condition after successful cleanup
+	meta.RemoveStatusCondition(&project.Status.Conditions, supabasev1alpha1.ConditionTypeBackupReady)
+	return r.Status().Update(ctx, project)
+}
+
+// reconcileRecovery handles recovery ObjectStore creation
+func (r *SupabaseProjectReconciler) reconcileRecovery(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	log := logf.FromContext(ctx)
+
+	// If recovery is disabled, clean up any existing recovery resources
+	if project.Spec.Database.Recovery == nil || !project.Spec.Database.Recovery.Enabled {
+		return r.cleanupRecoveryResources(ctx, project)
+	}
+
+	log.Info("Reconciling recovery infrastructure")
+
+	recovery := project.Spec.Database.Recovery
+
+	// Validate S3 credentials secret exists
+	if err := r.validateS3Secret(ctx, project.Namespace, recovery.S3CredentialsSecret); err != nil {
+		return r.failRecovery(ctx, project, "SecretError", err)
+	}
+
+	// Build and create/update ObjectStore
+	objectStore := cnpg.BuildRecoveryObjectStore(project)
+	if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
+		return r.failRecovery(ctx, project, "OwnerRefError", fmt.Errorf("failed to set owner reference on recovery ObjectStore: %w", err))
+	}
+
+	if err := r.createOrUpdateObjectStore(ctx, objectStore); err != nil {
+		return r.failRecovery(ctx, project, "ObjectStoreFailed", err)
+	}
+
+	// Success
+	r.setCondition(project, supabasev1alpha1.ConditionTypeRecoveryReady, metav1.ConditionTrue, "RecoveryConfigured", "Recovery infrastructure is ready")
+	return r.Status().Update(ctx, project)
+}
+
+// cleanupRecoveryResources removes recovery ObjectStore when recovery is disabled
+func (r *SupabaseProjectReconciler) cleanupRecoveryResources(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	// Skip cleanup if recovery was never configured (no RecoveryReady condition)
+	if meta.FindStatusCondition(project.Status.Conditions, supabasev1alpha1.ConditionTypeRecoveryReady) == nil {
+		return nil
+	}
+
+	log := logf.FromContext(ctx)
+
+	// Delete recovery ObjectStore if exists
+	objectStore := &barmancloudv1.ObjectStore{}
+	objectStoreName := cnpg.RecoveryObjectStoreName(project)
+	err := r.Get(ctx, types.NamespacedName{Name: objectStoreName, Namespace: project.Namespace}, objectStore)
+	if err == nil {
+		log.Info("Deleting recovery ObjectStore (recovery disabled)", "name", objectStoreName)
+		if err := r.Delete(ctx, objectStore); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete recovery ObjectStore: %w", err)
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get recovery ObjectStore: %w", err)
+	}
+
+	// Remove stale condition after successful cleanup
+	meta.RemoveStatusCondition(&project.Status.Conditions, supabasev1alpha1.ConditionTypeRecoveryReady)
+	return r.Status().Update(ctx, project)
+}
+
+// failRecovery sets RecoveryReady=False condition and updates status
+func (r *SupabaseProjectReconciler) failRecovery(ctx context.Context, project *supabasev1alpha1.SupabaseProject, reason string, err error) error {
+	r.setCondition(project, supabasev1alpha1.ConditionTypeRecoveryReady, metav1.ConditionFalse, reason, err.Error())
+	if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		return statusErr
+	}
+	return err
+}
+
+// validateS3Secret validates that the S3 credentials secret exists and has required keys
+func (r *SupabaseProjectReconciler) validateS3Secret(ctx context.Context, namespace, secretName string) error {
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("S3 credentials secret %s not found", secretName)
+		}
+		return fmt.Errorf("failed to get S3 credentials secret %s: %w", secretName, err)
+	}
+
+	// Validate required keys exist
+	requiredKeys := []string{cnpg.DefaultAccessKeyIDKey, cnpg.DefaultSecretAccessKeyKey}
+	for _, key := range requiredKeys {
+		if _, ok := secret.Data[key]; !ok {
+			return fmt.Errorf("S3 credentials secret %s missing required key: %s", secretName, key)
+		}
+	}
+
+	return nil
+}
+
+// failBackup sets BackupReady=False condition and updates status
+func (r *SupabaseProjectReconciler) failBackup(ctx context.Context, project *supabasev1alpha1.SupabaseProject, reason string, err error) error {
+	r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, reason, err.Error())
+	if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		return statusErr
+	}
+	return err
+}
+
+// createOrUpdateObjectStore creates or updates an ObjectStore resource
+func (r *SupabaseProjectReconciler) createOrUpdateObjectStore(ctx context.Context, objectStore *barmancloudv1.ObjectStore) error {
+	log := logf.FromContext(ctx)
+
+	existing := &barmancloudv1.ObjectStore{}
+	err := r.Get(ctx, types.NamespacedName{Name: objectStore.Name, Namespace: objectStore.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Creating ObjectStore", "name", objectStore.Name)
+			if err := r.Create(ctx, objectStore); err != nil {
+				return fmt.Errorf("failed to create ObjectStore: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get ObjectStore: %w", err)
+	}
+
+	// Update existing ObjectStore
+	existing.Spec = objectStore.Spec
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update ObjectStore: %w", err)
+	}
+	return nil
+}
+
+// createOrUpdateScheduledBackup creates or updates a ScheduledBackup resource
+func (r *SupabaseProjectReconciler) createOrUpdateScheduledBackup(ctx context.Context, scheduledBackup *cnpgv1.ScheduledBackup) error {
+	log := logf.FromContext(ctx)
+
+	existing := &cnpgv1.ScheduledBackup{}
+	err := r.Get(ctx, types.NamespacedName{Name: scheduledBackup.Name, Namespace: scheduledBackup.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Creating ScheduledBackup", "name", scheduledBackup.Name)
+			if err := r.Create(ctx, scheduledBackup); err != nil {
+				return fmt.Errorf("failed to create ScheduledBackup: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get ScheduledBackup: %w", err)
+	}
+
+	// Update existing ScheduledBackup
+	existing.Spec = scheduledBackup.Spec
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update ScheduledBackup: %w", err)
+	}
+	return nil
+}
+
 func (r *SupabaseProjectReconciler) setCondition(project *supabasev1alpha1.SupabaseProject, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	condition := metav1.Condition{
 		Type:               conditionType,
@@ -709,6 +958,8 @@ func (r *SupabaseProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&cnpgv1.Cluster{}).
+		Owns(&cnpgv1.ScheduledBackup{}).
+		Owns(&barmancloudv1.ObjectStore{}).
 		Named("supabaseproject").
 		Complete(r)
 }

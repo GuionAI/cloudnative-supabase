@@ -66,25 +66,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 			ImageName:             image,
 			EnableSuperuserAccess: ptr.To(spec.EnableSuperuserAccess),
 
-			Bootstrap: &cnpgv1.BootstrapConfiguration{
-				InitDB: &cnpgv1.BootstrapInitDB{
-					Database: common.DatabaseName,
-					Owner:    OwnerRole,
-					Secret: &cnpgv1.LocalObjectReference{
-						Name: secretNames.SupabaseAdmin,
-					},
-					PostInitApplicationSQLRefs: &cnpgv1.SQLRefs{
-						ConfigMapRefs: []cnpgv1.ConfigMapKeySelector{
-							{
-								LocalObjectReference: cnpgv1.LocalObjectReference{
-									Name: configmaps.InitSQLConfigMapName(project),
-								},
-								Key: "init.sql",
-							},
-						},
-					},
-				},
-			},
+			Bootstrap: buildBootstrapConfiguration(project, secretNames),
 
 			PostgresConfiguration: cnpgv1.PostgresConfiguration{
 				AdditionalLibraries: []string{
@@ -132,16 +114,86 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 	if spec.Backup != nil && spec.Backup.Enabled {
 		cluster.Spec.Plugins = []cnpgv1.PluginConfiguration{
 			{
-				Name:          "barman-cloud.cloudnative-pg.io",
+				Name:          BarmanCloudPluginName,
 				IsWALArchiver: ptr.To(true),
 				Parameters: map[string]string{
-					"barmanObjectName": project.Name + "-backup",
+					"barmanObjectName": ObjectStoreName(project),
+				},
+			},
+		}
+	}
+
+	// Add external clusters configuration for recovery
+	if spec.Recovery != nil && spec.Recovery.Enabled {
+		cluster.Spec.ExternalClusters = []cnpgv1.ExternalCluster{
+			{
+				Name: RecoverySourceName(project),
+				PluginConfiguration: &cnpgv1.PluginConfiguration{
+					Name: BarmanCloudPluginName,
+					Parameters: map[string]string{
+						"barmanObjectName": RecoveryObjectStoreName(project),
+						"serverName":       spec.Recovery.ServerName,
+					},
 				},
 			},
 		}
 	}
 
 	return cluster
+}
+
+// RecoverySourceName returns the external cluster source name for recovery
+func RecoverySourceName(project *supabasev1alpha1.SupabaseProject) string {
+	return project.Name + "-recovery-source"
+}
+
+// buildBootstrapConfiguration creates the bootstrap configuration based on recovery mode
+func buildBootstrapConfiguration(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) *cnpgv1.BootstrapConfiguration {
+	spec := project.Spec.Database
+
+	// Use recovery bootstrap if recovery is enabled
+	if spec.Recovery != nil && spec.Recovery.Enabled {
+		recovery := &cnpgv1.BootstrapRecovery{
+			Source:   RecoverySourceName(project),
+			Database: common.DatabaseName,
+			Owner:    OwnerRole,
+			Secret: &cnpgv1.LocalObjectReference{
+				Name: secretNames.SupabaseAdmin,
+			},
+		}
+
+		// Set recovery target if targetTime is specified
+		if spec.Recovery.TargetTime != "" {
+			recovery.RecoveryTarget = &cnpgv1.RecoveryTarget{
+				TargetTime: spec.Recovery.TargetTime,
+			}
+		}
+
+		return &cnpgv1.BootstrapConfiguration{
+			Recovery: recovery,
+		}
+	}
+
+	// Default: use initdb bootstrap
+	return &cnpgv1.BootstrapConfiguration{
+		InitDB: &cnpgv1.BootstrapInitDB{
+			Database: common.DatabaseName,
+			Owner:    OwnerRole,
+			Secret: &cnpgv1.LocalObjectReference{
+				Name: secretNames.SupabaseAdmin,
+			},
+			PostInitApplicationSQLRefs: &cnpgv1.SQLRefs{
+				ConfigMapRefs: []cnpgv1.ConfigMapKeySelector{
+					{
+						LocalObjectReference: cnpgv1.LocalObjectReference{
+							Name: configmaps.InitSQLConfigMapName(project),
+						},
+						Key: "init.sql",
+					},
+				},
+			},
+		},
+	}
 }
 
 // buildRoles creates the managed roles for Supabase

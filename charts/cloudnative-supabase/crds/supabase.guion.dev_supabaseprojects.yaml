@@ -343,6 +343,16 @@ spec:
                   backup:
                     description: Backup configuration
                     properties:
+                      dataCompression:
+                        default: gzip
+                        description: DataCompression algorithm for base backups (gzip,
+                          bzip2, snappy, none)
+                        enum:
+                        - gzip
+                        - bzip2
+                        - snappy
+                        - none
+                        type: string
                       destinationPath:
                         description: |-
                           DestinationPath is the S3/R2 bucket path (s3://bucket/path/)
@@ -367,6 +377,16 @@ spec:
                       schedule:
                         default: 0 0 2 * * *
                         description: Schedule in cron format (6 fields including seconds)
+                        type: string
+                      walCompression:
+                        default: gzip
+                        description: WalCompression algorithm for WAL archiving (gzip,
+                          bzip2, snappy, none)
+                        enum:
+                        - gzip
+                        - bzip2
+                        - snappy
+                        - none
                         type: string
                     required:
                     - enabled
@@ -396,6 +416,48 @@ spec:
                       type: string
                     description: Parameters for PostgreSQL configuration
                     type: object
+                  recovery:
+                    description: Recovery configuration for point-in-time recovery
+                      from backups
+                    properties:
+                      destinationPath:
+                        description: |-
+                          DestinationPath of the backup source (s3://bucket/path/)
+                          Required when recovery is enabled
+                        type: string
+                      enabled:
+                        default: false
+                        description: Enabled switches bootstrap from initdb to recovery
+                          mode
+                        type: boolean
+                      endpointURL:
+                        description: EndpointURL for S3-compatible storage
+                        type: string
+                      s3CredentialsSecret:
+                        description: |-
+                          S3CredentialsSecret references a secret with ACCESS_KEY_ID and SECRET_ACCESS_KEY
+                          Required when recovery is enabled
+                        type: string
+                      serverName:
+                        description: |-
+                          ServerName is the original cluster name in the backup
+                          Required when recovery is enabled
+                        type: string
+                      targetTime:
+                        description: |-
+                          TargetTime for point-in-time recovery (RFC 3339 format)
+                          If empty, recovers to the latest available point
+                        type: string
+                    required:
+                    - enabled
+                    type: object
+                    x-kubernetes-validations:
+                    - message: serverName is required when recovery is enabled
+                      rule: '!self.enabled || self.serverName.size() > 0'
+                    - message: destinationPath is required when recovery is enabled
+                      rule: '!self.enabled || self.destinationPath.size() > 0'
+                    - message: s3CredentialsSecret is required when recovery is enabled
+                      rule: '!self.enabled || self.s3CredentialsSecret.size() > 0'
                   resources:
                     description: Resources for PostgreSQL pods
                     properties:
@@ -550,7 +612,7 @@ spec:
                           resources:
                             description: |-
                               resources represents the minimum resources the volume should have.
-                              If RecoverVolumeExpansionFailure feature is enabled users are allowed to specify resource requirements
+                              Users are allowed to specify resource requirements
                               that are lower than previous value but must still be higher than capacity recorded in the
                               status field of the claim.
                               More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#resources
@@ -677,6 +739,10 @@ spec:
                 - instances
                 - storage
                 type: object
+                x-kubernetes-validations:
+                - message: backup and recovery cannot both be enabled
+                  rule: '!(has(self.backup) && self.backup.enabled && has(self.recovery)
+                    && self.recovery.enabled)'
               imagePullSecrets:
                 description: ImagePullSecrets for all deployments
                 items:

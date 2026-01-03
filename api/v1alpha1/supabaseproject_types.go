@@ -40,6 +40,21 @@ const (
 	PhaseDeleting = "Deleting"
 )
 
+// CompressionType defines the compression algorithm for backups
+// +kubebuilder:validation:Enum=gzip;bzip2;snappy;none
+type CompressionType string
+
+const (
+	// CompressionTypeGzip uses gzip compression (default)
+	CompressionTypeGzip CompressionType = "gzip"
+	// CompressionTypeBzip2 uses bzip2 compression
+	CompressionTypeBzip2 CompressionType = "bzip2"
+	// CompressionTypeSnappy uses snappy compression
+	CompressionTypeSnappy CompressionType = "snappy"
+	// CompressionTypeNone disables compression
+	CompressionTypeNone CompressionType = "none"
+)
+
 // Condition type constants
 const (
 	// ConditionTypeReady indicates overall readiness
@@ -68,6 +83,12 @@ const (
 
 	// ConditionTypeKongReady indicates Kong is ready
 	ConditionTypeKongReady = "KongReady"
+
+	// ConditionTypeBackupReady indicates backup infrastructure is ready
+	ConditionTypeBackupReady = "BackupReady"
+
+	// ConditionTypeRecoveryReady indicates recovery infrastructure is ready
+	ConditionTypeRecoveryReady = "RecoveryReady"
 )
 
 // SupabaseProjectSpec defines the desired state of SupabaseProject
@@ -112,6 +133,7 @@ type SupabaseProjectSpec struct {
 }
 
 // DatabaseSpec defines PostgreSQL configuration via CNPG
+// +kubebuilder:validation:XValidation:rule="!(has(self.backup) && self.backup.enabled && has(self.recovery) && self.recovery.enabled)",message="backup and recovery cannot both be enabled"
 type DatabaseSpec struct {
 	// Instances is the number of PostgreSQL instances
 	// +kubebuilder:default=1
@@ -147,10 +169,31 @@ type DatabaseSpec struct {
 	// +optional
 	Backup *BackupSpec `json:"backup,omitempty"`
 
+	// Recovery configuration for point-in-time recovery from backups
+	// +optional
+	Recovery *RecoverySpec `json:"recovery,omitempty"`
+
 	// AdditionalRoles beyond the standard Supabase roles (e.g., sequin_replication)
 	// Uses CNPG RoleConfiguration directly for full compatibility
 	// +optional
 	AdditionalRoles []cnpgv1.RoleConfiguration `json:"additionalRoles,omitempty"`
+}
+
+// S3Config defines S3-compatible storage configuration
+// This is embedded in BackupSpec and RecoverySpec to reduce duplication
+type S3Config struct {
+	// DestinationPath is the S3/R2 bucket path (e.g., s3://bucket-name/path/to/backups)
+	// +kubebuilder:validation:Pattern=`^s3://[a-z0-9][a-z0-9.\-]*[a-z0-9](/.*)?$`
+	// +optional
+	DestinationPath string `json:"destinationPath,omitempty"`
+
+	// EndpointURL for S3-compatible storage (e.g., https://account.r2.cloudflarestorage.com)
+	// +optional
+	EndpointURL string `json:"endpointURL,omitempty"`
+
+	// S3CredentialsSecret references a secret with ACCESS_KEY_ID and SECRET_ACCESS_KEY
+	// +optional
+	S3CredentialsSecret string `json:"s3CredentialsSecret,omitempty"`
 }
 
 // BackupSpec defines backup configuration
@@ -171,19 +214,43 @@ type BackupSpec struct {
 	// +optional
 	RetentionPolicy string `json:"retentionPolicy,omitempty"`
 
-	// DestinationPath is the S3/R2 bucket path (s3://bucket/path/)
-	// Required when backup is enabled
-	// +optional
-	DestinationPath string `json:"destinationPath,omitempty"`
+	// S3Config embeds S3 storage configuration
+	S3Config `json:",inline"`
 
-	// EndpointURL for S3-compatible storage
+	// WalCompression algorithm for WAL archiving
+	// +kubebuilder:default="gzip"
 	// +optional
-	EndpointURL string `json:"endpointURL,omitempty"`
+	WalCompression CompressionType `json:"walCompression,omitempty"`
 
-	// S3CredentialsSecret references a secret with ACCESS_KEY_ID and SECRET_ACCESS_KEY
-	// Required when backup is enabled
+	// DataCompression algorithm for base backups
+	// +kubebuilder:default="gzip"
 	// +optional
-	S3CredentialsSecret string `json:"s3CredentialsSecret,omitempty"`
+	DataCompression CompressionType `json:"dataCompression,omitempty"`
+}
+
+// RecoverySpec defines PITR recovery configuration
+// +kubebuilder:validation:XValidation:rule="!self.enabled || self.serverName.size() > 0",message="serverName is required when recovery is enabled"
+// +kubebuilder:validation:XValidation:rule="!self.enabled || self.destinationPath.size() > 0",message="destinationPath is required when recovery is enabled"
+// +kubebuilder:validation:XValidation:rule="!self.enabled || self.s3CredentialsSecret.size() > 0",message="s3CredentialsSecret is required when recovery is enabled"
+type RecoverySpec struct {
+	// Enabled switches bootstrap from initdb to recovery mode
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled"`
+
+	// ServerName is the original cluster name in the backup
+	// Required when recovery is enabled
+	// +optional
+	ServerName string `json:"serverName,omitempty"`
+
+	// TargetTime for point-in-time recovery in RFC 3339 format
+	// Examples: "2024-01-15T10:30:00Z", "2024-01-15T10:30:00+08:00"
+	// If empty, recovers to the latest available point
+	// +kubebuilder:validation:Pattern=`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$`
+	// +optional
+	TargetTime string `json:"targetTime,omitempty"`
+
+	// S3Config embeds S3 storage configuration
+	S3Config `json:",inline"`
 }
 
 // JWTSpec defines JWT configuration

@@ -46,3 +46,4 @@ testbin/
 
 # goreleaser
 dist/
+.claude/settings.local.json
