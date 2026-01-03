@@ -66,28 +66,30 @@ jobs:
           files: |
             config/crd/bases/*.yaml
 
-      - name: Update chart version
-        run: |
-          # Extract version without 'v' prefix
-          VERSION="${GITHUB_REF_NAME#v}"
-
-          # Update Chart.yaml
-          sed -i "s/^version: .*/version: ${VERSION}/" charts/cloudnative-supabase/Chart.yaml
-          sed -i "s/^appVersion: .*/appVersion: ${VERSION}/" charts/cloudnative-supabase/Chart.yaml
-
-          # Update values.yaml image tag
-          sed -i "s/^  tag: .*/  tag: \"${VERSION}\"/" charts/cloudnative-supabase/values.yaml
-
       - name: Commit and push chart version
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Fetch the latest main branch
+          git fetch origin main
+
+          # Checkout main branch
+          git checkout main
+
+          # Apply version updates on main
+          sed -i "s/^version: .*/version: ${VERSION}/" charts/cloudnative-supabase/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: ${VERSION}/" charts/cloudnative-supabase/Chart.yaml
+          sed -i "s/^  tag: .*/  tag: \"${VERSION}\"/" charts/cloudnative-supabase/values.yaml
+
           git add charts/cloudnative-supabase/Chart.yaml charts/cloudnative-supabase/values.yaml
 
           # Only commit if there are staged changes
           if git diff --cached --quiet; then
             echo "Chart already at correct version, skipping commit"
           else
-            git commit -m "chore(chart): bump to ${GITHUB_REF_NAME#v}"
-            git push origin HEAD:main
+            git commit -m "chore(chart): bump to ${VERSION}"
+            git push origin main
           fi
