@@ -2,8 +2,8 @@ apiVersion: v2
 name: cloudnative-supabase
 description: CloudNative Supabase Operator - Deploy Supabase on Kubernetes with CNPG
 type: application
-version: 0.1.6
-appVersion: 0.1.6
+version: 0.1.7
+appVersion: 0.1.7
 home: https://github.com/GuionAI/cloudnative-supabase
 sources:
   - https://github.com/GuionAI/cloudnative-supabase
