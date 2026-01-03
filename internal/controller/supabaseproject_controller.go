@@ -363,6 +363,14 @@ func (r *SupabaseProjectReconciler) waitForDatabase(ctx context.Context, project
 		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
 	}
 
+	// Update database status
+	project.Status.Database = supabasev1alpha1.DatabaseStatus{
+		Ready:          true,
+		Phase:          cluster.Status.Phase,
+		ReadyInstances: int32(cluster.Status.ReadyInstances),
+		PrimaryHost:    cluster.Status.CurrentPrimary,
+	}
+
 	// Update endpoints
 	project.Status.Endpoints = supabasev1alpha1.EndpointsStatus{
 		Database: fmt.Sprintf("%s:5432", cnpg.ClusterRWServiceName(project)),
@@ -441,6 +449,7 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 		return err
 	}
 
+	project.Status.Services.Auth = supabasev1alpha1.ServiceStatus{Ready: true}
 	r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionTrue, "Ready", "Auth service is running")
 	return nil
 }
@@ -473,6 +482,7 @@ func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *
 		return err
 	}
 
+	project.Status.Services.Rest = supabasev1alpha1.ServiceStatus{Ready: true}
 	r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionTrue, "Ready", "REST service is running")
 	return nil
 }
@@ -505,6 +515,7 @@ func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project
 		return err
 	}
 
+	project.Status.Services.Studio = supabasev1alpha1.ServiceStatus{Ready: true}
 	r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionTrue, "Ready", "Studio service is running")
 	return nil
 }
@@ -536,6 +547,7 @@ func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *
 		return err
 	}
 
+	project.Status.Services.Meta = supabasev1alpha1.ServiceStatus{Ready: true}
 	r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionTrue, "Ready", "Meta service is running")
 	return nil
 }
@@ -581,6 +593,7 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 	// Update API endpoint in status
 	project.Status.Endpoints.API = fmt.Sprintf("%s-kong:8000", project.Name)
 
+	project.Status.Services.Kong = supabasev1alpha1.ServiceStatus{Ready: true}
 	r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionTrue, "Ready", "Kong gateway is running")
 	return nil
 }
