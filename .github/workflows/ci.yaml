@@ -4,13 +4,12 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,12 +32,22 @@ jobs:
       - name: Generate manifests
         run: make generate manifests
 
-      - name: Check for uncommitted changes
+      - name: Sync CRDs to Helm chart
         run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "Generated files are out of date. Run 'make generate manifests' and commit the changes."
-            git status --porcelain
-            exit 1
+          cp config/crd/bases/*.yaml charts/cloudnative-supabase/crds/
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add charts/cloudnative-supabase/crds/
+
+          if git diff --cached --quiet; then
+            echo "Helm chart CRDs already in sync"
+          else
+            git fetch origin main
+            git pull --rebase origin main
+            git commit -m "chore(chart): sync CRDs from generated manifests"
+            git push origin main
           fi
 
   lint:
@@ -54,15 +63,14 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.6
           args: --timeout=5m
 
   docker:
     runs-on: ubuntu-latest
     needs: [build, lint]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout
         uses: actions/checkout@v4

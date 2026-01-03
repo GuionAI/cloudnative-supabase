@@ -784,7 +784,9 @@ func (r *SupabaseProjectReconciler) cleanupBackupResources(ctx context.Context, 
 		return fmt.Errorf("failed to get ObjectStore: %w", err)
 	}
 
-	return nil
+	// Remove stale condition after successful cleanup
+	meta.RemoveStatusCondition(&project.Status.Conditions, supabasev1alpha1.ConditionTypeBackupReady)
+	return r.Status().Update(ctx, project)
 }
 
 // reconcileRecovery handles recovery ObjectStore creation
@@ -842,7 +844,9 @@ func (r *SupabaseProjectReconciler) cleanupRecoveryResources(ctx context.Context
 		return fmt.Errorf("failed to get recovery ObjectStore: %w", err)
 	}
 
-	return nil
+	// Remove stale condition after successful cleanup
+	meta.RemoveStatusCondition(&project.Status.Conditions, supabasev1alpha1.ConditionTypeRecoveryReady)
+	return r.Status().Update(ctx, project)
 }
 
 // failRecovery sets RecoveryReady=False condition and updates status
