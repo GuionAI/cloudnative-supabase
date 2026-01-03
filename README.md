@@ -17,6 +17,8 @@ CloudNative Supabase provides a single `SupabaseProject` Custom Resource that ma
 
 - Single CRD deploys entire Supabase stack
 - All services always enabled (Auth, REST, Studio, Meta, Kong)
+- **Backup to S3-compatible storage** (AWS S3, Cloudflare R2, MinIO, etc.)
+- **Point-in-time recovery (PITR)** from existing backups
 - Auto-generates JWT secrets and database passwords
 - Integrates with CNPG for production-grade PostgreSQL
 - Owner references for automatic cleanup
@@ -26,6 +28,7 @@ CloudNative Supabase provides a single `SupabaseProject` Custom Resource that ma
 
 - Kubernetes v1.11.3+
 - [CloudNativePG operator](https://cloudnative-pg.io/documentation/current/installation_upgrade/) installed
+- [CNPG Barman Cloud Plugin](https://github.com/cloudnative-pg/plugin-barman-cloud) (for backup/recovery features)
 - kubectl v1.11.3+
 - (Optional) [Reloader](https://github.com/stakater/Reloader) - for automatic pod restarts on secret/configmap changes
 
@@ -80,11 +83,20 @@ metadata:
   namespace: my-namespace
 spec:
   database:
-    instances: 1
+    instances: 2
     storage:
       size: 10Gi
       storageClass: local-path
     enableSuperuserAccess: false
+    backup:
+      enabled: true
+      schedule: "0 2 * * *"  # 2 AM daily
+      retentionPolicy: "30d"
+      destinationPath: s3://my-bucket/backups/my-project/
+      endpointURL: https://s3.us-east-1.amazonaws.com
+      s3CredentialsSecret: my-s3-credentials
+      walCompression: gzip
+      dataCompression: gzip
 
   auth:
     siteURL: https://app.example.com
@@ -110,6 +122,34 @@ spec:
   # meta and kong use defaults
 ```
 
+### Recovery Example
+
+To restore from a backup to a point in time:
+
+```yaml
+apiVersion: supabase.guion.dev/v1alpha1
+kind: SupabaseProject
+metadata:
+  name: my-project-restored
+  namespace: my-namespace
+spec:
+  database:
+    instances: 1
+    storage:
+      size: 10Gi
+    recovery:
+      enabled: true
+      serverName: my-project  # Original cluster name
+      targetTime: "2026-01-01T12:00:00Z"
+      destinationPath: s3://my-bucket/backups/my-project/
+      endpointURL: https://s3.us-east-1.amazonaws.com
+      s3CredentialsSecret: my-s3-credentials
+
+  auth:
+    siteURL: https://app.example.com
+    externalURL: https://auth.example.com
+```
+
 ### Check Status
 
 ```bash
@@ -121,6 +161,8 @@ Status conditions:
 - `Ready` - Overall readiness
 - `SecretsReady` - JWT and database secrets generated
 - `DatabaseReady` - CNPG cluster is ready
+- `BackupReady` - Backup infrastructure configured
+- `RecoveryReady` - Recovery infrastructure configured
 - `AuthReady` - GoTrue is running
 - `RestReady` - PostgREST is running
 - `StudioReady` - Studio is running
@@ -138,6 +180,32 @@ Status conditions:
 | `storage.storageClass` | Storage class | Cluster default |
 | `image` | PostgreSQL image | `ghcr.io/guionai/postgres-pgjwt:17.6` |
 | `enableSuperuserAccess` | Enable superuser access | false |
+
+### Backup
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `backup.enabled` | Enable scheduled backups | false |
+| `backup.schedule` | Cron schedule for backups | `0 0 * * *` |
+| `backup.retentionPolicy` | Backup retention policy | `30d` |
+| `backup.destinationPath` | S3 path (e.g., `s3://bucket/path/`) | Required |
+| `backup.endpointURL` | S3 endpoint URL | - |
+| `backup.s3CredentialsSecret` | Secret with ACCESS_KEY_ID and SECRET_ACCESS_KEY | Required |
+| `backup.walCompression` | WAL compression (gzip, bzip2, snappy, none) | - |
+| `backup.dataCompression` | Data compression (gzip, bzip2, snappy, none) | - |
+
+### Recovery (PITR)
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `recovery.enabled` | Enable point-in-time recovery | false |
+| `recovery.serverName` | Original cluster name in backup | Required |
+| `recovery.targetTime` | Recovery target time (RFC 3339) | Latest |
+| `recovery.destinationPath` | S3 path to backup source | Required |
+| `recovery.endpointURL` | S3 endpoint URL | - |
+| `recovery.s3CredentialsSecret` | Secret with S3 credentials | Required |
+
+**Note**: Backup and recovery cannot both be enabled simultaneously.
 
 ### Auth (GoTrue)
 

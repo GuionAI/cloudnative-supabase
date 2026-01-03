@@ -33,11 +33,25 @@ rules:
       - patch
       - update
       - watch
-  # CNPG Clusters
+  # CNPG Clusters and ScheduledBackups
   - apiGroups:
       - postgresql.cnpg.io
     resources:
       - clusters
+      - scheduledbackups
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Barman Cloud ObjectStores
+  - apiGroups:
+      - barmancloud.cnpg.io
+    resources:
+      - objectstores
     verbs:
       - create
       - delete

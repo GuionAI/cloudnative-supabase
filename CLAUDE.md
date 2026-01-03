@@ -7,6 +7,8 @@ This file provides guidance to Claude Code when working with code in this reposi
 CloudNative Supabase is a Kubernetes operator that deploys Supabase using CloudNativePG (CNPG) as the PostgreSQL backend. It creates a single `SupabaseProject` CRD that manages:
 
 - CNPG PostgreSQL cluster with managed roles
+- Backup to S3-compatible storage (via barman-cloud plugin)
+- Point-in-time recovery (PITR) from existing backups
 - GoTrue (Auth service) - always enabled
 - PostgREST (REST API) - always enabled
 - Studio (Dashboard) - always enabled
@@ -26,7 +28,10 @@ cloudnative-supabase/
 │   ├── controller/                  # Reconciliation controller
 │   │   └── supabaseproject_controller.go
 │   └── resources/                   # Kubernetes resource builders
-│       ├── cnpg/cluster.go          # CNPG Cluster builder
+│       ├── cnpg/
+│       │   ├── cluster.go           # CNPG Cluster builder
+│       │   ├── objectstore.go       # ObjectStore builder (backup/recovery)
+│       │   └── scheduled_backup.go  # ScheduledBackup builder
 │       ├── configmaps/              # ConfigMap builders (init SQL, Kong config)
 │       ├── deployments/             # Deployment builders (auth, rest, studio, meta, kong)
 │       ├── secrets/secrets.go       # Secret generation
@@ -75,9 +80,10 @@ The controller uses a phased approach:
 
 1. **Secrets Phase** - Generate JWT secret + DB role passwords (or sync from existing)
 2. **InitSQL Phase** - Create ConfigMap with database initialization SQL
-3. **CNPG Cluster Phase** - Create CNPG Cluster with managed roles
-4. **Wait Database Phase** - Wait for CNPG to report ready instances
-5. **Services Phase** - Deploy Auth, REST, Studio, Meta, Kong
+3. **Backup Infrastructure Phase** - Create ObjectStore and ScheduledBackup (if backup enabled)
+4. **CNPG Cluster Phase** - Create CNPG Cluster with managed roles (with recovery bootstrap if enabled)
+5. **Wait Database Phase** - Wait for CNPG to report ready instances
+6. **Services Phase** - Deploy Auth, REST, Studio, Meta, Kong
 
 ### Secret Management
 
@@ -139,4 +145,20 @@ The GitHub Actions release workflow (`.github/workflows/release.yaml`) will auto
 ## Dependencies
 
 - CloudNativePG (CNPG) operator must be installed in the cluster
+- [CNPG Barman Cloud Plugin](https://github.com/cloudnative-pg/plugin-barman-cloud) for backup/recovery features
 - Requires Kubernetes 1.11.3+
+
+## Status Conditions
+
+| Condition | Description |
+|-----------|-------------|
+| `Ready` | Overall readiness |
+| `SecretsReady` | JWT and database secrets generated |
+| `DatabaseReady` | CNPG cluster is ready |
+| `BackupReady` | Backup infrastructure configured (ObjectStore + ScheduledBackup) |
+| `RecoveryReady` | Recovery infrastructure configured |
+| `AuthReady` | GoTrue is running |
+| `RestReady` | PostgREST is running |
+| `StudioReady` | Studio is running |
+| `MetaReady` | postgres-meta is running |
+| `KongReady` | Kong gateway is running |
