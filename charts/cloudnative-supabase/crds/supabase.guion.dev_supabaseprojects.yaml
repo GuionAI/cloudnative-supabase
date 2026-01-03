@@ -345,8 +345,7 @@ spec:
                     properties:
                       dataCompression:
                         default: gzip
-                        description: DataCompression algorithm for base backups (gzip,
-                          bzip2, snappy, none)
+                        description: DataCompression algorithm for base backups
                         enum:
                         - gzip
                         - bzip2
@@ -354,25 +353,25 @@ spec:
                         - none
                         type: string
                       destinationPath:
-                        description: |-
-                          DestinationPath is the S3/R2 bucket path (s3://bucket/path/)
-                          Required when backup is enabled
+                        description: DestinationPath is the S3/R2 bucket path (e.g.,
+                          s3://bucket-name/path/to/backups)
+                        pattern: ^s3://[a-z0-9][a-z0-9.\-]*[a-z0-9](/.*)?$
                         type: string
                       enabled:
                         default: false
                         description: Enabled enables scheduled backups
                         type: boolean
                       endpointURL:
-                        description: EndpointURL for S3-compatible storage
+                        description: EndpointURL for S3-compatible storage (e.g.,
+                          https://account.r2.cloudflarestorage.com)
                         type: string
                       retentionPolicy:
                         default: 30d
                         description: RetentionPolicy defines how long to keep backups
                         type: string
                       s3CredentialsSecret:
-                        description: |-
-                          S3CredentialsSecret references a secret with ACCESS_KEY_ID and SECRET_ACCESS_KEY
-                          Required when backup is enabled
+                        description: S3CredentialsSecret references a secret with
+                          ACCESS_KEY_ID and SECRET_ACCESS_KEY
                         type: string
                       schedule:
                         default: 0 0 2 * * *
@@ -380,8 +379,7 @@ spec:
                         type: string
                       walCompression:
                         default: gzip
-                        description: WalCompression algorithm for WAL archiving (gzip,
-                          bzip2, snappy, none)
+                        description: WalCompression algorithm for WAL archiving
                         enum:
                         - gzip
                         - bzip2
@@ -421,9 +419,9 @@ spec:
                       from backups
                     properties:
                       destinationPath:
-                        description: |-
-                          DestinationPath of the backup source (s3://bucket/path/)
-                          Required when recovery is enabled
+                        description: DestinationPath is the S3/R2 bucket path (e.g.,
+                          s3://bucket-name/path/to/backups)
+                        pattern: ^s3://[a-z0-9][a-z0-9.\-]*[a-z0-9](/.*)?$
                         type: string
                       enabled:
                         default: false
@@ -431,12 +429,12 @@ spec:
                           mode
                         type: boolean
                       endpointURL:
-                        description: EndpointURL for S3-compatible storage
+                        description: EndpointURL for S3-compatible storage (e.g.,
+                          https://account.r2.cloudflarestorage.com)
                         type: string
                       s3CredentialsSecret:
-                        description: |-
-                          S3CredentialsSecret references a secret with ACCESS_KEY_ID and SECRET_ACCESS_KEY
-                          Required when recovery is enabled
+                        description: S3CredentialsSecret references a secret with
+                          ACCESS_KEY_ID and SECRET_ACCESS_KEY
                         type: string
                       serverName:
                         description: |-
@@ -445,8 +443,10 @@ spec:
                         type: string
                       targetTime:
                         description: |-
-                          TargetTime for point-in-time recovery (RFC 3339 format)
+                          TargetTime for point-in-time recovery in RFC 3339 format
+                          Examples: "2024-01-15T10:30:00Z", "2024-01-15T10:30:00+08:00"
                           If empty, recovers to the latest available point
+                        pattern: ^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$
                         type: string
                     required:
                     - enabled
