@@ -700,94 +700,84 @@ func (r *SupabaseProjectReconciler) createOrUpdateService(ctx context.Context, p
 
 // reconcileBackupInfrastructure ensures ObjectStore and ScheduledBackup resources exist
 func (r *SupabaseProjectReconciler) reconcileBackupInfrastructure(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	if err := r.reconcileBackup(ctx, project); err != nil {
+		return err
+	}
+	return r.reconcileRecovery(ctx, project)
+}
+
+// reconcileBackup handles backup ObjectStore and ScheduledBackup creation
+func (r *SupabaseProjectReconciler) reconcileBackup(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	// Guard: skip if backup not enabled
+	if project.Spec.Database.Backup == nil || !project.Spec.Database.Backup.Enabled {
+		return nil
+	}
+
 	log := logf.FromContext(ctx)
+	log.Info("Reconciling backup infrastructure")
 
-	// Reconcile backup ObjectStore and ScheduledBackup if backup is enabled
-	if project.Spec.Database.Backup != nil && project.Spec.Database.Backup.Enabled {
-		log.Info("Reconciling backup infrastructure")
-
-		// Build and create/update ObjectStore
-		objectStore := cnpg.BuildObjectStore(project)
-		if objectStore == nil {
-			// This should never happen when backup is enabled - indicates a bug in the builder
-			err := fmt.Errorf("BuildObjectStore returned nil when backup is enabled")
-			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "BuilderError", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-				return statusErr
-			}
-			return err
-		}
-
-		if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
-			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "OwnerRefError", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-				return statusErr
-			}
-			return fmt.Errorf("failed to set owner reference on ObjectStore: %w", err)
-		}
-
-		if err := r.createOrUpdateObjectStore(ctx, objectStore); err != nil {
-			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "ObjectStoreFailed", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-				return statusErr
-			}
-			return err
-		}
-
-		// Build and create/update ScheduledBackup
-		scheduledBackup := cnpg.BuildScheduledBackup(project)
-		if scheduledBackup == nil {
-			// This should never happen when backup is enabled - indicates a bug in the builder
-			err := fmt.Errorf("BuildScheduledBackup returned nil when backup is enabled")
-			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "BuilderError", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-				return statusErr
-			}
-			return err
-		}
-
-		if err := controllerutil.SetControllerReference(project, scheduledBackup, r.Scheme); err != nil {
-			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "OwnerRefError", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-				return statusErr
-			}
-			return fmt.Errorf("failed to set owner reference on ScheduledBackup: %w", err)
-		}
-
-		if err := r.createOrUpdateScheduledBackup(ctx, scheduledBackup); err != nil {
-			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "ScheduledBackupFailed", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-				return statusErr
-			}
-			return err
-		}
-
-		r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionTrue, "BackupConfigured", "Backup infrastructure is ready")
-		if err := r.Status().Update(ctx, project); err != nil {
-			return err
-		}
+	// Build ObjectStore
+	objectStore := cnpg.BuildObjectStore(project)
+	if objectStore == nil {
+		return r.failBackup(ctx, project, "BuilderError", fmt.Errorf("BuildObjectStore returned nil when backup is enabled"))
 	}
 
-	// Reconcile recovery ObjectStore if recovery is enabled
-	if project.Spec.Database.Recovery != nil && project.Spec.Database.Recovery.Enabled {
-		log.Info("Reconciling recovery infrastructure")
-
-		objectStore := cnpg.BuildRecoveryObjectStore(project)
-		if objectStore == nil {
-			// This should never happen when recovery is enabled - indicates a bug in the builder
-			return fmt.Errorf("BuildRecoveryObjectStore returned nil when recovery is enabled")
-		}
-
-		if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
-			return fmt.Errorf("failed to set owner reference on recovery ObjectStore: %w", err)
-		}
-
-		if err := r.createOrUpdateObjectStore(ctx, objectStore); err != nil {
-			return fmt.Errorf("failed to reconcile recovery ObjectStore: %w", err)
-		}
+	if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
+		return r.failBackup(ctx, project, "OwnerRefError", fmt.Errorf("failed to set owner reference on ObjectStore: %w", err))
 	}
 
-	return nil
+	if err := r.createOrUpdateObjectStore(ctx, objectStore); err != nil {
+		return r.failBackup(ctx, project, "ObjectStoreFailed", err)
+	}
+
+	// Build ScheduledBackup
+	scheduledBackup := cnpg.BuildScheduledBackup(project)
+	if scheduledBackup == nil {
+		return r.failBackup(ctx, project, "BuilderError", fmt.Errorf("BuildScheduledBackup returned nil when backup is enabled"))
+	}
+
+	if err := controllerutil.SetControllerReference(project, scheduledBackup, r.Scheme); err != nil {
+		return r.failBackup(ctx, project, "OwnerRefError", fmt.Errorf("failed to set owner reference on ScheduledBackup: %w", err))
+	}
+
+	if err := r.createOrUpdateScheduledBackup(ctx, scheduledBackup); err != nil {
+		return r.failBackup(ctx, project, "ScheduledBackupFailed", err)
+	}
+
+	// Success
+	r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionTrue, "BackupConfigured", "Backup infrastructure is ready")
+	return r.Status().Update(ctx, project)
+}
+
+// reconcileRecovery handles recovery ObjectStore creation
+func (r *SupabaseProjectReconciler) reconcileRecovery(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	// Guard: skip if recovery not enabled
+	if project.Spec.Database.Recovery == nil || !project.Spec.Database.Recovery.Enabled {
+		return nil
+	}
+
+	log := logf.FromContext(ctx)
+	log.Info("Reconciling recovery infrastructure")
+
+	objectStore := cnpg.BuildRecoveryObjectStore(project)
+	if objectStore == nil {
+		return fmt.Errorf("BuildRecoveryObjectStore returned nil when recovery is enabled")
+	}
+
+	if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set owner reference on recovery ObjectStore: %w", err)
+	}
+
+	return r.createOrUpdateObjectStore(ctx, objectStore)
+}
+
+// failBackup sets BackupReady=False condition and updates status
+func (r *SupabaseProjectReconciler) failBackup(ctx context.Context, project *supabasev1alpha1.SupabaseProject, reason string, err error) error {
+	r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, reason, err.Error())
+	if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		return statusErr
+	}
+	return err
 }
 
 // createOrUpdateObjectStore creates or updates an ObjectStore resource
