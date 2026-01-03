@@ -26,11 +26,6 @@ import (
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
 )
 
-// KongConfigMapName returns the kong config map name
-func KongConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
-	return project.Name + "-kong-config"
-}
-
 // BuildKongConfigMap creates the Kong declarative configuration ConfigMap
 func BuildKongConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.ConfigMap {
 	// Build service names
@@ -193,7 +188,7 @@ services:
 
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      KongConfigMapName(project),
+			Name:      common.KongConfigMapName(project),
 			Namespace: project.Namespace,
 			Labels:    common.ComponentLabels(project, "kong"),
 		},

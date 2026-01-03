@@ -22,7 +22,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
@@ -55,10 +54,7 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		imageTag = spec.ImageTag
 	}
 
-	replicas := spec.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := NormalizeReplicas(spec.Replicas)
 
 	env := []corev1.EnvVar{
 		// Database configuration
@@ -97,12 +93,10 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: project.Namespace,
-			Labels:    common.ComponentLabels(project, MetaComponentName),
-			Annotations: map[string]string{
-				"reloader.stakater.com/auto": "true",
-			},
+			Name:        name,
+			Namespace:   project.Namespace,
+			Labels:      common.ComponentLabels(project, MetaComponentName),
+			Annotations: common.ReloaderAnnotations(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
@@ -111,10 +105,8 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: common.ComponentLabels(project, MetaComponentName),
-					Annotations: map[string]string{
-						"reloader.stakater.com/auto": "true",
-					},
+					Labels:      common.ComponentLabels(project, MetaComponentName),
+					Annotations: common.ReloaderAnnotations(),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -130,31 +122,9 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							LivenessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/health",
-										Port: intstr.FromInt(MetaPort),
-									},
-								},
-								InitialDelaySeconds: 10,
-								PeriodSeconds:       10,
-								TimeoutSeconds:      5,
-								FailureThreshold:    3,
-							},
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/health",
-										Port: intstr.FromInt(MetaPort),
-									},
-								},
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       5,
-								TimeoutSeconds:      3,
-								FailureThreshold:    3,
-							},
-							Resources: spec.Resources,
+							LivenessProbe:  BuildLivenessProbe("/health", MetaPort),
+							ReadinessProbe: BuildReadinessProbe("/health", MetaPort),
+							Resources:      spec.Resources,
 						},
 					},
 				},
@@ -162,10 +132,7 @@ func BuildMetaDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		},
 	}
 
-	// Add image pull secrets if specified
-	if len(project.Spec.ImagePullSecrets) > 0 {
-		deployment.Spec.Template.Spec.ImagePullSecrets = project.Spec.ImagePullSecrets
-	}
+	AddImagePullSecrets(&deployment.Spec.Template.Spec, project)
 
 	return deployment
 }

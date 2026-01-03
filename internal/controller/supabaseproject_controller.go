@@ -47,6 +47,16 @@ const (
 	RequeueDelay = 10 * time.Second
 )
 
+// serviceReconcileConfig holds configuration for reconciling a service component
+type serviceReconcileConfig struct {
+	name            string
+	conditionType   string
+	buildDeployment func() *appsv1.Deployment
+	buildService    func() *corev1.Service
+	setStatus       func(ready bool)
+	logFields       []any
+}
+
 // SupabaseProjectReconciler reconciles a SupabaseProject object
 type SupabaseProjectReconciler struct {
 	client.Client
@@ -419,20 +429,16 @@ func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, proje
 	return nil
 }
 
-// reconcileAuth deploys the Auth service
-func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
+// reconcileServiceComponent is a generic helper for reconciling a service component (deployment + service)
+func (r *SupabaseProjectReconciler) reconcileServiceComponent(ctx context.Context, project *supabasev1alpha1.SupabaseProject, config serviceReconcileConfig) error {
 	log := logf.FromContext(ctx)
-	log.Info("Reconciling Auth service")
+	log.Info(fmt.Sprintf("Reconciling %s service", config.name))
 
 	// Create deployment
-	deployment := deployments.BuildAuthDeployment(project, secretNames)
-	log.V(1).Info("Built Auth deployment",
-		"image", fmt.Sprintf("%s:%s", "supabase/gotrue", project.Spec.Auth.ImageTag),
-		"replicas", project.Spec.Auth.Replicas,
-		"hasProviders", project.Spec.Auth.Providers != nil,
-		"hasEmailHook", project.Spec.Auth.EmailHook != nil && project.Spec.Auth.EmailHook.Enabled)
+	deployment := config.buildDeployment()
+	log.V(1).Info(fmt.Sprintf("Built %s deployment", config.name), config.logFields...)
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
+		r.setCondition(project, config.conditionType, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
 			return statusErr
 		}
@@ -440,116 +446,103 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 	}
 
 	// Create service
-	service := services.BuildAuthService(project)
+	service := config.buildService()
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
+		r.setCondition(project, config.conditionType, metav1.ConditionFalse, "ServiceFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
 			return statusErr
 		}
 		return err
 	}
 
-	project.Status.Services.Auth = supabasev1alpha1.ServiceStatus{Ready: true}
-	r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionTrue, "Ready", "Auth service is running")
+	config.setStatus(true)
+	r.setCondition(project, config.conditionType, metav1.ConditionTrue, "Ready", fmt.Sprintf("%s service is running", config.name))
 	return nil
+}
+
+// reconcileAuth deploys the Auth service
+func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
+	return r.reconcileServiceComponent(ctx, project, serviceReconcileConfig{
+		name:          "Auth",
+		conditionType: supabasev1alpha1.ConditionTypeAuthReady,
+		buildDeployment: func() *appsv1.Deployment {
+			return deployments.BuildAuthDeployment(project, secretNames)
+		},
+		buildService: func() *corev1.Service {
+			return services.BuildAuthService(project)
+		},
+		setStatus: func(ready bool) {
+			project.Status.Services.Auth = supabasev1alpha1.ServiceStatus{Ready: ready}
+		},
+		logFields: []any{
+			"image", fmt.Sprintf("%s:%s", "supabase/gotrue", project.Spec.Auth.ImageTag),
+			"replicas", project.Spec.Auth.Replicas,
+			"hasProviders", project.Spec.Auth.Providers != nil,
+			"hasEmailHook", project.Spec.Auth.EmailHook != nil && project.Spec.Auth.EmailHook.Enabled,
+		},
+	})
 }
 
 // reconcileRest deploys the REST service
 func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
-	log := logf.FromContext(ctx)
-	log.Info("Reconciling REST service")
-
-	// Create deployment
-	deployment := deployments.BuildRestDeployment(project, secretNames)
-	log.V(1).Info("Built REST deployment",
-		"image", fmt.Sprintf("%s:%s", "postgrest/postgrest", project.Spec.Rest.ImageTag),
-		"schemas", project.Spec.Rest.Schemas)
-	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return statusErr
-		}
-		return err
-	}
-
-	// Create service
-	service := services.BuildRestService(project)
-	if err := r.createOrUpdateService(ctx, project, service); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return statusErr
-		}
-		return err
-	}
-
-	project.Status.Services.Rest = supabasev1alpha1.ServiceStatus{Ready: true}
-	r.setCondition(project, supabasev1alpha1.ConditionTypeRestReady, metav1.ConditionTrue, "Ready", "REST service is running")
-	return nil
+	return r.reconcileServiceComponent(ctx, project, serviceReconcileConfig{
+		name:          "REST",
+		conditionType: supabasev1alpha1.ConditionTypeRestReady,
+		buildDeployment: func() *appsv1.Deployment {
+			return deployments.BuildRestDeployment(project, secretNames)
+		},
+		buildService: func() *corev1.Service {
+			return services.BuildRestService(project)
+		},
+		setStatus: func(ready bool) {
+			project.Status.Services.Rest = supabasev1alpha1.ServiceStatus{Ready: ready}
+		},
+		logFields: []any{
+			"image", fmt.Sprintf("%s:%s", "postgrest/postgrest", project.Spec.Rest.ImageTag),
+			"schemas", project.Spec.Rest.Schemas,
+		},
+	})
 }
 
 // reconcileStudio deploys the Studio service
 func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
-	log := logf.FromContext(ctx)
-	log.Info("Reconciling Studio service")
-
-	// Create deployment
-	deployment := deployments.BuildStudioDeployment(project, secretNames)
-	log.V(1).Info("Built Studio deployment",
-		"image", fmt.Sprintf("%s:%s", "supabase/studio", project.Spec.Studio.ImageTag),
-		"publicURL", project.Spec.Studio.PublicURL)
-	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return statusErr
-		}
-		return err
-	}
-
-	// Create service
-	service := services.BuildStudioService(project)
-	if err := r.createOrUpdateService(ctx, project, service); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return statusErr
-		}
-		return err
-	}
-
-	project.Status.Services.Studio = supabasev1alpha1.ServiceStatus{Ready: true}
-	r.setCondition(project, supabasev1alpha1.ConditionTypeStudioReady, metav1.ConditionTrue, "Ready", "Studio service is running")
-	return nil
+	return r.reconcileServiceComponent(ctx, project, serviceReconcileConfig{
+		name:          "Studio",
+		conditionType: supabasev1alpha1.ConditionTypeStudioReady,
+		buildDeployment: func() *appsv1.Deployment {
+			return deployments.BuildStudioDeployment(project, secretNames)
+		},
+		buildService: func() *corev1.Service {
+			return services.BuildStudioService(project)
+		},
+		setStatus: func(ready bool) {
+			project.Status.Services.Studio = supabasev1alpha1.ServiceStatus{Ready: ready}
+		},
+		logFields: []any{
+			"image", fmt.Sprintf("%s:%s", "supabase/studio", project.Spec.Studio.ImageTag),
+			"publicURL", project.Spec.Studio.PublicURL,
+		},
+	})
 }
 
 // reconcileMeta deploys the Meta service
 func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
-	log := logf.FromContext(ctx)
-	log.Info("Reconciling Meta service")
-
-	// Create deployment
-	deployment := deployments.BuildMetaDeployment(project, secretNames)
-	log.V(1).Info("Built Meta deployment",
-		"image", fmt.Sprintf("%s:%s", "supabase/postgres-meta", project.Spec.Meta.ImageTag))
-	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return statusErr
-		}
-		return err
-	}
-
-	// Create service
-	service := services.BuildMetaService(project)
-	if err := r.createOrUpdateService(ctx, project, service); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return statusErr
-		}
-		return err
-	}
-
-	project.Status.Services.Meta = supabasev1alpha1.ServiceStatus{Ready: true}
-	r.setCondition(project, supabasev1alpha1.ConditionTypeMetaReady, metav1.ConditionTrue, "Ready", "Meta service is running")
-	return nil
+	return r.reconcileServiceComponent(ctx, project, serviceReconcileConfig{
+		name:          "Meta",
+		conditionType: supabasev1alpha1.ConditionTypeMetaReady,
+		buildDeployment: func() *appsv1.Deployment {
+			return deployments.BuildMetaDeployment(project, secretNames)
+		},
+		buildService: func() *corev1.Service {
+			return services.BuildMetaService(project)
+		},
+		setStatus: func(ready bool) {
+			project.Status.Services.Meta = supabasev1alpha1.ServiceStatus{Ready: ready}
+		},
+		logFields: []any{
+			"image", fmt.Sprintf("%s:%s", "supabase/postgres-meta", project.Spec.Meta.ImageTag),
+		},
+	})
 }
 
 // reconcileKong deploys the Kong API gateway
