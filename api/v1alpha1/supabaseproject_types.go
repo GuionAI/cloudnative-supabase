@@ -86,6 +86,9 @@ const (
 
 	// ConditionTypeBackupReady indicates backup infrastructure is ready
 	ConditionTypeBackupReady = "BackupReady"
+
+	// ConditionTypeRecoveryReady indicates recovery infrastructure is ready
+	ConditionTypeRecoveryReady = "RecoveryReady"
 )
 
 // SupabaseProjectSpec defines the desired state of SupabaseProject

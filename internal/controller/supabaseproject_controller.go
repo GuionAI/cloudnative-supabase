@@ -716,6 +716,13 @@ func (r *SupabaseProjectReconciler) reconcileBackup(ctx context.Context, project
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling backup infrastructure")
 
+	backup := project.Spec.Database.Backup
+
+	// Validate S3 credentials secret exists
+	if err := r.validateS3Secret(ctx, project.Namespace, backup.S3CredentialsSecret); err != nil {
+		return r.failBackup(ctx, project, "SecretError", err)
+	}
+
 	// Build ObjectStore
 	objectStore := cnpg.BuildObjectStore(project)
 	if objectStore == nil {
@@ -759,16 +766,59 @@ func (r *SupabaseProjectReconciler) reconcileRecovery(ctx context.Context, proje
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling recovery infrastructure")
 
+	recovery := project.Spec.Database.Recovery
+
+	// Validate S3 credentials secret exists
+	if err := r.validateS3Secret(ctx, project.Namespace, recovery.S3CredentialsSecret); err != nil {
+		return r.failRecovery(ctx, project, "SecretError", err)
+	}
+
 	objectStore := cnpg.BuildRecoveryObjectStore(project)
 	if objectStore == nil {
-		return fmt.Errorf("BuildRecoveryObjectStore returned nil when recovery is enabled")
+		return r.failRecovery(ctx, project, "BuilderError", fmt.Errorf("BuildRecoveryObjectStore returned nil when recovery is enabled"))
 	}
 
 	if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
-		return fmt.Errorf("failed to set owner reference on recovery ObjectStore: %w", err)
+		return r.failRecovery(ctx, project, "OwnerRefError", fmt.Errorf("failed to set owner reference on recovery ObjectStore: %w", err))
 	}
 
-	return r.createOrUpdateObjectStore(ctx, objectStore)
+	if err := r.createOrUpdateObjectStore(ctx, objectStore); err != nil {
+		return r.failRecovery(ctx, project, "ObjectStoreFailed", err)
+	}
+
+	// Success
+	r.setCondition(project, supabasev1alpha1.ConditionTypeRecoveryReady, metav1.ConditionTrue, "RecoveryConfigured", "Recovery infrastructure is ready")
+	return r.Status().Update(ctx, project)
+}
+
+// failRecovery sets RecoveryReady=False condition and updates status
+func (r *SupabaseProjectReconciler) failRecovery(ctx context.Context, project *supabasev1alpha1.SupabaseProject, reason string, err error) error {
+	r.setCondition(project, supabasev1alpha1.ConditionTypeRecoveryReady, metav1.ConditionFalse, reason, err.Error())
+	if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		return statusErr
+	}
+	return err
+}
+
+// validateS3Secret validates that the S3 credentials secret exists and has required keys
+func (r *SupabaseProjectReconciler) validateS3Secret(ctx context.Context, namespace, secretName string) error {
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("S3 credentials secret %s not found", secretName)
+		}
+		return fmt.Errorf("failed to get S3 credentials secret %s: %w", secretName, err)
+	}
+
+	// Validate required keys exist
+	requiredKeys := []string{cnpg.DefaultAccessKeyIDKey, cnpg.DefaultSecretAccessKeyKey}
+	for _, key := range requiredKeys {
+		if _, ok := secret.Data[key]; !ok {
+			return fmt.Errorf("S3 credentials secret %s missing required key: %s", secretName, key)
+		}
+	}
+
+	return nil
 }
 
 // failBackup sets BackupReady=False condition and updates status
