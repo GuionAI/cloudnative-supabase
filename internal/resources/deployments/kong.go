@@ -22,7 +22,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
@@ -48,11 +47,6 @@ func KongDeploymentName(project *supabasev1alpha1.SupabaseProject) string {
 	return project.Name + "-kong"
 }
 
-// KongConfigMapName returns the kong config map name
-func KongConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
-	return project.Name + "-kong-config"
-}
-
 // BuildKongDeployment creates the Kong API gateway deployment
 func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) *appsv1.Deployment {
 	spec := &project.Spec.Kong
@@ -64,10 +58,7 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		imageTag = spec.ImageTag
 	}
 
-	replicas := spec.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := NormalizeReplicas(spec.Replicas)
 
 	env := []corev1.EnvVar{
 		// Kong configuration
@@ -115,12 +106,10 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: project.Namespace,
-			Labels:    common.ComponentLabels(project, KongComponentName),
-			Annotations: map[string]string{
-				"reloader.stakater.com/auto": "true",
-			},
+			Name:        name,
+			Namespace:   project.Namespace,
+			Labels:      common.ComponentLabels(project, KongComponentName),
+			Annotations: common.ReloaderAnnotations(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
@@ -129,10 +118,8 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: common.ComponentLabels(project, KongComponentName),
-					Annotations: map[string]string{
-						"reloader.stakater.com/auto": "true",
-					},
+					Labels:      common.ComponentLabels(project, KongComponentName),
+					Annotations: common.ReloaderAnnotations(),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -158,31 +145,15 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							LivenessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/status",
-										Port: intstr.FromInt(KongAdminPort),
-									},
-								},
+							LivenessProbe: BuildHTTPProbe(ProbeConfig{
+								Path:                "/status",
+								Port:                KongAdminPort,
 								InitialDelaySeconds: 15,
 								PeriodSeconds:       10,
 								TimeoutSeconds:      5,
-								FailureThreshold:    3,
-							},
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/status",
-										Port: intstr.FromInt(KongAdminPort),
-									},
-								},
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       5,
-								TimeoutSeconds:      3,
-								FailureThreshold:    3,
-							},
-							Resources: spec.Resources,
+							}),
+							ReadinessProbe: BuildReadinessProbe("/status", KongAdminPort),
+							Resources:      spec.Resources,
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "kong-config",
@@ -198,7 +169,7 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 							VolumeSource: corev1.VolumeSource{
 								ConfigMap: &corev1.ConfigMapVolumeSource{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: KongConfigMapName(project),
+										Name: common.KongConfigMapName(project),
 									},
 								},
 							},
@@ -209,10 +180,7 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		},
 	}
 
-	// Add image pull secrets if specified
-	if len(project.Spec.ImagePullSecrets) > 0 {
-		deployment.Spec.Template.Spec.ImagePullSecrets = project.Spec.ImagePullSecrets
-	}
+	AddImagePullSecrets(&deployment.Spec.Template.Spec, project)
 
 	return deployment
 }

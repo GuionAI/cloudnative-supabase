@@ -22,7 +22,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
@@ -75,19 +74,14 @@ func BuildAuthDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		})
 	}
 
-	replicas := spec.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := NormalizeReplicas(spec.Replicas)
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: project.Namespace,
-			Labels:    common.ComponentLabels(project, AuthComponentName),
-			Annotations: map[string]string{
-				"reloader.stakater.com/auto": "true",
-			},
+			Name:        name,
+			Namespace:   project.Namespace,
+			Labels:      common.ComponentLabels(project, AuthComponentName),
+			Annotations: common.ReloaderAnnotations(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
@@ -96,10 +90,8 @@ func BuildAuthDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: common.ComponentLabels(project, AuthComponentName),
-					Annotations: map[string]string{
-						"reloader.stakater.com/auto": "true",
-					},
+					Labels:      common.ComponentLabels(project, AuthComponentName),
+					Annotations: common.ReloaderAnnotations(),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -116,31 +108,9 @@ func BuildAuthDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							LivenessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/health",
-										Port: intstr.FromInt(AuthPort),
-									},
-								},
-								InitialDelaySeconds: 10,
-								PeriodSeconds:       10,
-								TimeoutSeconds:      5,
-								FailureThreshold:    3,
-							},
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/health",
-										Port: intstr.FromInt(AuthPort),
-									},
-								},
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       5,
-								TimeoutSeconds:      3,
-								FailureThreshold:    3,
-							},
-							Resources: spec.Resources,
+							LivenessProbe:  BuildLivenessProbe("/health", AuthPort),
+							ReadinessProbe: BuildReadinessProbe("/health", AuthPort),
+							Resources:      spec.Resources,
 						},
 					},
 				},
@@ -148,10 +118,7 @@ func BuildAuthDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		},
 	}
 
-	// Add image pull secrets if specified
-	if len(project.Spec.ImagePullSecrets) > 0 {
-		deployment.Spec.Template.Spec.ImagePullSecrets = project.Spec.ImagePullSecrets
-	}
+	AddImagePullSecrets(&deployment.Spec.Template.Spec, project)
 
 	return deployment
 }
@@ -160,37 +127,31 @@ func BuildAuthDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, dbHost string) []corev1.EnvVar {
 	spec := project.Spec.Auth
 
-	env := []corev1.EnvVar{
-		// Database configuration
-		{Name: "DB_HOST", Value: dbHost},
-		{Name: "DB_PORT", Value: "5432"},
-		{Name: "DB_DRIVER", Value: "postgres"},
-		{Name: "DB_SSL", Value: "disable"},
-		{Name: "DB_NAME", Value: common.DatabaseName},
-
+	env := BuildDatabaseEnv(dbHost)
+	env = append(env,
 		// API configuration
-		{Name: "GOTRUE_API_HOST", Value: "0.0.0.0"},
-		{Name: "GOTRUE_API_PORT", Value: fmt.Sprintf("%d", AuthPort)},
-		{Name: "API_EXTERNAL_URL", Value: spec.ExternalURL},
-		{Name: "GOTRUE_SITE_URL", Value: spec.SiteURL},
-		{Name: "GOTRUE_URI_ALLOW_LIST", Value: "*"},
+		corev1.EnvVar{Name: "GOTRUE_API_HOST", Value: "0.0.0.0"},
+		corev1.EnvVar{Name: "GOTRUE_API_PORT", Value: fmt.Sprintf("%d", AuthPort)},
+		corev1.EnvVar{Name: "API_EXTERNAL_URL", Value: spec.ExternalURL},
+		corev1.EnvVar{Name: "GOTRUE_SITE_URL", Value: spec.SiteURL},
+		corev1.EnvVar{Name: "GOTRUE_URI_ALLOW_LIST", Value: "*"},
 
 		// JWT configuration
-		{Name: "GOTRUE_JWT_DEFAULT_GROUP_NAME", Value: "authenticated"},
-		{Name: "GOTRUE_JWT_ADMIN_ROLES", Value: "service_role"},
-		{Name: "GOTRUE_JWT_AUD", Value: "authenticated"},
-		{Name: "GOTRUE_JWT_EXP", Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project))},
+		corev1.EnvVar{Name: "GOTRUE_JWT_DEFAULT_GROUP_NAME", Value: "authenticated"},
+		corev1.EnvVar{Name: "GOTRUE_JWT_ADMIN_ROLES", Value: "service_role"},
+		corev1.EnvVar{Name: "GOTRUE_JWT_AUD", Value: "authenticated"},
+		corev1.EnvVar{Name: "GOTRUE_JWT_EXP", Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project))},
 
 		// Signup configuration
-		{Name: "GOTRUE_DISABLE_SIGNUP", Value: fmt.Sprintf("%t", spec.DisableSignup)},
+		corev1.EnvVar{Name: "GOTRUE_DISABLE_SIGNUP", Value: fmt.Sprintf("%t", spec.DisableSignup)},
 
 		// Email configuration
-		{Name: "GOTRUE_EXTERNAL_EMAIL_ENABLED", Value: "true"},
-		{Name: "GOTRUE_MAILER_AUTOCONFIRM", Value: fmt.Sprintf("%t", spec.AutoConfirmEmail)},
-		{Name: "GOTRUE_MAILER_OTP_EXP", Value: "3600"},
+		corev1.EnvVar{Name: "GOTRUE_EXTERNAL_EMAIL_ENABLED", Value: "true"},
+		corev1.EnvVar{Name: "GOTRUE_MAILER_AUTOCONFIRM", Value: fmt.Sprintf("%t", spec.AutoConfirmEmail)},
+		corev1.EnvVar{Name: "GOTRUE_MAILER_OTP_EXP", Value: "3600"},
 
 		// Database credentials from secret
-		{
+		corev1.EnvVar{
 			Name: "DB_USER",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -201,7 +162,7 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 				},
 			},
 		},
-		{
+		corev1.EnvVar{
 			Name: "DB_PASSWORD",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -212,7 +173,7 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 				},
 			},
 		},
-		{
+		corev1.EnvVar{
 			Name: "DB_PASSWORD_ENC",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -225,7 +186,7 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 		},
 
 		// JWT secret
-		{
+		corev1.EnvVar{
 			Name: "GOTRUE_JWT_SECRET",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -238,12 +199,12 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 		},
 
 		// Database URL (constructed from other env vars)
-		{
+		corev1.EnvVar{
 			Name:  "GOTRUE_DB_DATABASE_URL",
 			Value: "$(DB_DRIVER)://$(DB_USER):$(DB_PASSWORD_ENC)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?search_path=auth&sslmode=$(DB_SSL)",
 		},
-		{Name: "GOTRUE_DB_DRIVER", Value: "$(DB_DRIVER)"},
-	}
+		corev1.EnvVar{Name: "GOTRUE_DB_DRIVER", Value: "$(DB_DRIVER)"},
+	)
 
 	// Add OAuth provider configuration
 	if spec.Providers != nil {

@@ -41,7 +41,15 @@ const (
 
 	// DatabaseName is the default database name for Supabase
 	DatabaseName = "supabase"
+
+	// ReloaderAnnotation is the annotation key for stakater/reloader auto-reload
+	ReloaderAnnotation = "reloader.stakater.com/auto"
 )
+
+// ReloaderAnnotations returns the annotations map for enabling stakater/reloader
+func ReloaderAnnotations() map[string]string {
+	return map[string]string{ReloaderAnnotation: "true"}
+}
 
 // CommonLabels returns the common labels for all resources
 func CommonLabels(project *supabasev1alpha1.SupabaseProject) map[string]string {

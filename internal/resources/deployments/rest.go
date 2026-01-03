@@ -23,7 +23,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
@@ -62,27 +61,18 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		schemas = spec.Schemas
 	}
 
-	replicas := spec.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := NormalizeReplicas(spec.Replicas)
 
-	env := []corev1.EnvVar{
-		// Database configuration
-		{Name: "DB_HOST", Value: dbHost},
-		{Name: "DB_PORT", Value: "5432"},
-		{Name: "DB_DRIVER", Value: "postgres"},
-		{Name: "DB_SSL", Value: "disable"},
-		{Name: "DB_NAME", Value: common.DatabaseName},
-
+	env := BuildDatabaseEnv(dbHost)
+	env = append(env,
 		// PostgREST configuration
-		{Name: "PGRST_DB_SCHEMAS", Value: strings.Join(schemas, ",")},
-		{Name: "PGRST_DB_ANON_ROLE", Value: "anon"},
-		{Name: "PGRST_DB_USE_LEGACY_GUCS", Value: "false"},
-		{Name: "PGRST_APP_SETTINGS_JWT_EXP", Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project))},
+		corev1.EnvVar{Name: "PGRST_DB_SCHEMAS", Value: strings.Join(schemas, ",")},
+		corev1.EnvVar{Name: "PGRST_DB_ANON_ROLE", Value: "anon"},
+		corev1.EnvVar{Name: "PGRST_DB_USE_LEGACY_GUCS", Value: "false"},
+		corev1.EnvVar{Name: "PGRST_APP_SETTINGS_JWT_EXP", Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project))},
 
 		// Database credentials
-		{
+		corev1.EnvVar{
 			Name: "DB_USER",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -93,7 +83,7 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 				},
 			},
 		},
-		{
+		corev1.EnvVar{
 			Name: "DB_PASSWORD",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -106,7 +96,7 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		},
 
 		// JWT secret
-		{
+		corev1.EnvVar{
 			Name: "PGRST_JWT_SECRET",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -119,20 +109,18 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		},
 
 		// Database URI (constructed from env vars)
-		{
+		corev1.EnvVar{
 			Name:  "PGRST_DB_URI",
 			Value: "$(DB_DRIVER)://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSL)",
 		},
-	}
+	)
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: project.Namespace,
-			Labels:    common.ComponentLabels(project, RestComponentName),
-			Annotations: map[string]string{
-				"reloader.stakater.com/auto": "true",
-			},
+			Name:        name,
+			Namespace:   project.Namespace,
+			Labels:      common.ComponentLabels(project, RestComponentName),
+			Annotations: common.ReloaderAnnotations(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
@@ -141,10 +129,8 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: common.ComponentLabels(project, RestComponentName),
-					Annotations: map[string]string{
-						"reloader.stakater.com/auto": "true",
-					},
+					Labels:      common.ComponentLabels(project, RestComponentName),
+					Annotations: common.ReloaderAnnotations(),
 				},
 				Spec: corev1.PodSpec{
 					InitContainers: []corev1.Container{
@@ -163,31 +149,9 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							LivenessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/",
-										Port: intstr.FromInt(RestPort),
-									},
-								},
-								InitialDelaySeconds: 10,
-								PeriodSeconds:       10,
-								TimeoutSeconds:      5,
-								FailureThreshold:    3,
-							},
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/",
-										Port: intstr.FromInt(RestPort),
-									},
-								},
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       5,
-								TimeoutSeconds:      3,
-								FailureThreshold:    3,
-							},
-							Resources: spec.Resources,
+							LivenessProbe:  BuildLivenessProbe("/", RestPort),
+							ReadinessProbe: BuildReadinessProbe("/", RestPort),
+							Resources:      spec.Resources,
 						},
 					},
 				},
@@ -195,10 +159,7 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		},
 	}
 
-	// Add image pull secrets if specified
-	if len(project.Spec.ImagePullSecrets) > 0 {
-		deployment.Spec.Template.Spec.ImagePullSecrets = project.Spec.ImagePullSecrets
-	}
+	AddImagePullSecrets(&deployment.Spec.Template.Spec, project)
 
 	return deployment
 }

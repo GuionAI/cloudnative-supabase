@@ -22,7 +22,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
@@ -65,10 +64,7 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 		projName = spec.ProjectName
 	}
 
-	replicas := spec.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := NormalizeReplicas(spec.Replicas)
 
 	// Build internal service URLs
 	kongService := project.Name + "-kong"
@@ -157,12 +153,10 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: project.Namespace,
-			Labels:    common.ComponentLabels(project, StudioComponentName),
-			Annotations: map[string]string{
-				"reloader.stakater.com/auto": "true",
-			},
+			Name:        name,
+			Namespace:   project.Namespace,
+			Labels:      common.ComponentLabels(project, StudioComponentName),
+			Annotations: common.ReloaderAnnotations(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
@@ -171,10 +165,8 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: common.ComponentLabels(project, StudioComponentName),
-					Annotations: map[string]string{
-						"reloader.stakater.com/auto": "true",
-					},
+					Labels:      common.ComponentLabels(project, StudioComponentName),
+					Annotations: common.ReloaderAnnotations(),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -190,30 +182,20 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							LivenessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/api/platform/profile",
-										Port: intstr.FromInt(StudioPort),
-									},
-								},
+							LivenessProbe: BuildHTTPProbe(ProbeConfig{
+								Path:                "/api/platform/profile",
+								Port:                StudioPort,
 								InitialDelaySeconds: 15,
 								PeriodSeconds:       10,
 								TimeoutSeconds:      10,
-								FailureThreshold:    3,
-							},
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/api/platform/profile",
-										Port: intstr.FromInt(StudioPort),
-									},
-								},
+							}),
+							ReadinessProbe: BuildHTTPProbe(ProbeConfig{
+								Path:                "/api/platform/profile",
+								Port:                StudioPort,
 								InitialDelaySeconds: 10,
 								PeriodSeconds:       5,
 								TimeoutSeconds:      10,
-								FailureThreshold:    3,
-							},
+							}),
 							Resources: spec.Resources,
 						},
 					},
@@ -222,10 +204,7 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 		},
 	}
 
-	// Add image pull secrets if specified
-	if len(project.Spec.ImagePullSecrets) > 0 {
-		deployment.Spec.Template.Spec.ImagePullSecrets = project.Spec.ImagePullSecrets
-	}
+	AddImagePullSecrets(&deployment.Spec.Template.Spec, project)
 
 	return deployment
 }
