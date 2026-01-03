@@ -125,14 +125,15 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
+	// Phase 2.5: Ensure backup infrastructure exists (ObjectStore, ScheduledBackup)
+	// This must happen BEFORE cluster creation because the Cluster references the ObjectStore
+	if err := r.reconcileBackupInfrastructure(ctx, project); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Phase 3: Ensure CNPG Cluster exists
 	if result, err := r.reconcileCNPGCluster(ctx, project); err != nil || result.RequeueAfter > 0 {
 		return result, err
-	}
-
-	// Phase 3.5: Ensure backup infrastructure exists (ObjectStore, ScheduledBackup)
-	if err := r.reconcileBackupInfrastructure(ctx, project); err != nil {
-		return ctrl.Result{}, err
 	}
 
 	// Phase 4: Wait for database to be ready
@@ -701,93 +702,141 @@ func (r *SupabaseProjectReconciler) createOrUpdateService(ctx context.Context, p
 func (r *SupabaseProjectReconciler) reconcileBackupInfrastructure(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
 	log := logf.FromContext(ctx)
 
-	// Reconcile backup ObjectStore if backup is enabled
+	// Reconcile backup ObjectStore and ScheduledBackup if backup is enabled
 	if project.Spec.Database.Backup != nil && project.Spec.Database.Backup.Enabled {
-		objectStore := cnpg.BuildObjectStore(project)
-		if objectStore != nil {
-			if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
-				return fmt.Errorf("failed to set owner reference on ObjectStore: %w", err)
-			}
+		log.Info("Reconciling backup infrastructure")
 
-			existing := &barmancloudv1.ObjectStore{}
-			err := r.Get(ctx, types.NamespacedName{Name: objectStore.Name, Namespace: objectStore.Namespace}, existing)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					log.Info("Creating ObjectStore", "name", objectStore.Name)
-					if err := r.Create(ctx, objectStore); err != nil {
-						return fmt.Errorf("failed to create ObjectStore: %w", err)
-					}
-				} else {
-					return fmt.Errorf("failed to get ObjectStore: %w", err)
-				}
-			} else {
-				// Update existing ObjectStore
-				existing.Spec = objectStore.Spec
-				if err := r.Update(ctx, existing); err != nil {
-					return fmt.Errorf("failed to update ObjectStore: %w", err)
-				}
+		// Build and create/update ObjectStore
+		objectStore := cnpg.BuildObjectStore(project)
+		if objectStore == nil {
+			// This should never happen when backup is enabled - indicates a bug in the builder
+			err := fmt.Errorf("BuildObjectStore returned nil when backup is enabled")
+			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "BuilderError", err.Error())
+			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				return statusErr
 			}
+			return err
 		}
 
-		// Reconcile ScheduledBackup
-		scheduledBackup := cnpg.BuildScheduledBackup(project)
-		if scheduledBackup != nil {
-			if err := controllerutil.SetControllerReference(project, scheduledBackup, r.Scheme); err != nil {
-				return fmt.Errorf("failed to set owner reference on ScheduledBackup: %w", err)
+		if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
+			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "OwnerRefError", err.Error())
+			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				return statusErr
 			}
+			return fmt.Errorf("failed to set owner reference on ObjectStore: %w", err)
+		}
 
-			existing := &cnpgv1.ScheduledBackup{}
-			err := r.Get(ctx, types.NamespacedName{Name: scheduledBackup.Name, Namespace: scheduledBackup.Namespace}, existing)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					log.Info("Creating ScheduledBackup", "name", scheduledBackup.Name)
-					if err := r.Create(ctx, scheduledBackup); err != nil {
-						return fmt.Errorf("failed to create ScheduledBackup: %w", err)
-					}
-				} else {
-					return fmt.Errorf("failed to get ScheduledBackup: %w", err)
-				}
-			} else {
-				// Update existing ScheduledBackup
-				existing.Spec = scheduledBackup.Spec
-				if err := r.Update(ctx, existing); err != nil {
-					return fmt.Errorf("failed to update ScheduledBackup: %w", err)
-				}
+		if err := r.createOrUpdateObjectStore(ctx, objectStore); err != nil {
+			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "ObjectStoreFailed", err.Error())
+			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				return statusErr
 			}
+			return err
+		}
+
+		// Build and create/update ScheduledBackup
+		scheduledBackup := cnpg.BuildScheduledBackup(project)
+		if scheduledBackup == nil {
+			// This should never happen when backup is enabled - indicates a bug in the builder
+			err := fmt.Errorf("BuildScheduledBackup returned nil when backup is enabled")
+			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "BuilderError", err.Error())
+			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				return statusErr
+			}
+			return err
+		}
+
+		if err := controllerutil.SetControllerReference(project, scheduledBackup, r.Scheme); err != nil {
+			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "OwnerRefError", err.Error())
+			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				return statusErr
+			}
+			return fmt.Errorf("failed to set owner reference on ScheduledBackup: %w", err)
+		}
+
+		if err := r.createOrUpdateScheduledBackup(ctx, scheduledBackup); err != nil {
+			r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, "ScheduledBackupFailed", err.Error())
+			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				return statusErr
+			}
+			return err
 		}
 
 		r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionTrue, "BackupConfigured", "Backup infrastructure is ready")
+		if err := r.Status().Update(ctx, project); err != nil {
+			return err
+		}
 	}
 
 	// Reconcile recovery ObjectStore if recovery is enabled
 	if project.Spec.Database.Recovery != nil && project.Spec.Database.Recovery.Enabled {
-		objectStore := cnpg.BuildRecoveryObjectStore(project)
-		if objectStore != nil {
-			if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
-				return fmt.Errorf("failed to set owner reference on recovery ObjectStore: %w", err)
-			}
+		log.Info("Reconciling recovery infrastructure")
 
-			existing := &barmancloudv1.ObjectStore{}
-			err := r.Get(ctx, types.NamespacedName{Name: objectStore.Name, Namespace: objectStore.Namespace}, existing)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					log.Info("Creating recovery ObjectStore", "name", objectStore.Name)
-					if err := r.Create(ctx, objectStore); err != nil {
-						return fmt.Errorf("failed to create recovery ObjectStore: %w", err)
-					}
-				} else {
-					return fmt.Errorf("failed to get recovery ObjectStore: %w", err)
-				}
-			} else {
-				// Update existing ObjectStore
-				existing.Spec = objectStore.Spec
-				if err := r.Update(ctx, existing); err != nil {
-					return fmt.Errorf("failed to update recovery ObjectStore: %w", err)
-				}
-			}
+		objectStore := cnpg.BuildRecoveryObjectStore(project)
+		if objectStore == nil {
+			// This should never happen when recovery is enabled - indicates a bug in the builder
+			return fmt.Errorf("BuildRecoveryObjectStore returned nil when recovery is enabled")
+		}
+
+		if err := controllerutil.SetControllerReference(project, objectStore, r.Scheme); err != nil {
+			return fmt.Errorf("failed to set owner reference on recovery ObjectStore: %w", err)
+		}
+
+		if err := r.createOrUpdateObjectStore(ctx, objectStore); err != nil {
+			return fmt.Errorf("failed to reconcile recovery ObjectStore: %w", err)
 		}
 	}
 
+	return nil
+}
+
+// createOrUpdateObjectStore creates or updates an ObjectStore resource
+func (r *SupabaseProjectReconciler) createOrUpdateObjectStore(ctx context.Context, objectStore *barmancloudv1.ObjectStore) error {
+	log := logf.FromContext(ctx)
+
+	existing := &barmancloudv1.ObjectStore{}
+	err := r.Get(ctx, types.NamespacedName{Name: objectStore.Name, Namespace: objectStore.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Creating ObjectStore", "name", objectStore.Name)
+			if err := r.Create(ctx, objectStore); err != nil {
+				return fmt.Errorf("failed to create ObjectStore: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get ObjectStore: %w", err)
+	}
+
+	// Update existing ObjectStore
+	existing.Spec = objectStore.Spec
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update ObjectStore: %w", err)
+	}
+	return nil
+}
+
+// createOrUpdateScheduledBackup creates or updates a ScheduledBackup resource
+func (r *SupabaseProjectReconciler) createOrUpdateScheduledBackup(ctx context.Context, scheduledBackup *cnpgv1.ScheduledBackup) error {
+	log := logf.FromContext(ctx)
+
+	existing := &cnpgv1.ScheduledBackup{}
+	err := r.Get(ctx, types.NamespacedName{Name: scheduledBackup.Name, Namespace: scheduledBackup.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Creating ScheduledBackup", "name", scheduledBackup.Name)
+			if err := r.Create(ctx, scheduledBackup); err != nil {
+				return fmt.Errorf("failed to create ScheduledBackup: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get ScheduledBackup: %w", err)
+	}
+
+	// Update existing ScheduledBackup
+	existing.Spec = scheduledBackup.Spec
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update ScheduledBackup: %w", err)
+	}
 	return nil
 }
 
