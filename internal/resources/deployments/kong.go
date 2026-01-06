@@ -153,7 +153,7 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 								TimeoutSeconds:      5,
 							}),
 							ReadinessProbe: BuildReadinessProbe("/status", KongAdminPort),
-							Resources:      spec.Resources,
+							Resources:      NormalizeKongResources(spec.Resources),
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "kong-config",
