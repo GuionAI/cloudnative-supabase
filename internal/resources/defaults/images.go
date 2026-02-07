@@ -38,5 +38,9 @@ const (
 	MeilisearchImage = "getmeili/meilisearch"
 	MeilisearchTag   = "v1.11.0"
 
+	// Redis image defaults (bundled Redis for Sequin)
+	RedisImage = "redis"
+	RedisTag   = "7"
+
 	// Note: CDC permissions Job uses the same PostgresImage for psql compatibility
 )

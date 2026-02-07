@@ -1179,12 +1179,19 @@ func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context,
 	return nil
 }
 
-// reconcileSequin deploys the Sequin service
+// reconcileSequin deploys the Sequin service (and bundled Redis if external is not configured)
 func (r *SupabaseProjectReconciler) reconcileSequin(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling Sequin service")
 
 	secretNames := &project.Status.SecretNames
+
+	// Deploy bundled Redis if external is not configured
+	if project.Spec.Sequin.Redis.External == nil {
+		if err := r.reconcileSequinRedis(ctx, project); err != nil {
+			return err
+		}
+	}
 
 	// Create deployment
 	deployment := deployments.BuildSequinDeployment(project, secretNames)
@@ -1208,6 +1215,34 @@ func (r *SupabaseProjectReconciler) reconcileSequin(ctx context.Context, project
 
 	project.Status.Services.Sequin = supabasev1alpha1.ServiceStatus{Ready: true}
 	r.setCondition(project, supabasev1alpha1.ConditionTypeSequinReady, metav1.ConditionTrue, "Ready", "Sequin service is running")
+	return nil
+}
+
+// reconcileSequinRedis deploys the bundled Redis StatefulSet and Service for Sequin
+func (r *SupabaseProjectReconciler) reconcileSequinRedis(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	log := logf.FromContext(ctx)
+	log.Info("Reconciling bundled Redis for Sequin")
+
+	// Create Redis StatefulSet
+	sts := deployments.BuildSequinRedisStatefulSet(project)
+	if err := r.createOrUpdateStatefulSet(ctx, project, sts); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeSequinReady, metav1.ConditionFalse, "RedisStatefulSetFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return statusErr
+		}
+		return err
+	}
+
+	// Create Redis Service
+	svc := deployments.BuildSequinRedisService(project)
+	if err := r.createOrUpdateService(ctx, project, svc); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeSequinReady, metav1.ConditionFalse, "RedisServiceFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return statusErr
+		}
+		return err
+	}
+
 	return nil
 }
 

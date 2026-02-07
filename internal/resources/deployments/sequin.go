@@ -168,14 +168,16 @@ func BuildSequinDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 func buildSequinEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, dbHost string) []corev1.EnvVar {
 	spec := project.Spec.Sequin
 
-	// Build Redis URL
-	redisURL := "redis://localhost:6379"
+	// Build Redis URL - external takes precedence, otherwise use bundled Redis service
+	var redisURL string
 	if spec.Redis.External != nil {
 		port := spec.Redis.External.Port
 		if port == 0 {
 			port = 6379
 		}
 		redisURL = fmt.Sprintf("redis://%s:%d", spec.Redis.External.Host, port)
+	} else {
+		redisURL = fmt.Sprintf("redis://%s:%d", SequinRedisServiceName(project), RedisPort)
 	}
 
 	env := []corev1.EnvVar{

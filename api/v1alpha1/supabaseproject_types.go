@@ -589,11 +589,22 @@ type SequinSpec struct {
 	Account *SequinAccountSpec `json:"account,omitempty"`
 }
 
-// RedisSpec defines Redis configuration for Sequin
+// RedisSpec defines Redis configuration for Sequin.
+// If External is nil, the operator deploys a bundled single-replica Redis StatefulSet.
 type RedisSpec struct {
-	// External Redis reference (required for Phase 1)
+	// External Redis reference. If nil, operator deploys bundled Redis.
 	// +optional
 	External *ExternalRedisSpec `json:"external,omitempty"`
+
+	// Resources for bundled Redis (default: 128Mi/50m request, 256Mi/200m limit)
+	// Ignored when External is set.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Storage for bundled Redis persistence (default: 2Gi)
+	// Ignored when External is set.
+	// +optional
+	Storage RedisPersistenceSpec `json:"storage,omitempty"`
 }
 
 // ExternalRedisSpec defines connection to an external Redis instance
@@ -610,6 +621,18 @@ type ExternalRedisSpec struct {
 	// PasswordSecretRef for Redis AUTH (optional)
 	// +optional
 	PasswordSecretRef string `json:"passwordSecretRef,omitempty"`
+}
+
+// RedisPersistenceSpec defines Redis persistent storage configuration
+type RedisPersistenceSpec struct {
+	// StorageClass (default: "" = cluster default)
+	// +optional
+	StorageClass string `json:"storageClass,omitempty"`
+
+	// Size (default: 2Gi)
+	// +kubebuilder:default="2Gi"
+	// +optional
+	Size string `json:"size,omitempty"`
 }
 
 // SequinAccountSpec defines Sequin account/user configuration
