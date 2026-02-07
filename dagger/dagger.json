@@ -1,0 +1,7 @@
+{
+  "name": "cloudnative-supabase",
+  "engineVersion": "v0.19.8",
+  "sdk": {
+    "source": "typescript"
+  }
+}

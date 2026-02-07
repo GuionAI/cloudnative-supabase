@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: https://github.com/actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Unit tests
+        run: go test ./pkg/... ./internal/resources/... -v -count=1
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: https://github.com/actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: https://github.com/golangci/golangci-lint-action@v9
+        with:
+          version: v2.6
+          args: --timeout=5m
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: https://github.com/actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Publish container (SHA tag)
+        uses: https://github.com/dagger/dagger-for-github@v8.2.0
+        env:
+          _EXPERIMENTAL_DAGGER_RUNNER_HOST: tcp://dagger-engine-0.dagger-headless.arc-systems.svc:8080
+          REGISTRY: registry-docker-registry.arc-systems.svc:5000
+          IMAGE_NAME: cloudnative-supabase
+          IMAGE_TAG: sha-${{ steps.sha.outputs.short }}
+        with:
+          version: "latest"
+          verb: call
+          workdir: dagger
+          args: publish --source=.. --registry=$REGISTRY --image=$IMAGE_NAME --tag=$IMAGE_TAG
+
+      - name: Publish container (latest tag)
+        uses: https://github.com/dagger/dagger-for-github@v8.2.0
+        env:
+          _EXPERIMENTAL_DAGGER_RUNNER_HOST: tcp://dagger-engine-0.dagger-headless.arc-systems.svc:8080
+          REGISTRY: registry-docker-registry.arc-systems.svc:5000
+          IMAGE_NAME: cloudnative-supabase
+        with:
+          version: "latest"
+          verb: call
+          workdir: dagger
+          args: publish --source=.. --registry=$REGISTRY --image=$IMAGE_NAME --tag=latest

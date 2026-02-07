@@ -1,0 +1,62 @@
+name: PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: https://github.com/actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: https://github.com/golangci/golangci-lint-action@v9
+        with:
+          version: v2.6
+          args: --timeout=5m
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: https://github.com/actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Unit tests
+        run: go test ./pkg/... ./internal/resources/... -v -count=1
+
+      - name: Build
+        run: go build -o bin/manager cmd/main.go
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: https://github.com/actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Generate manifests
+        run: make generate manifests
+
+      - name: Check for uncommitted changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Generated files are out of date. Run 'make generate manifests' and commit."
+            git status --porcelain
+            exit 1
+          fi

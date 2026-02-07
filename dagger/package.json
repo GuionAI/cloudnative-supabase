@@ -1,0 +1,12 @@
+{
+  "name": "cloudnative-supabase-dagger",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "develop": "dagger develop"
+  },
+  "dependencies": {
+    "@dagger.io/dagger": "^0.19.8",
+    "typescript": "^5.8.0"
+  }
+}
