@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -153,8 +155,8 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Phase 6: CDC Services (after core services)
 	if project.Spec.Sequin != nil || project.Spec.Powersync != nil {
-		if err := r.reconcileCDCPermissions(ctx, project); err != nil {
-			return ctrl.Result{}, err
+		if result, err := r.reconcileCDCPermissions(ctx, project); err != nil || result.RequeueAfter > 0 {
+			return result, err
 		}
 	}
 	if project.Spec.Sequin != nil {
@@ -1148,8 +1150,10 @@ func (r *SupabaseProjectReconciler) createOrUpdateScheduledBackup(ctx context.Co
 	return nil
 }
 
-// reconcileCDCPermissions ensures CDC permissions are applied via dbmate Job
-func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+// reconcileCDCPermissions ensures CDC permissions are applied via a Job.
+// Returns RequeueAfter when the Job is still running so we don't proceed
+// to deploy Sequin/Powersync before permissions exist.
+func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling CDC permissions")
 
@@ -1160,23 +1164,44 @@ func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context,
 	if err := r.createOrUpdateConfigMap(ctx, project, configMap); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return statusErr
+			return ctrl.Result{}, statusErr
 		}
-		return err
+		return ctrl.Result{}, err
 	}
+
+	// Compute a hash of the CDC script so we can detect spec changes
+	scriptHash := cdcScriptHash(project)
 
 	// Create or check CDC permissions Job
 	job := jobs.BuildCDCPermissionsJob(project, secretNames)
-	if err := r.createOrCheckJob(ctx, project, job); err != nil {
+	completed, err := r.createOrCheckJob(ctx, project, job, scriptHash)
+	if err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "JobFailed", err.Error())
 		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
-			return statusErr
+			return ctrl.Result{}, statusErr
 		}
-		return err
+		return ctrl.Result{}, err
 	}
 
-	r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionTrue, "CDCPermissionsApplied", "CDC permissions Job created")
-	return nil
+	if !completed {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "JobRunning", "CDC permissions Job is still running")
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+	}
+
+	r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionTrue, "CDCPermissionsApplied", "CDC permissions applied successfully")
+	return ctrl.Result{}, nil
+}
+
+// cdcScriptHash computes a SHA-256 hash of the CDC setup script content.
+// Used to detect when the spec changes (e.g., Powersync added after Sequin)
+// so the Job can be recreated with the new permissions.
+func cdcScriptHash(project *supabasev1alpha1.SupabaseProject) string {
+	cm := jobs.BuildCDCMigrationsConfigMap(project)
+	h := sha256.Sum256([]byte(cm.Data["setup.sh"]))
+	return hex.EncodeToString(h[:])
 }
 
 // reconcileSequin deploys the Sequin service (and bundled Redis if external is not configured)
@@ -1403,14 +1428,27 @@ func (r *SupabaseProjectReconciler) createOrUpdateCronJob(ctx context.Context, p
 	return r.Update(ctx, existing)
 }
 
-// createOrCheckJob creates a Job if it doesn't exist, or checks status of existing Job
-func (r *SupabaseProjectReconciler) createOrCheckJob(ctx context.Context, project *supabasev1alpha1.SupabaseProject, job *batchv1.Job) error {
+const cdcScriptHashAnnotation = "supabase.guion.dev/cdc-script-hash"
+
+// createOrCheckJob creates a Job if it doesn't exist, or checks status of an existing Job.
+// scriptHash is compared against an annotation on the existing Job to detect spec changes
+// (e.g., Powersync added after Sequin). When the hash changes, the old Job is deleted
+// and a new one is created.
+// Returns (true, nil) when the Job has completed successfully, (false, nil) when still
+// running or just created, and (false, err) on failure.
+func (r *SupabaseProjectReconciler) createOrCheckJob(ctx context.Context, project *supabasev1alpha1.SupabaseProject, job *batchv1.Job, scriptHash string) (bool, error) {
 	log := logf.FromContext(ctx)
 
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(project, job, r.Scheme); err != nil {
-		return err
+		return false, err
 	}
+
+	// Annotate the Job with the script hash
+	if job.Annotations == nil {
+		job.Annotations = make(map[string]string)
+	}
+	job.Annotations[cdcScriptHashAnnotation] = scriptHash
 
 	// Check if Job exists
 	existing := &batchv1.Job{}
@@ -1418,23 +1456,38 @@ func (r *SupabaseProjectReconciler) createOrCheckJob(ctx context.Context, projec
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("Creating Job", "name", job.Name)
-			return r.Create(ctx, job)
+			return false, r.Create(ctx, job)
 		}
-		return err
+		return false, err
 	}
 
-	// Job exists - check completion status
+	// Check if the script has changed since the existing Job was created.
+	// If the hash differs, delete the old Job so a fresh one runs with the new script.
+	existingHash := existing.Annotations[cdcScriptHashAnnotation]
+	if existingHash != scriptHash {
+		log.Info("CDC script changed, recreating Job", "name", job.Name, "oldHash", existingHash, "newHash", scriptHash)
+		propagation := metav1.DeletePropagationForeground
+		if err := r.Delete(ctx, existing, &client.DeleteOptions{
+			PropagationPolicy: &propagation,
+		}); err != nil && !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("failed to delete outdated Job %s: %w", job.Name, err)
+		}
+		// Requeue — the next reconcile will create the new Job once the old one is gone
+		return false, nil
+	}
+
+	// Job exists with matching hash — check completion status
 	if existing.Status.Succeeded > 0 {
 		log.V(1).Info("Job completed successfully", "name", job.Name)
-		return nil
+		return true, nil
 	}
 	if existing.Status.Failed > 0 && existing.Status.Active == 0 {
-		return fmt.Errorf("job %s has failed", job.Name)
+		return false, fmt.Errorf("job %s has failed", job.Name)
 	}
 
 	// Job still running
 	log.V(1).Info("Job still running", "name", job.Name, "active", existing.Status.Active)
-	return nil
+	return false, nil
 }
 
 func (r *SupabaseProjectReconciler) setCondition(project *supabasev1alpha1.SupabaseProject, conditionType string, status metav1.ConditionStatus, reason, message string) {
