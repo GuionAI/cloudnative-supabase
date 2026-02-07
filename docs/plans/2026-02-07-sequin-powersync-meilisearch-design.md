@@ -340,25 +340,44 @@ publications:
 
 ### CDC Permissions SQL
 
-**Status:** Research needed (Task #1)
+**Solution:** dbmate migration Job (mirrors flicknote-deploy pattern)
 
-The following SQL grants CDC roles appropriate permissions:
+The operator creates a Kubernetes Job that runs dbmate to apply CDC permissions after CNPG cluster is ready.
 
+**Migration file** (`20260207000001_cdc_grants.sql`):
 ```sql
+-- migrate:up
+
 -- Grant CDC role (sequin_replication) read access to public schema only
 -- More restrictive than pg_read_all_data (avoids system schema access)
 
+-- Grant schema usage
 GRANT USAGE ON SCHEMA public TO sequin_replication;
+
+-- Grant sequin CREATE ON DATABASE so its migrations can run CREATE SCHEMA IF NOT EXISTS
+-- (supabase_admin owns the database, so it can grant this directly)
 GRANT CREATE ON DATABASE supabase TO sequin;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
-    GRANT SELECT ON TABLES TO sequin_replication;
+
+-- Grant SELECT on future tables created by supabase_admin in public schema
+-- (tables are created by subsequent migrations, so default privileges cover all)
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT SELECT ON TABLES TO sequin_replication;
+
+-- migrate:down
+
+REVOKE USAGE ON SCHEMA public FROM sequin_replication;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE SELECT ON TABLES FROM sequin_replication;
+REVOKE CREATE ON DATABASE supabase FROM sequin;
 ```
 
-**Open question:** When/how to run this SQL?
-- Option A: Include in initSQL ConfigMap (runs during cluster bootstrap)
-- Option B: Separate Job after cluster + roles ready (flicknote-deploy pattern)
+**Implementation:**
+- ConfigMap containing migration file
+- Job with dbmate image (`ghcr.io/amacneil/dbmate:2.24`)
+- Uses `--migrations-table=cloudnative_supabase_schema_migrations` to avoid conflicts with application's schema_migrations table
+- Runs `dbmate up` with `--no-dump-schema` flag
+- InitContainer waits for CNPG cluster ready (checks for auth.users table existence)
+- Status tracked via `ConditionTypeCDCReady` condition
 
-See Task #1 for research on CNPG bootstrap ordering.
+Reference: `/Users/neil/Code/guion/flick-backend-31/tanka/charts/db-init`
 
 ### Secret Generation
 
@@ -1042,34 +1061,28 @@ spec:
 
 ## Open Questions & Research Tasks
 
-### Task #1: CDC Permissions SQL Ordering
+### ~~Task #1: CDC Permissions SQL Ordering~~ ✅ RESOLVED
 
-**Status:** Research in progress
+**Status:** ✅ Resolved - using dbmate migration Job
 
-**Question:** When/how should CDC permissions SQL execute?
+**Solution:** Create a Kubernetes Job that runs dbmate to apply CDC permissions after CNPG cluster is ready.
 
-```sql
-GRANT USAGE ON SCHEMA public TO sequin_replication;
-GRANT CREATE ON DATABASE supabase TO sequin;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
-    GRANT SELECT ON TABLES TO sequin_replication;
-```
+**Implementation details:**
+- ConfigMap with single migration: `20260207000001_cdc_grants.sql`
+- Job uses `ghcr.io/amacneil/dbmate:2.24` image
+- Custom migrations table: `--migrations-table=cloudnative_supabase_schema_migrations` (avoids conflict with application migrations)
+- InitContainer waits for auth.users table (ensures CNPG fully ready)
+- Job runs `dbmate up --no-dump-schema`
+- Idempotent: dbmate tracks applied migrations, safe to re-run
 
-**Options:**
-1. **InitSQL ConfigMap** - Include in `bootstrap.initdb.postInitApplicationSQL`
-   - Issue: Does initSQL run before or after managed roles are created?
-   - If before: GRANT fails (roles don't exist yet)
+**Why this approach:**
+- ✅ Clear ordering: Runs after CNPG cluster + managed roles ready
+- ✅ Mirrors flicknote-deploy pattern (proven in production)
+- ✅ Idempotent via dbmate's schema_migrations tracking
+- ✅ Status tracking via ConditionTypeCDCReady
+- ✅ No conflict with application's dbmate migrations (separate table)
 
-2. **Separate Job** - Run after CNPG cluster + roles ready (flicknote-deploy pattern)
-   - Pros: Clear ordering, matches existing pattern
-   - Cons: Adds complexity, need status tracking
-
-3. **CNPG postInitTemplateSQL** - Check if CNPG supports post-role-creation hooks
-
-**Research needed:**
-- CNPG bootstrap execution order documentation
-- Test initSQL vs managed.roles timing
-- Idempotency pattern for Job approach
+Reference implementation: `/Users/neil/Code/guion/flick-backend-31/tanka/charts/db-init`
 
 ### Other Open Questions
 
