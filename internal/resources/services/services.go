@@ -126,6 +126,11 @@ func BuildPowersyncAPIService(project *supabasev1alpha1.SupabaseProject) *corev1
 	}
 }
 
+// BuildMeilisearchService creates the service for Meilisearch
+func BuildMeilisearchService(project *supabasev1alpha1.SupabaseProject) *corev1.Service {
+	return BuildService(project, project.Name+"-meilisearch", "meilisearch", 7700)
+}
+
 // BuildKongService creates the service for Kong
 func BuildKongService(project *supabasev1alpha1.SupabaseProject) *corev1.Service {
 	return &corev1.Service{

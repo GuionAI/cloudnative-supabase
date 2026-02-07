@@ -1740,6 +1740,10 @@ spec:
                   jwt:
                     description: JWT is the name of the JWT secret
                     type: string
+                  meilisearchMasterKey:
+                    description: MeilisearchMasterKey is the name of the Meilisearch
+                      master key secret
+                    type: string
                   powersyncStoragePassword:
                     description: PowersyncStoragePassword is the name of the powersync_storage
                       role password secret

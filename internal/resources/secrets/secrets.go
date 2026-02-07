@@ -227,6 +227,43 @@ func PowersyncSecretNames(project *supabasev1alpha1.SupabaseProject) (powersyncS
 	return project.Name + "-powersync-storage-password"
 }
 
+// GenerateMeilisearchSecrets generates Meilisearch-related secrets
+func GenerateMeilisearchSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secret, error) {
+	// Use existing secret if specified
+	if project.Spec.Meilisearch.MasterKeySecretRef != "" {
+		return nil, nil
+	}
+
+	secretName := MeilisearchSecretName(project)
+
+	masterKey, err := crypto.GenerateHex(32)
+	if err != nil {
+		return nil, fmt.Errorf("generating meilisearch master key: %w", err)
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: project.Namespace,
+			Labels:    common.ComponentLabels(project, "meilisearch"),
+		},
+		Type: corev1.SecretTypeOpaque,
+		StringData: map[string]string{
+			"masterKey": masterKey,
+		},
+	}
+
+	return []*corev1.Secret{secret}, nil
+}
+
+// MeilisearchSecretName returns the expected secret name for Meilisearch master key
+func MeilisearchSecretName(project *supabasev1alpha1.SupabaseProject) string {
+	if project.Spec.Meilisearch != nil && project.Spec.Meilisearch.MasterKeySecretRef != "" {
+		return project.Spec.Meilisearch.MasterKeySecretRef
+	}
+	return project.Name + "-meilisearch-master-key"
+}
+
 // generateSequinAppSecret creates the Sequin application secret
 func generateSequinAppSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secret, error) {
 	secretName := project.Name + "-sequin"

@@ -855,6 +855,10 @@ type SecretNamesStatus struct {
 	// PowersyncStoragePassword is the name of the powersync_storage role password secret
 	// +optional
 	PowersyncStoragePassword string `json:"powersyncStoragePassword,omitempty"`
+
+	// MeilisearchMasterKey is the name of the Meilisearch master key secret
+	// +optional
+	MeilisearchMasterKey string `json:"meilisearchMasterKey,omitempty"`
 }
 
 // EndpointsStatus contains service endpoints
