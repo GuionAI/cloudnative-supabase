@@ -3,7 +3,9 @@ module github.com/GuionAI/cloudnative-supabase
 go 1.25.0
 
 require (
+	github.com/cloudnative-pg/barman-cloud v0.4.0
 	github.com/cloudnative-pg/cloudnative-pg v1.28.0
+	github.com/cloudnative-pg/machinery v0.3.3
 	github.com/cloudnative-pg/plugin-barman-cloud v0.10.0
 	github.com/onsi/ginkgo/v2 v2.27.3
 	github.com/onsi/gomega v1.38.3
@@ -22,9 +24,7 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/cloudnative-pg/barman-cloud v0.4.0 // indirect
 	github.com/cloudnative-pg/cnpg-i v0.3.1 // indirect
-	github.com/cloudnative-pg/machinery v0.3.3 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect

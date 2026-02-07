@@ -172,3 +172,75 @@ func GetSecretNamesFromSpec(spec *supabasev1alpha1.SecretsSpec) supabasev1alpha1
 		AuthAdmin:     spec.AuthAdmin,
 	}
 }
+
+// GenerateSequinSecrets generates all Sequin-related secrets
+func GenerateSequinSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secret, error) {
+	var secrets []*corev1.Secret
+
+	// Sequin application secret (secretKeyBase, vaultKey, apiToken)
+	appSecret, err := generateSequinAppSecret(project)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate Sequin app secret: %w", err)
+	}
+	secrets = append(secrets, appSecret)
+
+	// Sequin database role password
+	sequinPassword, _, err := generateRoleSecret(project, "sequin", "sequin")
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate sequin password: %w", err)
+	}
+	secrets = append(secrets, sequinPassword)
+
+	// Sequin replication role password
+	replicationPassword, _, err := generateRoleSecret(project, "sequin-replication", "sequin_replication")
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate sequin-replication password: %w", err)
+	}
+	secrets = append(secrets, replicationPassword)
+
+	return secrets, nil
+}
+
+// SequinSecretNames returns the expected secret names for Sequin
+func SequinSecretNames(project *supabasev1alpha1.SupabaseProject) (sequin, sequinPassword, sequinReplicationPassword string) {
+	return project.Name + "-sequin",
+		project.Name + "-sequin-password",
+		project.Name + "-sequin-replication-password"
+}
+
+// generateSequinAppSecret creates the Sequin application secret
+func generateSequinAppSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secret, error) {
+	secretName := project.Name + "-sequin"
+
+	// SECRET_KEY_BASE: 64 bytes hex (128 chars)
+	secretKeyBase, err := crypto.GenerateHex(64)
+	if err != nil {
+		return nil, fmt.Errorf("generating secretKeyBase: %w", err)
+	}
+
+	// VAULT_KEY: 32 bytes base64
+	vaultKey, err := crypto.GenerateBase64(32)
+	if err != nil {
+		return nil, fmt.Errorf("generating vaultKey: %w", err)
+	}
+
+	// API token: 32 bytes hex
+	apiToken, err := crypto.GenerateHex(32)
+	if err != nil {
+		return nil, fmt.Errorf("generating apiToken: %w", err)
+	}
+
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: project.Namespace,
+			Labels:    common.ComponentLabels(project, "sequin"),
+		},
+		Type: corev1.SecretTypeOpaque,
+		StringData: map[string]string{
+			"secretKeyBase": secretKeyBase,
+			"vaultKey":      vaultKey,
+			"apiToken":      apiToken,
+		},
+	}, nil
+}

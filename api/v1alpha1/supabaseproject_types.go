@@ -89,6 +89,18 @@ const (
 
 	// ConditionTypeRecoveryReady indicates recovery infrastructure is ready
 	ConditionTypeRecoveryReady = "RecoveryReady"
+
+	// ConditionTypeCDCReady indicates CDC permissions have been applied
+	ConditionTypeCDCReady = "CDCReady"
+
+	// ConditionTypeSequinReady indicates Sequin is ready
+	ConditionTypeSequinReady = "SequinReady"
+
+	// ConditionTypePowersyncReady indicates Powersync is ready
+	ConditionTypePowersyncReady = "PowersyncReady"
+
+	// ConditionTypeMeilisearchReady indicates Meilisearch is ready
+	ConditionTypeMeilisearchReady = "MeilisearchReady"
 )
 
 // SupabaseProjectSpec defines the desired state of SupabaseProject
@@ -126,6 +138,18 @@ type SupabaseProjectSpec struct {
 	// Kong API gateway configuration
 	// +optional
 	Kong KongSpec `json:"kong,omitempty"`
+
+	// Sequin CDC/event streaming configuration (optional - presence enables Sequin)
+	// +optional
+	Sequin *SequinSpec `json:"sequin,omitempty"`
+
+	// Powersync offline-first sync configuration (optional - presence enables Powersync)
+	// +optional
+	Powersync *PowersyncSpec `json:"powersync,omitempty"`
+
+	// Meilisearch full-text search configuration (optional - presence enables Meilisearch)
+	// +optional
+	Meilisearch *MeilisearchSpec `json:"meilisearch,omitempty"`
 
 	// ImagePullSecrets for all deployments
 	// +optional
@@ -521,6 +545,199 @@ type IngressSpec struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
+// ImageSpec defines container image configuration for optional services
+type ImageSpec struct {
+	// Registry (default: docker.io)
+	// +optional
+	Registry string `json:"registry,omitempty"`
+
+	// Repository (e.g., sequin/sequin)
+	// +optional
+	Repository string `json:"repository,omitempty"`
+
+	// Tag (pinned stable version per service)
+	// +optional
+	Tag string `json:"tag,omitempty"`
+
+	// PullPolicy (default: IfNotPresent)
+	// +kubebuilder:default=IfNotPresent
+	// +optional
+	PullPolicy corev1.PullPolicy `json:"pullPolicy,omitempty"`
+}
+
+// SequinSpec defines Sequin CDC/event streaming configuration
+type SequinSpec struct {
+	// Image configuration (default: sequin/sequin:v0.13.25)
+	// +optional
+	Image ImageSpec `json:"image,omitempty"`
+
+	// Replicas (default: 1)
+	// +kubebuilder:default=1
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Resources for Sequin pods
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Redis configuration - external reference required for Phase 1
+	// +optional
+	Redis RedisSpec `json:"redis,omitempty"`
+
+	// Account/user configuration
+	// +optional
+	Account *SequinAccountSpec `json:"account,omitempty"`
+}
+
+// RedisSpec defines Redis configuration for Sequin
+type RedisSpec struct {
+	// External Redis reference (required for Phase 1)
+	// +optional
+	External *ExternalRedisSpec `json:"external,omitempty"`
+}
+
+// ExternalRedisSpec defines connection to an external Redis instance
+type ExternalRedisSpec struct {
+	// Host of external Redis instance
+	// +required
+	Host string `json:"host"`
+
+	// Port (default: 6379)
+	// +kubebuilder:default=6379
+	// +optional
+	Port int32 `json:"port,omitempty"`
+
+	// PasswordSecretRef for Redis AUTH (optional)
+	// +optional
+	PasswordSecretRef string `json:"passwordSecretRef,omitempty"`
+}
+
+// SequinAccountSpec defines Sequin account/user configuration
+type SequinAccountSpec struct {
+	// Account name (default: "default")
+	// +kubebuilder:default="default"
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// Admin user email (default: "admin@example.com")
+	// +optional
+	Email string `json:"email,omitempty"`
+}
+
+// PowersyncSpec defines Powersync offline-first sync configuration
+type PowersyncSpec struct {
+	// Image configuration (default: journeyapps/powersync-service:1.18.2)
+	// +optional
+	Image ImageSpec `json:"image,omitempty"`
+
+	// API deployment configuration (client-facing)
+	// +optional
+	API PowersyncAPISpec `json:"api,omitempty"`
+
+	// Replication deployment configuration (CDC processing)
+	// +optional
+	Replication PowersyncReplicationSpec `json:"replication,omitempty"`
+
+	// Sync rules configuration
+	// +optional
+	SyncRules SyncRulesSpec `json:"syncRules,omitempty"`
+
+	// Compact CronJob configuration
+	// +optional
+	Compact PowersyncCompactSpec `json:"compact,omitempty"`
+}
+
+// PowersyncAPISpec defines Powersync API deployment configuration
+type PowersyncAPISpec struct {
+	// Replicas (default: 2)
+	// +kubebuilder:default=2
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Resources for Powersync API pods
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// NodeOptions for heap size (default: "--max-old-space-size=330")
+	// +optional
+	NodeOptions string `json:"nodeOptions,omitempty"`
+}
+
+// PowersyncReplicationSpec defines Powersync replication deployment configuration
+type PowersyncReplicationSpec struct {
+	// Resources for Powersync replication pods
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// NodeOptions for heap size (default: "--max-old-space-size=482")
+	// +optional
+	NodeOptions string `json:"nodeOptions,omitempty"`
+}
+
+// SyncRulesSpec defines sync rules configuration for Powersync
+type SyncRulesSpec struct {
+	// Inline sync rules (YAML string)
+	// +optional
+	Inline string `json:"inline,omitempty"`
+
+	// Reference to external ConfigMap containing sync rules (takes precedence over Inline)
+	// +optional
+	ConfigMapRef string `json:"configMapRef,omitempty"`
+}
+
+// PowersyncCompactSpec defines Powersync compaction CronJob configuration
+type PowersyncCompactSpec struct {
+	// Enabled (default: true)
+	// +kubebuilder:default=true
+	// +optional
+	Enabled bool `json:"enabled"`
+
+	// Schedule in cron format (default: "0 3 * * *" = 3am daily)
+	// +kubebuilder:default="0 3 * * *"
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// Resources for compaction pods
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// MeilisearchSpec defines Meilisearch full-text search configuration
+type MeilisearchSpec struct {
+	// Image configuration (default: getmeili/meilisearch:v1.11.0)
+	// +optional
+	Image ImageSpec `json:"image,omitempty"`
+
+	// Replicas (default: 1)
+	// +kubebuilder:default=1
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Resources for Meilisearch pods
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Persistence configuration
+	// +optional
+	Persistence PersistenceSpec `json:"persistence,omitempty"`
+
+	// MasterKeySecretRef for existing secret (optional, auto-generated if not provided)
+	// +optional
+	MasterKeySecretRef string `json:"masterKeySecretRef,omitempty"`
+}
+
+// PersistenceSpec defines persistent storage configuration
+type PersistenceSpec struct {
+	// StorageClass (default: "" = cluster default)
+	// +optional
+	StorageClass string `json:"storageClass,omitempty"`
+
+	// Size (default: 10Gi)
+	// +kubebuilder:default="10Gi"
+	// +optional
+	Size string `json:"size,omitempty"`
+}
+
 // SupabaseProjectStatus defines the observed state of SupabaseProject
 type SupabaseProjectStatus struct {
 	// Phase represents the current lifecycle phase
@@ -585,6 +802,14 @@ type ServicesStatus struct {
 	Meta ServiceStatus `json:"meta,omitempty"`
 	// +optional
 	Kong ServiceStatus `json:"kong,omitempty"`
+	// +optional
+	Sequin ServiceStatus `json:"sequin,omitempty"`
+	// +optional
+	PowersyncAPI ServiceStatus `json:"powersyncApi,omitempty"`
+	// +optional
+	PowersyncReplication ServiceStatus `json:"powersyncReplication,omitempty"`
+	// +optional
+	Meilisearch ServiceStatus `json:"meilisearch,omitempty"`
 }
 
 // ServiceStatus defines individual service status
@@ -614,6 +839,18 @@ type SecretNamesStatus struct {
 	// AuthAdmin is the name of the supabase_auth_admin password secret
 	// +optional
 	AuthAdmin string `json:"authAdmin,omitempty"`
+
+	// Sequin is the name of the Sequin secret (secretKeyBase, vaultKey, apiToken)
+	// +optional
+	Sequin string `json:"sequin,omitempty"`
+
+	// SequinPassword is the name of the sequin database role password secret
+	// +optional
+	SequinPassword string `json:"sequinPassword,omitempty"`
+
+	// SequinReplicationPassword is the name of the sequin_replication role password secret
+	// +optional
+	SequinReplicationPassword string `json:"sequinReplicationPassword,omitempty"`
 }
 
 // EndpointsStatus contains service endpoints

@@ -92,7 +92,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 			StorageConfiguration: spec.Storage,
 
 			Managed: &cnpgv1.ManagedConfiguration{
-				Roles: buildRoles(&spec, secretNames),
+				Roles: buildAllRoles(project, secretNames),
 			},
 		},
 	}
@@ -192,6 +192,41 @@ func buildBootstrapConfiguration(project *supabasev1alpha1.SupabaseProject, secr
 					},
 				},
 			},
+		},
+	}
+}
+
+// buildAllRoles combines base Supabase roles with optional Sequin roles
+func buildAllRoles(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
+	roles := buildRoles(&project.Spec.Database, secretNames)
+	if project.Spec.Sequin != nil && secretNames.SequinPassword != "" {
+		roles = append(roles, BuildSequinRoles(secretNames)...)
+	}
+	return roles
+}
+
+// BuildSequinRoles returns additional CNPG roles required for Sequin CDC
+func BuildSequinRoles(secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
+	return []cnpgv1.RoleConfiguration{
+		{
+			Name:   "sequin",
+			Ensure: cnpgv1.EnsurePresent,
+			Login:  true,
+			PasswordSecret: &cnpgv1.LocalObjectReference{
+				Name: secretNames.SequinPassword,
+			},
+			Comment: "Sequin database owner role",
+		},
+		{
+			Name:        "sequin_replication",
+			Ensure:      cnpgv1.EnsurePresent,
+			Login:       true,
+			Replication: true,
+			BypassRLS:   true,
+			PasswordSecret: &cnpgv1.LocalObjectReference{
+				Name: secretNames.SequinReplicationPassword,
+			},
+			Comment: "Sequin CDC replication role",
 		},
 	}
 }
