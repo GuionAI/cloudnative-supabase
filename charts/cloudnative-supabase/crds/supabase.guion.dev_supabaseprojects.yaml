@@ -1818,6 +1818,10 @@ spec:
                     description: MeilisearchMasterKey is the name of the Meilisearch
                       master key secret
                     type: string
+                  powersyncReplicationPassword:
+                    description: PowersyncReplicationPassword is the name of the powersync_replication
+                      role password secret
+                    type: string
                   powersyncStoragePassword:
                     description: PowersyncStoragePassword is the name of the powersync_storage
                       role password secret

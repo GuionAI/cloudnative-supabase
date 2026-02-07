@@ -95,7 +95,7 @@ func BuildPowersyncConfigMap(project *supabasev1alpha1.SupabaseProject, dbHost s
 				{
 					Type: "postgresql",
 					// Will be overridden by PS_POWERSYNC_REPLICATION_URI env var
-					URI: fmt.Sprintf("postgresql://powersync_storage@%s:5432/supabase?sslmode=disable", dbHost),
+					URI: fmt.Sprintf("postgresql://powersync_replication@%s:5432/supabase?sslmode=disable", dbHost),
 					Tag: "default",
 				},
 			},

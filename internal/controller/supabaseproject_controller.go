@@ -453,13 +453,14 @@ func (r *SupabaseProjectReconciler) reconcileSequinSecrets(ctx context.Context, 
 func (r *SupabaseProjectReconciler) reconcilePowersyncSecrets(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
 	log := logf.FromContext(ctx)
 
-	storagePwdName := secrets.PowersyncSecretNames(project)
+	storagePwdName, replPwdName := secrets.PowersyncSecretNames(project)
 
-	// Check if secret exists
+	// Check if both secrets exist (use storage password as the sentinel)
 	existing := &corev1.Secret{}
 	if err := r.Get(ctx, types.NamespacedName{Name: storagePwdName, Namespace: project.Namespace}, existing); err == nil {
 		log.Info("Powersync secrets already exist, syncing status")
 		secretNames.PowersyncStoragePassword = storagePwdName
+		secretNames.PowersyncReplicationPassword = replPwdName
 		return nil
 	} else if !apierrors.IsNotFound(err) {
 		return err
@@ -487,6 +488,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersyncSecrets(ctx context.Contex
 	}
 
 	secretNames.PowersyncStoragePassword = storagePwdName
+	secretNames.PowersyncReplicationPassword = replPwdName
 	return nil
 }
 

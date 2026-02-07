@@ -34,12 +34,13 @@ func newTestProject(namespace string) *supabasev1alpha1.SupabaseProject {
 
 func newTestSecretNames() *supabasev1alpha1.SecretNamesStatus {
 	return &supabasev1alpha1.SecretNamesStatus{
-		JWT:                       "test-jwt",
-		Sequin:                    "test-sequin",
-		SequinPassword:            "test-sequin-password",
-		SequinReplicationPassword: "test-sequin-replication-password",
-		PowersyncStoragePassword:  "test-powersync-storage-password",
-		MeilisearchMasterKey:      "test-meilisearch-master-key",
+		JWT:                          "test-jwt",
+		Sequin:                       "test-sequin",
+		SequinPassword:               "test-sequin-password",
+		SequinReplicationPassword:    "test-sequin-replication-password",
+		PowersyncStoragePassword:     "test-powersync-storage-password",
+		PowersyncReplicationPassword: "test-powersync-replication-password",
+		MeilisearchMasterKey:         "test-meilisearch-master-key",
 	}
 }
 

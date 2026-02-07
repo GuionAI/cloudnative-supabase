@@ -879,6 +879,10 @@ type SecretNamesStatus struct {
 	// +optional
 	PowersyncStoragePassword string `json:"powersyncStoragePassword,omitempty"`
 
+	// PowersyncReplicationPassword is the name of the powersync_replication role password secret
+	// +optional
+	PowersyncReplicationPassword string `json:"powersyncReplicationPassword,omitempty"`
+
 	// MeilisearchMasterKey is the name of the Meilisearch master key secret
 	// +optional
 	MeilisearchMasterKey string `json:"meilisearchMasterKey,omitempty"`

@@ -105,13 +105,13 @@ EOSQL
 # Apply Powersync grants
 echo "Applying Powersync grants..."
 psql "$PGCONNSTR" <<'EOSQL'
--- Grant powersync_storage role access to create its schema
+-- Grant powersync_storage role access to create its schema (internal sync state)
 GRANT CREATE ON DATABASE supabase TO powersync_storage;
 
--- Grant usage on public schema for replication reads
-GRANT USAGE ON SCHEMA public TO powersync_storage;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO powersync_storage;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT SELECT ON TABLES TO powersync_storage;
+-- Grant powersync_replication role CDC read access to public schema
+GRANT USAGE ON SCHEMA public TO powersync_replication;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO powersync_replication;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT SELECT ON TABLES TO powersync_replication;
 EOSQL
 `
 	}

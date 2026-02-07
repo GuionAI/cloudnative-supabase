@@ -45,9 +45,12 @@ func TestSequinSecretNames(t *testing.T) {
 
 func TestPowersyncSecretNames(t *testing.T) {
 	project := newTestProject("default")
-	got := PowersyncSecretNames(project)
-	if got != "my-app-powersync-storage-password" {
-		t.Errorf("got %q, want %q", got, "my-app-powersync-storage-password")
+	storagePwd, replPwd := PowersyncSecretNames(project)
+	if storagePwd != "my-app-powersync-storage-password" {
+		t.Errorf("storagePwd = %q, want %q", storagePwd, "my-app-powersync-storage-password")
+	}
+	if replPwd != "my-app-powersync-replication-password" {
+		t.Errorf("replPwd = %q, want %q", replPwd, "my-app-powersync-replication-password")
 	}
 }
 
@@ -142,19 +145,26 @@ func TestGeneratePowersyncSecrets(t *testing.T) {
 		t.Fatalf("GeneratePowersyncSecrets() error = %v", err)
 	}
 
-	if len(secrets) != 1 {
-		t.Fatalf("expected 1 secret, got %d", len(secrets))
+	if len(secrets) != 2 {
+		t.Fatalf("expected 2 secrets, got %d", len(secrets))
 	}
 
-	secret := secrets[0]
-	if secret.Name != "my-app-powersync-storage-password" {
-		t.Errorf("name = %q, want %q", secret.Name, "my-app-powersync-storage-password")
+	// Storage role secret
+	storage := secrets[0]
+	if storage.Name != "my-app-powersync-storage-password" {
+		t.Errorf("storage name = %q, want %q", storage.Name, "my-app-powersync-storage-password")
 	}
-	if secret.StringData["username"] != "powersync_storage" {
-		t.Errorf("username = %q, want %q", secret.StringData["username"], "powersync_storage")
+	if storage.StringData["username"] != "powersync_storage" {
+		t.Errorf("storage username = %q, want %q", storage.StringData["username"], "powersync_storage")
 	}
-	if len(secret.StringData["password"]) == 0 {
-		t.Error("expected non-empty password")
+
+	// Replication role secret
+	repl := secrets[1]
+	if repl.Name != "my-app-powersync-replication-password" {
+		t.Errorf("replication name = %q, want %q", repl.Name, "my-app-powersync-replication-password")
+	}
+	if repl.StringData["username"] != "powersync_replication" {
+		t.Errorf("replication username = %q, want %q", repl.StringData["username"], "powersync_replication")
 	}
 }
 

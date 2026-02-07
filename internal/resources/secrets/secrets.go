@@ -212,19 +212,27 @@ func SequinSecretNames(project *supabasev1alpha1.SupabaseProject) (sequin, sequi
 func GeneratePowersyncSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secret, error) {
 	var secrets []*corev1.Secret
 
-	// Powersync storage role password
+	// Powersync storage role password (for internal sync state tables)
 	storagePassword, _, err := generateRoleSecret(project, "powersync-storage", "powersync_storage")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate powersync-storage password: %w", err)
 	}
 	secrets = append(secrets, storagePassword)
 
+	// Powersync replication role password (for CDC/WAL reading)
+	replicationPassword, _, err := generateRoleSecret(project, "powersync-replication", "powersync_replication")
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate powersync-replication password: %w", err)
+	}
+	secrets = append(secrets, replicationPassword)
+
 	return secrets, nil
 }
 
 // PowersyncSecretNames returns the expected secret names for Powersync
-func PowersyncSecretNames(project *supabasev1alpha1.SupabaseProject) (powersyncStoragePassword string) {
-	return project.Name + "-powersync-storage-password"
+func PowersyncSecretNames(project *supabasev1alpha1.SupabaseProject) (powersyncStoragePassword, powersyncReplicationPassword string) {
+	return project.Name + "-powersync-storage-password",
+		project.Name + "-powersync-replication-password"
 }
 
 // GenerateMeilisearchSecrets generates Meilisearch-related secrets

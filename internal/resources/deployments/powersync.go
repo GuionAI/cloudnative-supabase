@@ -277,9 +277,9 @@ func buildPowersyncEnv(project *supabasev1alpha1.SupabaseProject, secretNames *s
 	return []corev1.EnvVar{
 		{Name: "POWERSYNC_CONFIG_PATH", Value: "/powersync/config/config.json"},
 		{Name: "NODE_OPTIONS", Value: nodeOptions},
-		// Database password from secret for connection string construction
+		// Storage password (powersync_storage role — internal sync state tables)
 		{
-			Name: "PS_PG_PASSWORD",
+			Name: "PS_STORAGE_PASSWORD",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
@@ -289,14 +289,26 @@ func buildPowersyncEnv(project *supabasev1alpha1.SupabaseProject, secretNames *s
 				},
 			},
 		},
+		// Replication password (powersync_replication role — CDC/WAL reading)
+		{
+			Name: "PS_REPLICATION_PASSWORD",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: secretNames.PowersyncReplicationPassword,
+					},
+					Key: "password",
+				},
+			},
+		},
 		// PowerSync resolves {{ env.VAR }} in config.json
 		{
 			Name:  "PS_POWERSYNC_STORAGE_URI",
-			Value: fmt.Sprintf("postgresql://powersync_storage:$(PS_PG_PASSWORD)@%s:5432/supabase?sslmode=disable", dbHost),
+			Value: fmt.Sprintf("postgresql://powersync_storage:$(PS_STORAGE_PASSWORD)@%s:5432/supabase?sslmode=disable", dbHost),
 		},
 		{
 			Name:  "PS_POWERSYNC_REPLICATION_URI",
-			Value: fmt.Sprintf("postgresql://powersync_storage:$(PS_PG_PASSWORD)@%s:5432/supabase?sslmode=disable", dbHost),
+			Value: fmt.Sprintf("postgresql://powersync_replication:$(PS_REPLICATION_PASSWORD)@%s:5432/supabase?sslmode=disable", dbHost),
 		},
 		// JWT secret for client authentication
 		{

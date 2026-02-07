@@ -202,7 +202,7 @@ func buildAllRoles(project *supabasev1alpha1.SupabaseProject, secretNames *supab
 	if project.Spec.Sequin != nil && secretNames.SequinPassword != "" {
 		roles = append(roles, BuildSequinRoles(secretNames)...)
 	}
-	if project.Spec.Powersync != nil && secretNames.PowersyncStoragePassword != "" {
+	if project.Spec.Powersync != nil && secretNames.PowersyncStoragePassword != "" && secretNames.PowersyncReplicationPassword != "" {
 		roles = append(roles, BuildPowersyncRoles(secretNames)...)
 	}
 	return roles
@@ -234,7 +234,10 @@ func BuildSequinRoles(secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.
 	}
 }
 
-// BuildPowersyncRoles returns additional CNPG roles required for Powersync
+// BuildPowersyncRoles returns additional CNPG roles required for Powersync.
+// Two roles are needed:
+//   - powersync_storage: stores Powersync's internal sync state (checkpoints, buckets)
+//   - powersync_replication: reads the WAL via logical replication for CDC
 func BuildPowersyncRoles(secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
 	return []cnpgv1.RoleConfiguration{
 		{
@@ -244,7 +247,18 @@ func BuildPowersyncRoles(secretNames *supabasev1alpha1.SecretNamesStatus) []cnpg
 			PasswordSecret: &cnpgv1.LocalObjectReference{
 				Name: secretNames.PowersyncStoragePassword,
 			},
-			Comment: "Powersync storage role",
+			Comment: "Powersync internal storage role",
+		},
+		{
+			Name:        "powersync_replication",
+			Ensure:      cnpgv1.EnsurePresent,
+			Login:       true,
+			Replication: true,
+			BypassRLS:   true,
+			PasswordSecret: &cnpgv1.LocalObjectReference{
+				Name: secretNames.PowersyncReplicationPassword,
+			},
+			Comment: "Powersync CDC replication role",
 		},
 	}
 }
