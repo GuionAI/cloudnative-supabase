@@ -851,6 +851,10 @@ type SecretNamesStatus struct {
 	// SequinReplicationPassword is the name of the sequin_replication role password secret
 	// +optional
 	SequinReplicationPassword string `json:"sequinReplicationPassword,omitempty"`
+
+	// PowersyncStoragePassword is the name of the powersync_storage role password secret
+	// +optional
+	PowersyncStoragePassword string `json:"powersyncStoragePassword,omitempty"`
 }
 
 // EndpointsStatus contains service endpoints

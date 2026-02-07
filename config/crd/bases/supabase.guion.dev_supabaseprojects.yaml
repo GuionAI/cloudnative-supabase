@@ -1740,6 +1740,10 @@ spec:
                   jwt:
                     description: JWT is the name of the JWT secret
                     type: string
+                  powersyncStoragePassword:
+                    description: PowersyncStoragePassword is the name of the powersync_storage
+                      role password secret
+                    type: string
                   sequin:
                     description: Sequin is the name of the Sequin secret (secretKeyBase,
                       vaultKey, apiToken)

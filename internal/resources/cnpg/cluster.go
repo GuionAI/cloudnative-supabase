@@ -196,11 +196,14 @@ func buildBootstrapConfiguration(project *supabasev1alpha1.SupabaseProject, secr
 	}
 }
 
-// buildAllRoles combines base Supabase roles with optional Sequin roles
+// buildAllRoles combines base Supabase roles with optional CDC/search roles
 func buildAllRoles(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
 	roles := buildRoles(&project.Spec.Database, secretNames)
 	if project.Spec.Sequin != nil && secretNames.SequinPassword != "" {
 		roles = append(roles, BuildSequinRoles(secretNames)...)
+	}
+	if project.Spec.Powersync != nil && secretNames.PowersyncStoragePassword != "" {
+		roles = append(roles, BuildPowersyncRoles(secretNames)...)
 	}
 	return roles
 }
@@ -227,6 +230,21 @@ func BuildSequinRoles(secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.
 				Name: secretNames.SequinReplicationPassword,
 			},
 			Comment: "Sequin CDC replication role",
+		},
+	}
+}
+
+// BuildPowersyncRoles returns additional CNPG roles required for Powersync
+func BuildPowersyncRoles(secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
+	return []cnpgv1.RoleConfiguration{
+		{
+			Name:   "powersync_storage",
+			Ensure: cnpgv1.EnsurePresent,
+			Login:  true,
+			PasswordSecret: &cnpgv1.LocalObjectReference{
+				Name: secretNames.PowersyncStoragePassword,
+			},
+			Comment: "Powersync storage role",
 		},
 	}
 }

@@ -208,6 +208,25 @@ func SequinSecretNames(project *supabasev1alpha1.SupabaseProject) (sequin, sequi
 		project.Name + "-sequin-replication-password"
 }
 
+// GeneratePowersyncSecrets generates Powersync-related secrets
+func GeneratePowersyncSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secret, error) {
+	var secrets []*corev1.Secret
+
+	// Powersync storage role password
+	storagePassword, _, err := generateRoleSecret(project, "powersync-storage", "powersync_storage")
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate powersync-storage password: %w", err)
+	}
+	secrets = append(secrets, storagePassword)
+
+	return secrets, nil
+}
+
+// PowersyncSecretNames returns the expected secret names for Powersync
+func PowersyncSecretNames(project *supabasev1alpha1.SupabaseProject) (powersyncStoragePassword string) {
+	return project.Name + "-powersync-storage-password"
+}
+
 // generateSequinAppSecret creates the Sequin application secret
 func generateSequinAppSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secret, error) {
 	secretName := project.Name + "-sequin"

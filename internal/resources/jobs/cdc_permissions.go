@@ -45,14 +45,32 @@ func CDCJobName(project *supabasev1alpha1.SupabaseProject) string {
 
 // BuildCDCMigrationsConfigMap creates the ConfigMap containing CDC setup scripts
 func BuildCDCMigrationsConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.ConfigMap {
-	// Shell script that handles both database creation and grants
-	// Uses psql which handles CREATE DATABASE outside transactions
-	setupScript := `#!/bin/sh
+	setupScript := buildCDCSetupScript(project)
+
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      CDCConfigMapName(project),
+			Namespace: project.Namespace,
+			Labels:    common.ComponentLabels(project, CDCComponentName),
+		},
+		Data: map[string]string{
+			"setup.sh": setupScript,
+		},
+	}
+}
+
+// buildCDCSetupScript generates the CDC setup shell script based on enabled services
+func buildCDCSetupScript(project *supabasev1alpha1.SupabaseProject) string {
+	script := `#!/bin/sh
 set -e
 
 echo "=== CDC Permissions Setup ==="
+`
 
-# Step 1: Create sequin database if it doesn't exist
+	// Sequin-specific grants
+	if project.Spec.Sequin != nil {
+		script += `
+# Create sequin database if it doesn't exist
 echo "Checking if sequin database exists..."
 DB_EXISTS=$(psql "$PGCONNSTR" -tAc "SELECT 1 FROM pg_database WHERE datname='sequin'" 2>/dev/null || echo "0")
 if [ "$DB_EXISTS" != "1" ]; then
@@ -63,8 +81,8 @@ else
   echo "Sequin database already exists"
 fi
 
-# Step 2: Apply CDC grants (idempotent)
-echo "Applying CDC grants..."
+# Apply Sequin CDC grants
+echo "Applying Sequin CDC grants..."
 psql "$PGCONNSTR" <<'EOSQL'
 -- Grant CDC role (sequin_replication) read access to public schema
 GRANT USAGE ON SCHEMA public TO sequin_replication;
@@ -78,20 +96,30 @@ ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT SELECT O
 -- Grant SELECT on existing tables in public schema
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO sequin_replication;
 EOSQL
+`
+	}
 
+	// Powersync-specific grants
+	if project.Spec.Powersync != nil {
+		script += `
+# Apply Powersync grants
+echo "Applying Powersync grants..."
+psql "$PGCONNSTR" <<'EOSQL'
+-- Grant powersync_storage role access to create its schema
+GRANT CREATE ON DATABASE supabase TO powersync_storage;
+
+-- Grant usage on public schema for replication reads
+GRANT USAGE ON SCHEMA public TO powersync_storage;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO powersync_storage;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT SELECT ON TABLES TO powersync_storage;
+EOSQL
+`
+	}
+
+	script += `
 echo "=== CDC Permissions Setup Complete ==="
 `
-
-	return &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      CDCConfigMapName(project),
-			Namespace: project.Namespace,
-			Labels:    common.ComponentLabels(project, CDCComponentName),
-		},
-		Data: map[string]string{
-			"setup.sh": setupScript,
-		},
-	}
+	return script
 }
 
 // BuildCDCPermissionsJob creates the Job that applies CDC permissions after database is ready
