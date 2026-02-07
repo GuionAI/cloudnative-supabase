@@ -33,9 +33,9 @@ import (
 )
 
 const (
-	PowersyncAPIComponentName         = "powersync-api"
-	PowersyncReplicationComponentName = "powersync-replication"
-	PowersyncCompactComponentName     = "powersync-compact"
+	PowersyncAPIComponentName               = "powersync-api"
+	PowersyncReplicationComponentName       = "powersync-replication"
+	PowersyncCompactComponentName           = "powersync-compact"
 	PowersyncHTTPPort                 int32 = 8080
 	PowersyncMetricsPort              int32 = 9464
 )
@@ -355,9 +355,9 @@ func powersyncVolumes(project *supabasev1alpha1.SupabaseProject) []corev1.Volume
 	}
 }
 
-func normalizePowersyncResources(resources corev1.ResourceRequirements, defaults corev1.ResourceRequirements) corev1.ResourceRequirements {
+func normalizePowersyncResources(resources corev1.ResourceRequirements, fallback corev1.ResourceRequirements) corev1.ResourceRequirements {
 	if len(resources.Requests) == 0 && len(resources.Limits) == 0 {
-		return defaults
+		return fallback
 	}
 	return resources
 }

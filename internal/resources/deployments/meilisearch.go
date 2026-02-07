@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	MeilisearchComponentName = "meilisearch"
+	MeilisearchComponentName       = "meilisearch"
 	MeilisearchHTTPPort      int32 = 7700
 )
 

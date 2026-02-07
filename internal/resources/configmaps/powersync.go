@@ -66,9 +66,9 @@ type powersyncConnection struct {
 }
 
 type powersyncClientAuth struct {
-	Supabase         bool     `json:"supabase"`
-	SupabaseJWTSecret string  `json:"supabase_jwt_secret"`
-	Audience         []string `json:"audience"`
+	Supabase          bool     `json:"supabase"`
+	SupabaseJWTSecret string   `json:"supabase_jwt_secret"`
+	Audience          []string `json:"audience"`
 }
 
 type powersyncSyncRules struct {

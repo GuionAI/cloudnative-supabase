@@ -10,10 +10,15 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 )
 
-func newTestProject(name, namespace string) *supabasev1alpha1.SupabaseProject {
+const (
+	testProjectName = "my-app"
+	testNamespace   = "test-ns"
+)
+
+func newTestProject(namespace string) *supabasev1alpha1.SupabaseProject {
 	return &supabasev1alpha1.SupabaseProject{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      testProjectName,
 			Namespace: namespace,
 		},
 		Spec: supabasev1alpha1.SupabaseProjectSpec{
@@ -23,7 +28,7 @@ func newTestProject(name, namespace string) *supabasev1alpha1.SupabaseProject {
 }
 
 func TestPowersyncConfigMapName(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	got := PowersyncConfigMapName(project)
 	if got != "my-app-powersync-config" {
 		t.Errorf("PowersyncConfigMapName() = %q, want %q", got, "my-app-powersync-config")
@@ -31,7 +36,7 @@ func TestPowersyncConfigMapName(t *testing.T) {
 }
 
 func TestPowersyncSyncRulesConfigMapName(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	got := PowersyncSyncRulesConfigMapName(project)
 	if got != "my-app-powersync-sync-rules" {
 		t.Errorf("PowersyncSyncRulesConfigMapName() = %q, want %q", got, "my-app-powersync-sync-rules")
@@ -58,7 +63,7 @@ func TestSyncRulesConfigMapName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			project := newTestProject("my-app", "default")
+			project := newTestProject("default")
 			project.Spec.Powersync.SyncRules.ConfigMapRef = tt.configMapRef
 
 			got := SyncRulesConfigMapName(project)
@@ -70,7 +75,7 @@ func TestSyncRulesConfigMapName(t *testing.T) {
 }
 
 func TestBuildPowersyncConfigMap(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 	dbHost := "my-app-rw"
 
 	cm := BuildPowersyncConfigMap(project, dbHost)
@@ -78,8 +83,8 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 	if cm.Name != "my-app-powersync-config" {
 		t.Errorf("Name = %q, want %q", cm.Name, "my-app-powersync-config")
 	}
-	if cm.Namespace != "test-ns" {
-		t.Errorf("Namespace = %q, want %q", cm.Namespace, "test-ns")
+	if cm.Namespace != testNamespace {
+		t.Errorf("Namespace = %q, want %q", cm.Namespace, testNamespace)
 	}
 
 	configJSON, ok := cm.Data["config.json"]
@@ -128,12 +133,12 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 }
 
 func TestBuildPowersyncSyncRulesConfigMap_Default(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 
 	cm := BuildPowersyncSyncRulesConfigMap(project)
-
 	if cm == nil {
 		t.Fatal("expected non-nil ConfigMap")
+		return
 	}
 	if cm.Name != "my-app-powersync-sync-rules" {
 		t.Errorf("Name = %q, want %q", cm.Name, "my-app-powersync-sync-rules")
@@ -149,13 +154,13 @@ func TestBuildPowersyncSyncRulesConfigMap_Default(t *testing.T) {
 }
 
 func TestBuildPowersyncSyncRulesConfigMap_Inline(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Powersync.SyncRules.Inline = "bucket_definitions:\n  custom:\n    data:\n      - SELECT * FROM users"
 
 	cm := BuildPowersyncSyncRulesConfigMap(project)
-
 	if cm == nil {
 		t.Fatal("expected non-nil ConfigMap")
+		return
 	}
 	if !strings.Contains(cm.Data["sync_rules.yaml"], "custom") {
 		t.Error("expected inline sync rules to be used")
@@ -163,7 +168,7 @@ func TestBuildPowersyncSyncRulesConfigMap_Inline(t *testing.T) {
 }
 
 func TestBuildPowersyncSyncRulesConfigMap_ExternalRef(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Powersync.SyncRules.ConfigMapRef = "my-external-rules"
 
 	cm := BuildPowersyncSyncRulesConfigMap(project)

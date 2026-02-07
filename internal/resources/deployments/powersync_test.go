@@ -8,7 +8,7 @@ import (
 )
 
 func TestPowersyncNames(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 
 	tests := []struct {
 		name string
@@ -31,7 +31,7 @@ func TestPowersyncNames(t *testing.T) {
 }
 
 func TestBuildPowersyncAPIDeployment(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 	secretNames := newTestSecretNames()
 
 	dep := BuildPowersyncAPIDeployment(project, secretNames)
@@ -39,8 +39,8 @@ func TestBuildPowersyncAPIDeployment(t *testing.T) {
 	if dep.Name != "my-app-powersync-api" {
 		t.Errorf("Name = %q, want %q", dep.Name, "my-app-powersync-api")
 	}
-	if dep.Namespace != "test-ns" {
-		t.Errorf("Namespace = %q, want %q", dep.Namespace, "test-ns")
+	if dep.Namespace != testNamespace {
+		t.Errorf("Namespace = %q, want %q", dep.Namespace, testNamespace)
 	}
 
 	// Default replicas = 1 (NormalizeReplicas(0) = 1)
@@ -99,7 +99,7 @@ func TestBuildPowersyncAPIDeployment(t *testing.T) {
 }
 
 func TestBuildPowersyncAPIDeployment_CustomReplicas(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Powersync.API.Replicas = 3
 	secretNames := newTestSecretNames()
 
@@ -110,7 +110,7 @@ func TestBuildPowersyncAPIDeployment_CustomReplicas(t *testing.T) {
 }
 
 func TestBuildPowersyncAPIDeployment_CustomNodeOptions(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Powersync.API.NodeOptions = "--max-old-space-size=512"
 	secretNames := newTestSecretNames()
 
@@ -129,7 +129,7 @@ func TestBuildPowersyncAPIDeployment_CustomNodeOptions(t *testing.T) {
 }
 
 func TestBuildPowersyncReplicationDeployment(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 	secretNames := newTestSecretNames()
 
 	dep := BuildPowersyncReplicationDeployment(project, secretNames)
@@ -168,7 +168,7 @@ func TestBuildPowersyncReplicationDeployment(t *testing.T) {
 }
 
 func TestBuildPowersyncCompactCronJob(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 	secretNames := newTestSecretNames()
 
 	cj := BuildPowersyncCompactCronJob(project, secretNames)
@@ -176,8 +176,8 @@ func TestBuildPowersyncCompactCronJob(t *testing.T) {
 	if cj.Name != "my-app-powersync-compact" {
 		t.Errorf("Name = %q, want %q", cj.Name, "my-app-powersync-compact")
 	}
-	if cj.Namespace != "test-ns" {
-		t.Errorf("Namespace = %q, want %q", cj.Namespace, "test-ns")
+	if cj.Namespace != testNamespace {
+		t.Errorf("Namespace = %q, want %q", cj.Namespace, testNamespace)
 	}
 
 	// Default schedule
@@ -193,7 +193,7 @@ func TestBuildPowersyncCompactCronJob(t *testing.T) {
 }
 
 func TestBuildPowersyncCompactCronJob_CustomSchedule(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Powersync.Compact.Schedule = "0 2 * * *"
 	secretNames := newTestSecretNames()
 
@@ -204,7 +204,7 @@ func TestBuildPowersyncCompactCronJob_CustomSchedule(t *testing.T) {
 }
 
 func TestBuildPowersyncCompactCronJob_Disabled(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Powersync.Compact.Enabled = false
 	secretNames := newTestSecretNames()
 
@@ -215,7 +215,7 @@ func TestBuildPowersyncCompactCronJob_Disabled(t *testing.T) {
 }
 
 func TestBuildPowersyncEnvVars(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	secretNames := newTestSecretNames()
 
 	dep := BuildPowersyncAPIDeployment(project, secretNames)

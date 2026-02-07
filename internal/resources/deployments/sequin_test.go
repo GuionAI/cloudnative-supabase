@@ -11,10 +11,15 @@ import (
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
 )
 
-func newTestProject(name, namespace string) *supabasev1alpha1.SupabaseProject {
+const (
+	testProjectName = "my-app"
+	testNamespace   = "test-ns"
+)
+
+func newTestProject(namespace string) *supabasev1alpha1.SupabaseProject {
 	return &supabasev1alpha1.SupabaseProject{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      testProjectName,
 			Namespace: namespace,
 		},
 		Spec: supabasev1alpha1.SupabaseProjectSpec{
@@ -29,17 +34,17 @@ func newTestProject(name, namespace string) *supabasev1alpha1.SupabaseProject {
 
 func newTestSecretNames() *supabasev1alpha1.SecretNamesStatus {
 	return &supabasev1alpha1.SecretNamesStatus{
-		JWT:                      "test-jwt",
-		Sequin:                   "test-sequin",
-		SequinPassword:           "test-sequin-password",
+		JWT:                       "test-jwt",
+		Sequin:                    "test-sequin",
+		SequinPassword:            "test-sequin-password",
 		SequinReplicationPassword: "test-sequin-replication-password",
-		PowersyncStoragePassword: "test-powersync-storage-password",
-		MeilisearchMasterKey:     "test-meilisearch-master-key",
+		PowersyncStoragePassword:  "test-powersync-storage-password",
+		MeilisearchMasterKey:      "test-meilisearch-master-key",
 	}
 }
 
 func TestSequinDeploymentName(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	got := SequinDeploymentName(project)
 	want := "my-app-sequin"
 	if got != want {
@@ -135,7 +140,7 @@ func TestResolvePullPolicy(t *testing.T) {
 }
 
 func TestBuildSequinDeployment(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 	secretNames := newTestSecretNames()
 
 	dep := BuildSequinDeployment(project, secretNames)
@@ -195,7 +200,7 @@ func TestBuildSequinDeployment(t *testing.T) {
 }
 
 func TestBuildSequinDeployment_CustomReplicas(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Sequin.Replicas = 3
 	secretNames := newTestSecretNames()
 
@@ -206,7 +211,7 @@ func TestBuildSequinDeployment_CustomReplicas(t *testing.T) {
 }
 
 func TestBuildSequinDeployment_ExternalRedis(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Sequin.Redis.External = &supabasev1alpha1.ExternalRedisSpec{
 		Host: "redis.infra.svc",
 		Port: 6380,
@@ -230,7 +235,7 @@ func TestBuildSequinDeployment_ExternalRedis(t *testing.T) {
 }
 
 func TestBuildSequinDeployment_BundledRedis(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	// External is nil by default - should use bundled Redis URL
 	secretNames := newTestSecretNames()
 
@@ -251,7 +256,7 @@ func TestBuildSequinDeployment_BundledRedis(t *testing.T) {
 }
 
 func TestBuildSequinDeployment_EnvVars(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	secretNames := newTestSecretNames()
 
 	dep := BuildSequinDeployment(project, secretNames)

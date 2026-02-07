@@ -9,24 +9,29 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 )
 
-func newTestProject(name, namespace string) *supabasev1alpha1.SupabaseProject {
+const (
+	testProjectName = "my-app"
+	testNamespace   = "test-ns"
+)
+
+func newTestProject(namespace string) *supabasev1alpha1.SupabaseProject {
 	return &supabasev1alpha1.SupabaseProject{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      testProjectName,
 			Namespace: namespace,
 		},
 	}
 }
 
 func TestBuildSequinService(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 	svc := BuildSequinService(project)
 
 	if svc.Name != "my-app-sequin" {
 		t.Errorf("Name = %q, want %q", svc.Name, "my-app-sequin")
 	}
-	if svc.Namespace != "test-ns" {
-		t.Errorf("Namespace = %q, want %q", svc.Namespace, "test-ns")
+	if svc.Namespace != testNamespace {
+		t.Errorf("Namespace = %q, want %q", svc.Namespace, testNamespace)
 	}
 	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
 		t.Errorf("Type = %q, want ClusterIP", svc.Spec.Type)
@@ -51,14 +56,14 @@ func TestBuildSequinService(t *testing.T) {
 }
 
 func TestBuildPowersyncAPIService(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 	svc := BuildPowersyncAPIService(project)
 
 	if svc.Name != "my-app-powersync-api" {
 		t.Errorf("Name = %q, want %q", svc.Name, "my-app-powersync-api")
 	}
-	if svc.Namespace != "test-ns" {
-		t.Errorf("Namespace = %q, want %q", svc.Namespace, "test-ns")
+	if svc.Namespace != testNamespace {
+		t.Errorf("Namespace = %q, want %q", svc.Namespace, testNamespace)
 	}
 	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
 		t.Errorf("Type = %q, want ClusterIP", svc.Spec.Type)
@@ -83,14 +88,14 @@ func TestBuildPowersyncAPIService(t *testing.T) {
 }
 
 func TestBuildMeilisearchService(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 	svc := BuildMeilisearchService(project)
 
 	if svc.Name != "my-app-meilisearch" {
 		t.Errorf("Name = %q, want %q", svc.Name, "my-app-meilisearch")
 	}
-	if svc.Namespace != "test-ns" {
-		t.Errorf("Namespace = %q, want %q", svc.Namespace, "test-ns")
+	if svc.Namespace != testNamespace {
+		t.Errorf("Namespace = %q, want %q", svc.Namespace, testNamespace)
 	}
 	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
 		t.Errorf("Type = %q, want ClusterIP", svc.Spec.Type)
@@ -106,7 +111,7 @@ func TestBuildMeilisearchService(t *testing.T) {
 }
 
 func TestServiceLabels(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 
 	tests := []struct {
 		name      string

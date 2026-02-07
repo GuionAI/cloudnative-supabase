@@ -1429,7 +1429,7 @@ func (r *SupabaseProjectReconciler) createOrCheckJob(ctx context.Context, projec
 		return nil
 	}
 	if existing.Status.Failed > 0 && existing.Status.Active == 0 {
-		return fmt.Errorf("Job %s has failed", job.Name)
+		return fmt.Errorf("job %s has failed", job.Name)
 	}
 
 	// Job still running

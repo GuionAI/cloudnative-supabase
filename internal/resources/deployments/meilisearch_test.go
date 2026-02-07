@@ -11,25 +11,25 @@ import (
 )
 
 func TestMeilisearchStatefulSetName(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	got := MeilisearchStatefulSetName(project)
-	if got != "my-app-meilisearch" {
-		t.Errorf("MeilisearchStatefulSetName() = %q, want %q", got, "my-app-meilisearch")
+	if got != testProjectName+"-meilisearch" {
+		t.Errorf("MeilisearchStatefulSetName() = %q, want %q", got, testProjectName+"-meilisearch")
 	}
 }
 
 func TestBuildMeilisearchStatefulSet(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 	secretNames := newTestSecretNames()
 
 	sts := BuildMeilisearchStatefulSet(project, secretNames)
 
 	// Metadata
-	if sts.Name != "my-app-meilisearch" {
-		t.Errorf("Name = %q, want %q", sts.Name, "my-app-meilisearch")
+	if sts.Name != testProjectName+"-meilisearch" {
+		t.Errorf("Name = %q, want %q", sts.Name, testProjectName+"-meilisearch")
 	}
-	if sts.Namespace != "test-ns" {
-		t.Errorf("Namespace = %q, want %q", sts.Namespace, "test-ns")
+	if sts.Namespace != testNamespace {
+		t.Errorf("Namespace = %q, want %q", sts.Namespace, testNamespace)
 	}
 
 	// Default replica = 1
@@ -38,8 +38,8 @@ func TestBuildMeilisearchStatefulSet(t *testing.T) {
 	}
 
 	// ServiceName
-	if sts.Spec.ServiceName != "my-app-meilisearch" {
-		t.Errorf("ServiceName = %q, want %q", sts.Spec.ServiceName, "my-app-meilisearch")
+	if sts.Spec.ServiceName != testProjectName+"-meilisearch" {
+		t.Errorf("ServiceName = %q, want %q", sts.Spec.ServiceName, testProjectName+"-meilisearch")
 	}
 
 	// Container
@@ -101,7 +101,7 @@ func TestBuildMeilisearchStatefulSet(t *testing.T) {
 }
 
 func TestBuildMeilisearchStatefulSet_CustomStorage(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Meilisearch.Persistence.Size = "50Gi"
 	project.Spec.Meilisearch.Persistence.StorageClass = "longhorn"
 	secretNames := newTestSecretNames()
@@ -119,7 +119,7 @@ func TestBuildMeilisearchStatefulSet_CustomStorage(t *testing.T) {
 }
 
 func TestBuildMeilisearchStatefulSet_MasterKeySecretRef(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Meilisearch.MasterKeySecretRef = "my-existing-key"
 	secretNames := newTestSecretNames()
 
@@ -167,7 +167,7 @@ func TestNormalizeMeilisearchResources(t *testing.T) {
 }
 
 func TestBuildMeilisearchStatefulSet_ImagePullSecrets(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.ImagePullSecrets = []corev1.LocalObjectReference{
 		{Name: "my-registry-secret"},
 	}
@@ -183,7 +183,7 @@ func TestBuildMeilisearchStatefulSet_ImagePullSecrets(t *testing.T) {
 }
 
 func TestBuildMeilisearchStatefulSet_CustomReplicas(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Meilisearch = &supabasev1alpha1.MeilisearchSpec{Replicas: 2}
 	secretNames := newTestSecretNames()
 

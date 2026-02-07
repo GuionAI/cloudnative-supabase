@@ -8,32 +8,32 @@ import (
 )
 
 func TestSequinRedisStatefulSetName(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	got := SequinRedisStatefulSetName(project)
-	if got != "my-app-sequin-redis" {
-		t.Errorf("SequinRedisStatefulSetName() = %q, want %q", got, "my-app-sequin-redis")
+	if got != testProjectName+"-sequin-redis" {
+		t.Errorf("SequinRedisStatefulSetName() = %q, want %q", got, testProjectName+"-sequin-redis")
 	}
 }
 
 func TestSequinRedisServiceName(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	got := SequinRedisServiceName(project)
-	if got != "my-app-sequin-redis" {
-		t.Errorf("SequinRedisServiceName() = %q, want %q", got, "my-app-sequin-redis")
+	if got != testProjectName+"-sequin-redis" {
+		t.Errorf("SequinRedisServiceName() = %q, want %q", got, testProjectName+"-sequin-redis")
 	}
 }
 
 func TestBuildSequinRedisStatefulSet(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 
 	sts := BuildSequinRedisStatefulSet(project)
 
 	// Metadata
-	if sts.Name != "my-app-sequin-redis" {
-		t.Errorf("Name = %q, want %q", sts.Name, "my-app-sequin-redis")
+	if sts.Name != testProjectName+"-sequin-redis" {
+		t.Errorf("Name = %q, want %q", sts.Name, testProjectName+"-sequin-redis")
 	}
-	if sts.Namespace != "test-ns" {
-		t.Errorf("Namespace = %q, want %q", sts.Namespace, "test-ns")
+	if sts.Namespace != testNamespace {
+		t.Errorf("Namespace = %q, want %q", sts.Namespace, testNamespace)
 	}
 
 	// Always single replica
@@ -42,8 +42,8 @@ func TestBuildSequinRedisStatefulSet(t *testing.T) {
 	}
 
 	// ServiceName matches StatefulSet name
-	if sts.Spec.ServiceName != "my-app-sequin-redis" {
-		t.Errorf("ServiceName = %q, want %q", sts.Spec.ServiceName, "my-app-sequin-redis")
+	if sts.Spec.ServiceName != testProjectName+"-sequin-redis" {
+		t.Errorf("ServiceName = %q, want %q", sts.Spec.ServiceName, testProjectName+"-sequin-redis")
 	}
 
 	// Container
@@ -86,12 +86,14 @@ func TestBuildSequinRedisStatefulSet(t *testing.T) {
 		t.Error("expected RunAsNonRoot=true")
 	}
 
-	// Container security: drop ALL capabilities
-	containerSec := c.SecurityContext
-	if containerSec == nil || !*containerSec.AllowPrivilegeEscalation {
-		// AllowPrivilegeEscalation should be false
+	// Container security: drop ALL capabilities, no privilege escalation
+	if c.SecurityContext == nil {
+		t.Fatal("expected container security context")
 	}
-	if containerSec == nil || len(containerSec.Capabilities.Drop) == 0 {
+	if c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation {
+		t.Error("expected AllowPrivilegeEscalation=false")
+	}
+	if c.SecurityContext.Capabilities == nil || len(c.SecurityContext.Capabilities.Drop) == 0 {
 		t.Error("expected dropped capabilities")
 	}
 
@@ -112,7 +114,7 @@ func TestBuildSequinRedisStatefulSet(t *testing.T) {
 }
 
 func TestBuildSequinRedisStatefulSet_CustomStorage(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Sequin.Redis.Storage.Size = "5Gi"
 	project.Spec.Sequin.Redis.Storage.StorageClass = "fast-ssd"
 
@@ -129,14 +131,14 @@ func TestBuildSequinRedisStatefulSet_CustomStorage(t *testing.T) {
 }
 
 func TestBuildSequinRedisService(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 	svc := BuildSequinRedisService(project)
 
-	if svc.Name != "my-app-sequin-redis" {
-		t.Errorf("Name = %q, want %q", svc.Name, "my-app-sequin-redis")
+	if svc.Name != testProjectName+"-sequin-redis" {
+		t.Errorf("Name = %q, want %q", svc.Name, testProjectName+"-sequin-redis")
 	}
-	if svc.Namespace != "test-ns" {
-		t.Errorf("Namespace = %q, want %q", svc.Namespace, "test-ns")
+	if svc.Namespace != testNamespace {
+		t.Errorf("Namespace = %q, want %q", svc.Namespace, testNamespace)
 	}
 	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
 		t.Errorf("Type = %q, want ClusterIP", svc.Spec.Type)

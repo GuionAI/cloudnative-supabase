@@ -8,10 +8,15 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 )
 
-func newTestProject(name, namespace string) *supabasev1alpha1.SupabaseProject {
+const (
+	testProjectName = "my-app"
+	testNamespace   = "test-ns"
+)
+
+func newTestProject(namespace string) *supabasev1alpha1.SupabaseProject {
 	return &supabasev1alpha1.SupabaseProject{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      testProjectName,
 			Namespace: namespace,
 		},
 		Spec: supabasev1alpha1.SupabaseProjectSpec{
@@ -23,7 +28,7 @@ func newTestProject(name, namespace string) *supabasev1alpha1.SupabaseProject {
 }
 
 func TestSequinSecretNames(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 
 	sequin, sequinPw, sequinRepl := SequinSecretNames(project)
 
@@ -39,7 +44,7 @@ func TestSequinSecretNames(t *testing.T) {
 }
 
 func TestPowersyncSecretNames(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	got := PowersyncSecretNames(project)
 	if got != "my-app-powersync-storage-password" {
 		t.Errorf("got %q, want %q", got, "my-app-powersync-storage-password")
@@ -66,7 +71,7 @@ func TestMeilisearchSecretName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			project := newTestProject("my-app", "default")
+			project := newTestProject("default")
 			project.Spec.Meilisearch.MasterKeySecretRef = tt.masterKeyRef
 
 			got := MeilisearchSecretName(project)
@@ -78,7 +83,7 @@ func TestMeilisearchSecretName(t *testing.T) {
 }
 
 func TestGenerateSequinSecrets(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 
 	secrets, err := GenerateSequinSecrets(project)
 	if err != nil {
@@ -94,8 +99,8 @@ func TestGenerateSequinSecrets(t *testing.T) {
 	if appSecret.Name != "my-app-sequin" {
 		t.Errorf("app secret name = %q, want %q", appSecret.Name, "my-app-sequin")
 	}
-	if appSecret.Namespace != "test-ns" {
-		t.Errorf("app secret namespace = %q, want %q", appSecret.Namespace, "test-ns")
+	if appSecret.Namespace != testNamespace {
+		t.Errorf("app secret namespace = %q, want %q", appSecret.Namespace, testNamespace)
 	}
 
 	requiredAppKeys := []string{"secretKeyBase", "vaultKey", "apiToken"}
@@ -130,7 +135,7 @@ func TestGenerateSequinSecrets(t *testing.T) {
 }
 
 func TestGeneratePowersyncSecrets(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 
 	secrets, err := GeneratePowersyncSecrets(project)
 	if err != nil {
@@ -154,7 +159,7 @@ func TestGeneratePowersyncSecrets(t *testing.T) {
 }
 
 func TestGenerateMeilisearchSecrets(t *testing.T) {
-	project := newTestProject("my-app", "test-ns")
+	project := newTestProject(testNamespace)
 
 	secrets, err := GenerateMeilisearchSecrets(project)
 	if err != nil {
@@ -169,8 +174,8 @@ func TestGenerateMeilisearchSecrets(t *testing.T) {
 	if secret.Name != "my-app-meilisearch-master-key" {
 		t.Errorf("name = %q, want %q", secret.Name, "my-app-meilisearch-master-key")
 	}
-	if secret.Namespace != "test-ns" {
-		t.Errorf("namespace = %q, want %q", secret.Namespace, "test-ns")
+	if secret.Namespace != testNamespace {
+		t.Errorf("namespace = %q, want %q", secret.Namespace, testNamespace)
 	}
 
 	// masterKey should be 64 chars (32 bytes hex)
@@ -181,7 +186,7 @@ func TestGenerateMeilisearchSecrets(t *testing.T) {
 }
 
 func TestGenerateMeilisearchSecrets_ExistingRef(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 	project.Spec.Meilisearch.MasterKeySecretRef = "my-existing-key"
 
 	secrets, err := GenerateMeilisearchSecrets(project)
@@ -195,7 +200,7 @@ func TestGenerateMeilisearchSecrets_ExistingRef(t *testing.T) {
 }
 
 func TestGenerateSecrets_Uniqueness(t *testing.T) {
-	project := newTestProject("my-app", "default")
+	project := newTestProject("default")
 
 	secrets1, err := GenerateSequinSecrets(project)
 	if err != nil {

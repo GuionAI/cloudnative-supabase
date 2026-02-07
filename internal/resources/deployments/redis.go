@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	RedisComponentName = "sequin-redis"
+	RedisComponentName       = "sequin-redis"
 	RedisPort          int32 = 6379
 )
 
