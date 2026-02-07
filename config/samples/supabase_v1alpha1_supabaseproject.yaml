@@ -13,15 +13,6 @@ spec:
       size: 10Gi
       storageClass: local-path
     enableSuperuserAccess: false
-    # Additional roles for CDC tools like Sequin/PowerSync
-    # Uses CNPG RoleConfiguration format directly
-    # additionalRoles:
-    #   - name: sequin_replication
-    #     login: true
-    #     replication: true
-    #     bypassRLS: true
-    #     passwordSecret:
-    #       name: sequin-replication-password
 
   auth:
     siteURL: https://app.example.com
@@ -45,3 +36,34 @@ spec:
     projectName: Example Project
 
   # meta and kong use defaults (always enabled)
+
+  # --- Optional CDC/Search Services ---
+  # Uncomment sections below to enable. Presence = enabled, absence = disabled.
+  # All secrets, roles, and permissions are auto-generated.
+
+  # Sequin CDC/event streaming (bundled Redis auto-deployed)
+  # sequin: {}
+
+  # Sequin with external Redis
+  # sequin:
+  #   replicas: 1
+  #   redis:
+  #     external:
+  #       host: redis.infra.svc
+  #       port: 6379
+
+  # Powersync offline-first sync
+  # powersync:
+  #   api:
+  #     replicas: 2
+  #   syncRules:
+  #     inline: |
+  #       bucket_definitions:
+  #         global:
+  #           data:
+  #             - SELECT * FROM public.*
+
+  # Meilisearch full-text search
+  # meilisearch:
+  #   persistence:
+  #     size: 10Gi

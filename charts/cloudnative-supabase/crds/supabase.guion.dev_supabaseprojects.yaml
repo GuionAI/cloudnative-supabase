@@ -878,6 +878,107 @@ spec:
                         type: object
                     type: object
                 type: object
+              meilisearch:
+                description: Meilisearch full-text search configuration (optional
+                  - presence enables Meilisearch)
+                properties:
+                  image:
+                    description: 'Image configuration (default: getmeili/meilisearch:v1.11.0)'
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: 'PullPolicy (default: IfNotPresent)'
+                        type: string
+                      registry:
+                        description: 'Registry (default: docker.io)'
+                        type: string
+                      repository:
+                        description: Repository (e.g., sequin/sequin)
+                        type: string
+                      tag:
+                        description: Tag (pinned stable version per service)
+                        type: string
+                    type: object
+                  masterKeySecretRef:
+                    description: MasterKeySecretRef for existing secret (optional,
+                      auto-generated if not provided)
+                    type: string
+                  persistence:
+                    description: Persistence configuration
+                    properties:
+                      size:
+                        default: 10Gi
+                        description: 'Size (default: 10Gi)'
+                        type: string
+                      storageClass:
+                        description: 'StorageClass (default: "" = cluster default)'
+                        type: string
+                    type: object
+                  replicas:
+                    default: 1
+                    description: 'Replicas (default: 1)'
+                    format: int32
+                    type: integer
+                  resources:
+                    description: Resources for Meilisearch pods
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                type: object
               meta:
                 description: Meta service configuration (postgres-meta)
                 properties:
@@ -948,6 +1049,248 @@ spec:
                           otherwise to an implementation-defined value. Requests cannot exceed Limits.
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
+                    type: object
+                type: object
+              powersync:
+                description: Powersync offline-first sync configuration (optional
+                  - presence enables Powersync)
+                properties:
+                  api:
+                    description: API deployment configuration (client-facing)
+                    properties:
+                      nodeOptions:
+                        description: 'NodeOptions for heap size (default: "--max-old-space-size=330")'
+                        type: string
+                      replicas:
+                        default: 2
+                        description: 'Replicas (default: 2)'
+                        format: int32
+                        type: integer
+                      resources:
+                        description: Resources for Powersync API pods
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                    type: object
+                  compact:
+                    description: Compact CronJob configuration
+                    properties:
+                      enabled:
+                        default: true
+                        description: 'Enabled (default: true)'
+                        type: boolean
+                      resources:
+                        description: Resources for compaction pods
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                      schedule:
+                        default: 0 3 * * *
+                        description: 'Schedule in cron format (default: "0 3 * * *"
+                          = 3am daily)'
+                        type: string
+                    type: object
+                  image:
+                    description: 'Image configuration (default: journeyapps/powersync-service:1.18.2)'
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: 'PullPolicy (default: IfNotPresent)'
+                        type: string
+                      registry:
+                        description: 'Registry (default: docker.io)'
+                        type: string
+                      repository:
+                        description: Repository (e.g., sequin/sequin)
+                        type: string
+                      tag:
+                        description: Tag (pinned stable version per service)
+                        type: string
+                    type: object
+                  replication:
+                    description: Replication deployment configuration (CDC processing)
+                    properties:
+                      nodeOptions:
+                        description: 'NodeOptions for heap size (default: "--max-old-space-size=482")'
+                        type: string
+                      resources:
+                        description: Resources for Powersync replication pods
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                    type: object
+                  syncRules:
+                    description: Sync rules configuration
+                    properties:
+                      configMapRef:
+                        description: Reference to external ConfigMap containing sync
+                          rules (takes precedence over Inline)
+                        type: string
+                      inline:
+                        description: Inline sync rules (YAML string)
+                        type: string
                     type: object
                 type: object
               rest:
@@ -1071,6 +1414,200 @@ spec:
                   rule: self.autoGenerate || (self.jwt.size() > 0 && self.supabaseAdmin.size()
                     > 0 && self.authenticator.size() > 0 && self.authAdmin.size()
                     > 0)
+              sequin:
+                description: Sequin CDC/event streaming configuration (optional -
+                  presence enables Sequin)
+                properties:
+                  account:
+                    description: Account/user configuration
+                    properties:
+                      email:
+                        description: 'Admin user email (default: "admin@example.com")'
+                        type: string
+                      name:
+                        default: default
+                        description: 'Account name (default: "default")'
+                        type: string
+                    type: object
+                  image:
+                    description: 'Image configuration (default: sequin/sequin:v0.13.25)'
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: 'PullPolicy (default: IfNotPresent)'
+                        type: string
+                      registry:
+                        description: 'Registry (default: docker.io)'
+                        type: string
+                      repository:
+                        description: Repository (e.g., sequin/sequin)
+                        type: string
+                      tag:
+                        description: Tag (pinned stable version per service)
+                        type: string
+                    type: object
+                  redis:
+                    description: Redis configuration - external reference required
+                      for Phase 1
+                    properties:
+                      external:
+                        description: External Redis reference. If nil, operator deploys
+                          bundled Redis.
+                        properties:
+                          host:
+                            description: Host of external Redis instance
+                            type: string
+                          passwordSecretRef:
+                            description: PasswordSecretRef for Redis AUTH (optional)
+                            type: string
+                          port:
+                            default: 6379
+                            description: 'Port (default: 6379)'
+                            format: int32
+                            type: integer
+                        required:
+                        - host
+                        type: object
+                      resources:
+                        description: |-
+                          Resources for bundled Redis (default: 128Mi/50m request, 256Mi/200m limit)
+                          Ignored when External is set.
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                      storage:
+                        description: |-
+                          Storage for bundled Redis persistence (default: 2Gi)
+                          Ignored when External is set.
+                        properties:
+                          size:
+                            default: 2Gi
+                            description: 'Size (default: 2Gi)'
+                            type: string
+                          storageClass:
+                            description: 'StorageClass (default: "" = cluster default)'
+                            type: string
+                        type: object
+                    type: object
+                  replicas:
+                    default: 1
+                    description: 'Replicas (default: 1)'
+                    format: int32
+                    type: integer
+                  resources:
+                    description: Resources for Sequin pods
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                type: object
               studio:
                 description: Studio dashboard configuration
                 properties:
@@ -1277,6 +1814,26 @@ spec:
                   jwt:
                     description: JWT is the name of the JWT secret
                     type: string
+                  meilisearchMasterKey:
+                    description: MeilisearchMasterKey is the name of the Meilisearch
+                      master key secret
+                    type: string
+                  powersyncStoragePassword:
+                    description: PowersyncStoragePassword is the name of the powersync_storage
+                      role password secret
+                    type: string
+                  sequin:
+                    description: Sequin is the name of the Sequin secret (secretKeyBase,
+                      vaultKey, apiToken)
+                    type: string
+                  sequinPassword:
+                    description: SequinPassword is the name of the sequin database
+                      role password secret
+                    type: string
+                  sequinReplicationPassword:
+                    description: SequinReplicationPassword is the name of the sequin_replication
+                      role password secret
+                    type: string
                   supabaseAdmin:
                     description: SupabaseAdmin is the name of the supabase_admin password
                       secret
@@ -1313,6 +1870,20 @@ spec:
                     required:
                     - ready
                     type: object
+                  meilisearch:
+                    description: ServiceStatus defines individual service status
+                    properties:
+                      availableReplicas:
+                        description: AvailableReplicas is the number of available
+                          replicas
+                        format: int32
+                        type: integer
+                      ready:
+                        description: Ready indicates if the service is ready
+                        type: boolean
+                    required:
+                    - ready
+                    type: object
                   meta:
                     description: ServiceStatus defines individual service status
                     properties:
@@ -1327,7 +1898,49 @@ spec:
                     required:
                     - ready
                     type: object
+                  powersyncApi:
+                    description: ServiceStatus defines individual service status
+                    properties:
+                      availableReplicas:
+                        description: AvailableReplicas is the number of available
+                          replicas
+                        format: int32
+                        type: integer
+                      ready:
+                        description: Ready indicates if the service is ready
+                        type: boolean
+                    required:
+                    - ready
+                    type: object
+                  powersyncReplication:
+                    description: ServiceStatus defines individual service status
+                    properties:
+                      availableReplicas:
+                        description: AvailableReplicas is the number of available
+                          replicas
+                        format: int32
+                        type: integer
+                      ready:
+                        description: Ready indicates if the service is ready
+                        type: boolean
+                    required:
+                    - ready
+                    type: object
                   rest:
+                    description: ServiceStatus defines individual service status
+                    properties:
+                      availableReplicas:
+                        description: AvailableReplicas is the number of available
+                          replicas
+                        format: int32
+                        type: integer
+                      ready:
+                        description: Ready indicates if the service is ready
+                        type: boolean
+                    required:
+                    - ready
+                    type: object
+                  sequin:
                     description: ServiceStatus defines individual service status
                     properties:
                       availableReplicas:
