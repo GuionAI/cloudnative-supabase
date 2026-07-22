@@ -5,7 +5,13 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
-grep -Fq 'platforms: linux/amd64,linux/arm64' .github/workflows/pr.yaml
+for workflow in .github/workflows/ci.yaml .github/workflows/pr.yaml .github/workflows/release.yaml; do
+  grep -Fq 'platforms: linux/amd64' "${workflow}"
+done
+if rg -q 'linux/arm64' .github/workflows Makefile; then
+  echo 'delivery must not build unused arm64 images' >&2
+  exit 1
+fi
 if grep -Fq 'type=raw,value=latest' .github/workflows/release.yaml; then
   echo 'release workflow must not overwrite the main branch latest tag' >&2
   exit 1
