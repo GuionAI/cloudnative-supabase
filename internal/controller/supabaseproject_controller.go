@@ -34,11 +34,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/yaml"
 
@@ -184,7 +187,7 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	project.Status.ObservedGeneration = project.Generation
 	r.setCondition(project, supabasev1alpha1.ConditionTypeReady, metav1.ConditionTrue, "AllComponentsReady", "All Supabase components are running")
 
-	if err := r.Status().Update(ctx, project); err != nil {
+	if err := r.updateProjectStatus(ctx, project); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -198,7 +201,7 @@ func (r *SupabaseProjectReconciler) reconcilePowerSyncRulesValidation(ctx contex
 		return rules, nil
 	}
 	r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "InvalidSyncRules", err.Error())
-	if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+	if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 		return nil, statusErr
 	}
 	return nil, err
@@ -244,14 +247,14 @@ func (r *SupabaseProjectReconciler) waitForPowerSyncManagedRoles(ctx context.Con
 	ready, err := powerSyncManagedRolesReady(cluster)
 	if err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "ManagedRolesFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, err
 	}
 	if !ready {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "ManagedRolesPending", "Waiting for CloudNativePG to reconcile PowerSync roles")
-		if err := r.Status().Update(ctx, project); err != nil {
+		if err := r.updateProjectStatus(ctx, project); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
@@ -279,7 +282,9 @@ func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, projec
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling secrets")
 
-	project.Status.Phase = supabasev1alpha1.PhaseProvisioning
+	if project.Status.Phase == supabasev1alpha1.PhasePending {
+		project.Status.Phase = supabasev1alpha1.PhaseProvisioning
+	}
 
 	// Check if user-specified secrets mode is enabled
 	if project.Spec.Secrets != nil && !project.Spec.Secrets.AutoGenerate {
@@ -303,7 +308,7 @@ func (r *SupabaseProjectReconciler) reconcileUserSpecifiedSecrets(ctx context.Co
 		if apierrors.IsNotFound(err) {
 			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "SecretNotFound",
 				fmt.Sprintf("JWT secret %s not found", secretNames.JWT))
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 				return statusErr
 			}
 			return fmt.Errorf("JWT secret %s not found", secretNames.JWT)
@@ -312,7 +317,7 @@ func (r *SupabaseProjectReconciler) reconcileUserSpecifiedSecrets(ctx context.Co
 	}
 	if err := secrets.ValidateJWTSecret(jwtSecret); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "InvalidSecret", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
 		}
 		return err
@@ -335,7 +340,7 @@ func (r *SupabaseProjectReconciler) reconcileUserSpecifiedSecrets(ctx context.Co
 			if apierrors.IsNotFound(err) {
 				r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "SecretNotFound",
 					fmt.Sprintf("Secret %s for role %s not found", secretName, roleName))
-				if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 					return statusErr
 				}
 				return fmt.Errorf("secret %s for role %s not found", secretName, roleName)
@@ -344,7 +349,7 @@ func (r *SupabaseProjectReconciler) reconcileUserSpecifiedSecrets(ctx context.Co
 		}
 		if err := secrets.ValidateRoleSecret(secret, secretName); err != nil {
 			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "InvalidSecret", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 				return statusErr
 			}
 			return err
@@ -354,7 +359,7 @@ func (r *SupabaseProjectReconciler) reconcileUserSpecifiedSecrets(ctx context.Co
 	// All secrets validated successfully
 	project.Status.SecretNames = secretNames
 	r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionTrue, "SecretsValidated", "All user-specified secrets are valid")
-	if err := r.Status().Update(ctx, project); err != nil {
+	if err := r.updateProjectStatus(ctx, project); err != nil {
 		return err
 	}
 
@@ -410,7 +415,7 @@ func (r *SupabaseProjectReconciler) reconcileAutoGeneratedSecrets(ctx context.Co
 
 			project.Status.SecretNames = secretNames
 			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionTrue, "SecretsExist", "All secrets exist")
-			if err := r.Status().Update(ctx, project); err != nil {
+			if err := r.updateProjectStatus(ctx, project); err != nil {
 				return err
 			}
 			return nil
@@ -424,7 +429,7 @@ func (r *SupabaseProjectReconciler) reconcileAutoGeneratedSecrets(ctx context.Co
 	generatedSecrets, secretNames, err := secrets.GenerateSecrets(project)
 	if err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "GenerationFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
 		}
 		return err
@@ -434,7 +439,7 @@ func (r *SupabaseProjectReconciler) reconcileAutoGeneratedSecrets(ctx context.Co
 	for _, secret := range generatedSecrets {
 		if err := r.createOrUpdateSecret(ctx, project, secret); err != nil {
 			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "CreateFailed", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 				return statusErr
 			}
 			return err
@@ -452,7 +457,7 @@ func (r *SupabaseProjectReconciler) reconcileAutoGeneratedSecrets(ctx context.Co
 	project.Status.SecretNames = secretNames
 
 	r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionTrue, "SecretsCreated", "All secrets have been created")
-	if err := r.Status().Update(ctx, project); err != nil {
+	if err := r.updateProjectStatus(ctx, project); err != nil {
 		return err
 	}
 
@@ -488,7 +493,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersyncSecrets(ctx context.Contex
 	psSecrets, err := secrets.GeneratePowersyncSecrets(project)
 	if err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "PowersyncSecretsFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
 		}
 		return err
@@ -497,7 +502,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersyncSecrets(ctx context.Contex
 	for _, secret := range psSecrets {
 		if err := r.createOrUpdateSecret(ctx, project, secret); err != nil {
 			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "CreateFailed", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 				return statusErr
 			}
 			return err
@@ -538,14 +543,14 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 			log.Info("Creating CNPG Cluster", "name", cluster.Name)
 			if err := r.Create(ctx, cluster); err != nil {
 				r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "CreateFailed", err.Error())
-				if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 					return ctrl.Result{}, statusErr
 				}
 				return ctrl.Result{}, err
 			}
 
 			r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "Creating", "CNPG Cluster is being created")
-			if err := r.Status().Update(ctx, project); err != nil {
+			if err := r.updateProjectStatus(ctx, project); err != nil {
 				return ctrl.Result{}, err
 			}
 
@@ -595,7 +600,7 @@ func (r *SupabaseProjectReconciler) waitForDatabase(ctx context.Context, project
 
 		r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "WaitingForInstances",
 			fmt.Sprintf("Waiting for database instances: %d/%d ready", cluster.Status.ReadyInstances, cluster.Spec.Instances))
-		if err := r.Status().Update(ctx, project); err != nil {
+		if err := r.updateProjectStatus(ctx, project); err != nil {
 			return ctrl.Result{}, err
 		}
 
@@ -616,7 +621,7 @@ func (r *SupabaseProjectReconciler) waitForDatabase(ctx context.Context, project
 	}
 
 	r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionTrue, "Ready", "Database is ready")
-	if err := r.Status().Update(ctx, project); err != nil {
+	if err := r.updateProjectStatus(ctx, project); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -668,7 +673,7 @@ func (r *SupabaseProjectReconciler) reconcileServiceComponent(ctx context.Contex
 	log.V(1).Info(fmt.Sprintf("Built %s deployment", config.name), config.logFields...)
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, config.conditionType, metav1.ConditionFalse, "DeploymentFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
 		}
 		return err
@@ -678,7 +683,7 @@ func (r *SupabaseProjectReconciler) reconcileServiceComponent(ctx context.Contex
 	service := config.buildService()
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
 		r.setCondition(project, config.conditionType, metav1.ConditionFalse, "ServiceFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
 		}
 		return err
@@ -764,7 +769,7 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 	log.V(1).Info("Built Kong ConfigMap", "name", kongConfig.Name)
 	if err := r.createOrUpdateConfigMap(ctx, project, kongConfig); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
 		}
 		return err
@@ -776,7 +781,7 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 		"image", fmt.Sprintf("%s:%s", "kong", project.Spec.Kong.ImageTag))
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
 		}
 		return err
@@ -786,7 +791,7 @@ func (r *SupabaseProjectReconciler) reconcileKong(ctx context.Context, project *
 	service := services.BuildKongService(project)
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeKongReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
 		}
 		return err
@@ -839,6 +844,9 @@ func (r *SupabaseProjectReconciler) createOrUpdateConfigMap(ctx context.Context,
 	}
 
 	// Update existing
+	if apiequality.Semantic.DeepEqual(existing.Data, configMap.Data) {
+		return nil
+	}
 	existing.Data = configMap.Data
 	return r.Update(ctx, existing)
 }
@@ -866,11 +874,102 @@ func (r *SupabaseProjectReconciler) createOrUpdateDeployment(ctx context.Context
 		return err
 	}
 
-	// Update existing - only update operator-owned fields
+	desired := deployment.DeepCopy()
+	actual := existing.DeepCopy()
+	normalizePodTemplateDefaults(&desired.Spec.Template)
+	normalizePodTemplateDefaults(&actual.Spec.Template)
+	if apiequality.Semantic.DeepEqual(actual.Spec.Replicas, desired.Spec.Replicas) &&
+		apiequality.Semantic.DeepEqual(actual.Spec.Template, desired.Spec.Template) {
+		return nil
+	}
+
+	// Update existing - only update operator-owned fields.
 	log.V(1).Info("Updating deployment", "name", deployment.Name)
-	existing.Spec.Replicas = deployment.Spec.Replicas
-	existing.Spec.Template = deployment.Spec.Template
+	existing.Spec.Replicas = desired.Spec.Replicas
+	existing.Spec.Template = desired.Spec.Template
 	return r.Update(ctx, existing)
+}
+
+func normalizePodTemplateDefaults(template *corev1.PodTemplateSpec) {
+	spec := &template.Spec
+	if spec.RestartPolicy == "" {
+		spec.RestartPolicy = corev1.RestartPolicyAlways
+	}
+	if spec.TerminationGracePeriodSeconds == nil {
+		spec.TerminationGracePeriodSeconds = ptr.To[int64](30)
+	}
+	if spec.DNSPolicy == "" {
+		spec.DNSPolicy = corev1.DNSClusterFirst
+	}
+	if spec.SecurityContext == nil {
+		spec.SecurityContext = &corev1.PodSecurityContext{}
+	}
+	if spec.SchedulerName == "" {
+		spec.SchedulerName = corev1.DefaultSchedulerName
+	}
+	for i := range spec.Volumes {
+		normalizeVolumeDefaults(&spec.Volumes[i])
+	}
+	for i := range spec.InitContainers {
+		normalizeContainerDefaults(&spec.InitContainers[i])
+	}
+	for i := range spec.Containers {
+		normalizeContainerDefaults(&spec.Containers[i])
+	}
+}
+
+func normalizeVolumeDefaults(volume *corev1.Volume) {
+	const defaultMode int32 = 0o644
+	if volume.ConfigMap != nil && volume.ConfigMap.DefaultMode == nil {
+		volume.ConfigMap.DefaultMode = ptr.To(defaultMode)
+	}
+	if volume.Secret != nil && volume.Secret.DefaultMode == nil {
+		volume.Secret.DefaultMode = ptr.To(defaultMode)
+	}
+	if volume.DownwardAPI != nil && volume.DownwardAPI.DefaultMode == nil {
+		volume.DownwardAPI.DefaultMode = ptr.To(defaultMode)
+	}
+	if volume.Projected != nil && volume.Projected.DefaultMode == nil {
+		volume.Projected.DefaultMode = ptr.To(defaultMode)
+	}
+}
+
+func normalizeContainerDefaults(container *corev1.Container) {
+	if container.TerminationMessagePath == "" {
+		container.TerminationMessagePath = corev1.TerminationMessagePathDefault
+	}
+	if container.TerminationMessagePolicy == "" {
+		container.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+	}
+	for i := range container.Ports {
+		if container.Ports[i].Protocol == "" {
+			container.Ports[i].Protocol = corev1.ProtocolTCP
+		}
+	}
+	normalizeProbeDefaults(container.LivenessProbe)
+	normalizeProbeDefaults(container.ReadinessProbe)
+	normalizeProbeDefaults(container.StartupProbe)
+}
+
+func normalizeProbeDefaults(probe *corev1.Probe) {
+	if probe == nil {
+		return
+	}
+	if probe.TimeoutSeconds == 0 {
+		probe.TimeoutSeconds = 1
+	}
+	if probe.PeriodSeconds == 0 {
+		probe.PeriodSeconds = 10
+	}
+	if probe.SuccessThreshold == 0 {
+		probe.SuccessThreshold = 1
+	}
+	if probe.FailureThreshold == 0 {
+		probe.FailureThreshold = 3
+	}
+	if probe.HTTPGet != nil && probe.HTTPGet.Scheme == "" {
+		probe.HTTPGet.Scheme = corev1.URISchemeHTTP
+	}
 }
 
 func (r *SupabaseProjectReconciler) createOrUpdateService(ctx context.Context, project *supabasev1alpha1.SupabaseProject, service *corev1.Service) error {
@@ -895,6 +994,10 @@ func (r *SupabaseProjectReconciler) createOrUpdateService(ctx context.Context, p
 	}
 
 	// Update existing (preserve ClusterIP)
+	if apiequality.Semantic.DeepEqual(existing.Spec.Ports, service.Spec.Ports) &&
+		apiequality.Semantic.DeepEqual(existing.Spec.Selector, service.Spec.Selector) {
+		return nil
+	}
 	existing.Spec.Ports = service.Spec.Ports
 	existing.Spec.Selector = service.Spec.Selector
 	return r.Update(ctx, existing)
@@ -948,7 +1051,7 @@ func (r *SupabaseProjectReconciler) reconcileBackup(ctx context.Context, project
 
 	// Success
 	r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionTrue, "BackupConfigured", "Backup infrastructure is ready")
-	return r.Status().Update(ctx, project)
+	return r.updateProjectStatus(ctx, project)
 }
 
 // cleanupBackupResources removes ObjectStore and ScheduledBackup when backup is disabled
@@ -988,7 +1091,7 @@ func (r *SupabaseProjectReconciler) cleanupBackupResources(ctx context.Context, 
 
 	// Remove stale condition after successful cleanup
 	meta.RemoveStatusCondition(&project.Status.Conditions, supabasev1alpha1.ConditionTypeBackupReady)
-	return r.Status().Update(ctx, project)
+	return r.updateProjectStatus(ctx, project)
 }
 
 // reconcileRecovery handles recovery ObjectStore creation
@@ -1021,7 +1124,7 @@ func (r *SupabaseProjectReconciler) reconcileRecovery(ctx context.Context, proje
 
 	// Success
 	r.setCondition(project, supabasev1alpha1.ConditionTypeRecoveryReady, metav1.ConditionTrue, "RecoveryConfigured", "Recovery infrastructure is ready")
-	return r.Status().Update(ctx, project)
+	return r.updateProjectStatus(ctx, project)
 }
 
 // cleanupRecoveryResources removes recovery ObjectStore when recovery is disabled
@@ -1048,13 +1151,13 @@ func (r *SupabaseProjectReconciler) cleanupRecoveryResources(ctx context.Context
 
 	// Remove stale condition after successful cleanup
 	meta.RemoveStatusCondition(&project.Status.Conditions, supabasev1alpha1.ConditionTypeRecoveryReady)
-	return r.Status().Update(ctx, project)
+	return r.updateProjectStatus(ctx, project)
 }
 
 // failRecovery sets RecoveryReady=False condition and updates status
 func (r *SupabaseProjectReconciler) failRecovery(ctx context.Context, project *supabasev1alpha1.SupabaseProject, reason string, err error) error {
 	r.setCondition(project, supabasev1alpha1.ConditionTypeRecoveryReady, metav1.ConditionFalse, reason, err.Error())
-	if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+	if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 		return statusErr
 	}
 	return err
@@ -1084,7 +1187,7 @@ func (r *SupabaseProjectReconciler) validateS3Secret(ctx context.Context, namesp
 // failBackup sets BackupReady=False condition and updates status
 func (r *SupabaseProjectReconciler) failBackup(ctx context.Context, project *supabasev1alpha1.SupabaseProject, reason string, err error) error {
 	r.setCondition(project, supabasev1alpha1.ConditionTypeBackupReady, metav1.ConditionFalse, reason, err.Error())
-	if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+	if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 		return statusErr
 	}
 	return err
@@ -1107,8 +1210,15 @@ func (r *SupabaseProjectReconciler) createOrUpdateObjectStore(ctx context.Contex
 		return fmt.Errorf("failed to get ObjectStore: %w", err)
 	}
 
-	// Update existing ObjectStore
-	existing.Spec = objectStore.Spec
+	if apiequality.Semantic.DeepEqual(existing.Spec.Configuration, objectStore.Spec.Configuration) &&
+		existing.Spec.RetentionPolicy == objectStore.Spec.RetentionPolicy {
+		return nil
+	}
+
+	// Update only fields owned by this controller. The ObjectStore CRD defaults
+	// instanceSidecarConfiguration, so preserve that API-managed field.
+	existing.Spec.Configuration = objectStore.Spec.Configuration
+	existing.Spec.RetentionPolicy = objectStore.Spec.RetentionPolicy
 	if err := r.Update(ctx, existing); err != nil {
 		return fmt.Errorf("failed to update ObjectStore: %w", err)
 	}
@@ -1132,7 +1242,11 @@ func (r *SupabaseProjectReconciler) createOrUpdateScheduledBackup(ctx context.Co
 		return fmt.Errorf("failed to get ScheduledBackup: %w", err)
 	}
 
-	// Update existing ScheduledBackup
+	if apiequality.Semantic.DeepEqual(existing.Spec, scheduledBackup.Spec) {
+		return nil
+	}
+
+	// Update existing ScheduledBackup.
 	existing.Spec = scheduledBackup.Spec
 	if err := r.Update(ctx, existing); err != nil {
 		return fmt.Errorf("failed to update ScheduledBackup: %w", err)
@@ -1153,7 +1267,7 @@ func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context,
 	configMap := jobs.BuildCDCMigrationsConfigMap(project)
 	if err := r.createOrUpdateConfigMap(ctx, project, configMap); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, err
@@ -1167,7 +1281,7 @@ func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context,
 	completed, err := r.createOrCheckJob(ctx, project, job, scriptHash)
 	if err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "JobFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, err
@@ -1175,7 +1289,7 @@ func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context,
 
 	if !completed {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "JobRunning", "CDC permissions Job is still running")
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
@@ -1208,21 +1322,33 @@ func (r *SupabaseProjectReconciler) reconcilePowerSyncPublication(ctx context.Co
 			return ctrl.Result{}, err
 		}
 		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "PublicationPending", "Waiting for the PowerSync publication")
-		if err := r.Status().Update(ctx, project); err != nil {
+		if err := r.updateProjectStatus(ctx, project); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
 	}
 
-	before := existing.DeepCopy()
-	existing.Spec = desired.Spec
-	existing.Labels = desired.Labels
+	needsUpdate := !apiequality.Semantic.DeepEqual(desired.Spec, existing.Spec)
+	if needsUpdate {
+		existing.Spec = desired.Spec
+	}
+	if existing.Labels == nil && len(desired.Labels) > 0 {
+		existing.Labels = make(map[string]string, len(desired.Labels))
+	}
+	for key, value := range desired.Labels {
+		if existing.Labels[key] != value {
+			existing.Labels[key] = value
+			needsUpdate = true
+		}
+	}
+	ownerReferences := append([]metav1.OwnerReference(nil), existing.OwnerReferences...)
 	if err := controllerutil.SetControllerReference(project, existing, r.Scheme); err != nil {
 		return ctrl.Result{}, err
 	}
-	if !apiequality.Semantic.DeepEqual(before.Spec, existing.Spec) ||
-		!apiequality.Semantic.DeepEqual(before.Labels, existing.Labels) ||
-		!apiequality.Semantic.DeepEqual(before.OwnerReferences, existing.OwnerReferences) {
+	if !apiequality.Semantic.DeepEqual(ownerReferences, existing.OwnerReferences) {
+		needsUpdate = true
+	}
+	if needsUpdate {
 		if err := r.Update(ctx, existing); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating PowerSync publication: %w", err)
 		}
@@ -1235,7 +1361,7 @@ func (r *SupabaseProjectReconciler) reconcilePowerSyncPublication(ctx context.Co
 			message = existing.Status.Message
 		}
 		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "PublicationPending", message)
-		if err := r.Status().Update(ctx, project); err != nil {
+		if err := r.updateProjectStatus(ctx, project); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
@@ -1260,7 +1386,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	psConfig := configmaps.BuildPowersyncConfigMap(project)
 	if err := r.createOrUpdateConfigMap(ctx, project, psConfig); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, err
@@ -1271,7 +1397,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	if syncRulesConfigMap != nil {
 		if err := r.createOrUpdateConfigMap(ctx, project, syncRulesConfigMap); err != nil {
 			r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "SyncRulesConfigMapFailed", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 				return ctrl.Result{}, statusErr
 			}
 			return ctrl.Result{}, err
@@ -1283,7 +1409,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	applyPowerSyncConfigHash(apiDeployment, psConfig.Data["config.json"], syncRulesContent)
 	if err := r.createOrUpdateDeployment(ctx, project, apiDeployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "APIDeploymentFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, err
@@ -1293,7 +1419,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	apiService := services.BuildPowersyncAPIService(project)
 	if err := r.createOrUpdateService(ctx, project, apiService); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "APIServiceFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, err
@@ -1304,7 +1430,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	applyPowerSyncConfigHash(replDeployment, psConfig.Data["config.json"], syncRulesContent)
 	if err := r.createOrUpdateDeployment(ctx, project, replDeployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "ReplicationDeploymentFailed", err.Error())
-		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, err
@@ -1315,7 +1441,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	if compactCronJob != nil {
 		if err := r.createOrUpdateCronJob(ctx, project, compactCronJob); err != nil {
 			r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "CronJobFailed", err.Error())
-			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 				return ctrl.Result{}, statusErr
 			}
 			return ctrl.Result{}, err
@@ -1336,7 +1462,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	project.Status.Services.PowersyncReplication = supabasev1alpha1.ServiceStatus{Ready: replicationReady, AvailableReplicas: replicationAvailable}
 	if !apiReady || !replicationReady {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "DeploymentsPending", "Waiting for PowerSync deployments to become ready")
-		if err := r.Status().Update(ctx, project); err != nil {
+		if err := r.updateProjectStatus(ctx, project); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
@@ -1388,7 +1514,7 @@ func (r *SupabaseProjectReconciler) cleanupPowerSync(ctx context.Context, projec
 	project.Status.Services.PowersyncReplication = supabasev1alpha1.ServiceStatus{}
 	meta.RemoveStatusCondition(&project.Status.Conditions, supabasev1alpha1.ConditionTypeCDCReady)
 	meta.RemoveStatusCondition(&project.Status.Conditions, supabasev1alpha1.ConditionTypePowersyncReady)
-	return r.Status().Update(ctx, project)
+	return r.updateProjectStatus(ctx, project)
 }
 
 func powerSyncStatusNeedsCleanup(project *supabasev1alpha1.SupabaseProject) bool {
@@ -1441,6 +1567,17 @@ func powersyncDeploymentIsReady(deployment *appsv1.Deployment) bool {
 		deployment.Status.UnavailableReplicas == 0
 }
 
+func (r *SupabaseProjectReconciler) updateProjectStatus(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	current := &supabasev1alpha1.SupabaseProject{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(project), current); err != nil {
+		return err
+	}
+	if apiequality.Semantic.DeepEqual(current.Status, project.Status) {
+		return nil
+	}
+	return r.Status().Update(ctx, project)
+}
+
 // createOrUpdateCronJob creates or updates a CronJob resource
 func (r *SupabaseProjectReconciler) createOrUpdateCronJob(ctx context.Context, project *supabasev1alpha1.SupabaseProject, cronJob *batchv1.CronJob) error {
 	log := logf.FromContext(ctx)
@@ -1459,9 +1596,24 @@ func (r *SupabaseProjectReconciler) createOrUpdateCronJob(ctx context.Context, p
 		return err
 	}
 
-	// Update existing
-	existing.Spec = cronJob.Spec
+	desired := cronJob.DeepCopy()
+	actual := existing.DeepCopy()
+	normalizeCronJobDefaults(&desired.Spec)
+	normalizeCronJobDefaults(&actual.Spec)
+	if apiequality.Semantic.DeepEqual(actual.Spec, desired.Spec) {
+		return nil
+	}
+
+	// Update existing.
+	existing.Spec = desired.Spec
 	return r.Update(ctx, existing)
+}
+
+func normalizeCronJobDefaults(spec *batchv1.CronJobSpec) {
+	if spec.Suspend == nil {
+		spec.Suspend = ptr.To(false)
+	}
+	normalizePodTemplateDefaults(&spec.JobTemplate.Spec.Template)
 }
 
 const cdcScriptHashAnnotation = "supabase.guion.dev/cdc-script-hash"
@@ -1562,7 +1714,7 @@ func (r *SupabaseProjectReconciler) mapPowerSyncConfigMapToProjects(ctx context.
 // SetupWithManager sets up the controller with the Manager.
 func (r *SupabaseProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&supabasev1alpha1.SupabaseProject{}).
+		For(&supabasev1alpha1.SupabaseProject{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&corev1.Secret{}).
 		Owns(&corev1.ConfigMap{}).
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.mapPowerSyncConfigMapToProjects)).

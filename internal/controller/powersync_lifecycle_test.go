@@ -88,6 +88,36 @@ func TestPowerSyncStatusNeedsCleanup(t *testing.T) {
 	}
 }
 
+func TestReconcileSecretsDoesNotDowngradeRunningPhase(t *testing.T) {
+	t.Parallel()
+
+	scheme := newPowerSyncTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default", UID: "project-uid"},
+		Status:     supabasev1alpha1.SupabaseProjectStatus{Phase: supabasev1alpha1.PhaseRunning},
+	}
+	objects := []client.Object{project}
+	for _, name := range []string{
+		"app-jwt",
+		"app-supabase-admin-password",
+		"app-authenticator-password",
+		"app-auth-admin-password",
+	} {
+		objects = append(objects, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}})
+	}
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(objects...).Build(),
+		Scheme: scheme,
+	}
+
+	if err := reconciler.reconcileSecrets(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	if project.Status.Phase != supabasev1alpha1.PhaseRunning {
+		t.Fatalf("phase = %q, want %q", project.Status.Phase, supabasev1alpha1.PhaseRunning)
+	}
+}
+
 func TestCleanupPowerSyncCompactDeletesOwnedCronJob(t *testing.T) {
 	t.Parallel()
 
