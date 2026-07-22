@@ -279,7 +279,9 @@ func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, projec
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling secrets")
 
-	project.Status.Phase = supabasev1alpha1.PhaseProvisioning
+	if project.Status.Phase == supabasev1alpha1.PhasePending {
+		project.Status.Phase = supabasev1alpha1.PhaseProvisioning
+	}
 
 	// Check if user-specified secrets mode is enabled
 	if project.Spec.Secrets != nil && !project.Spec.Secrets.AutoGenerate {
