@@ -2,12 +2,15 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/guionai/cloudnative-supabase
-  tag: "0.1.8"
+  # Defaults to Chart.appVersion so OCI chart releases select the matching image.
+  tag: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
+# Overrides app.kubernetes.io/version when deploying an immutable image tag.
+versionOverride: ""
 
 serviceAccount:
   # Specifies whether a service account should be created

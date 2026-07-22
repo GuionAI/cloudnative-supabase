@@ -229,7 +229,7 @@ spec:
                     type: array
                   additionalRoles:
                     description: |-
-                      AdditionalRoles beyond the standard Supabase roles (e.g., sequin_replication)
+                      AdditionalRoles beyond the roles managed by the operator
                       Uses CNPG RoleConfiguration directly for full compatibility
                     items:
                       description: |-
@@ -950,6 +950,257 @@ spec:
                         type: object
                     type: object
                 type: object
+              powersync:
+                description: Powersync offline-first sync configuration (optional
+                  - presence enables Powersync)
+                properties:
+                  api:
+                    description: API deployment configuration (client-facing)
+                    properties:
+                      nodeOptions:
+                        description: 'NodeOptions for heap size (default: "--max-old-space-size=150")'
+                        type: string
+                      replicas:
+                        default: 1
+                        description: 'Replicas (default: 1)'
+                        format: int32
+                        type: integer
+                      resources:
+                        description: Resources for Powersync API pods
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                    type: object
+                  compact:
+                    description: Compact CronJob configuration
+                    properties:
+                      enabled:
+                        default: true
+                        description: 'Enabled (default: true)'
+                        type: boolean
+                      resources:
+                        description: Resources for compaction pods
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                      schedule:
+                        default: 0 3 * * *
+                        description: 'Schedule in cron format (default: "0 3 * * *"
+                          = 3am daily)'
+                        type: string
+                    type: object
+                  image:
+                    description: 'Image configuration (default: journeyapps/powersync-service:1.20.4)'
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: 'PullPolicy (default: IfNotPresent)'
+                        type: string
+                      registry:
+                        description: 'Registry (default: docker.io)'
+                        type: string
+                      repository:
+                        description: Repository (e.g., journeyapps/powersync-service)
+                        type: string
+                      tag:
+                        description: Tag (pinned stable version per service)
+                        type: string
+                    type: object
+                  replication:
+                    description: Replication deployment configuration (CDC processing)
+                    properties:
+                      nodeOptions:
+                        description: 'NodeOptions for heap size (default: "--max-old-space-size=230")'
+                        type: string
+                      resources:
+                        description: Resources for Powersync replication pods
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                    type: object
+                  syncRules:
+                    description: Sync Streams configuration. Exactly one of inline
+                      or configMapRef is required.
+                    properties:
+                      configMapRef:
+                        description: Reference to an external ConfigMap containing
+                          sync_rules.yaml.
+                        minLength: 1
+                        type: string
+                      inline:
+                        description: 'Inline Sync Streams YAML, including config.edition:
+                          3.'
+                        minLength: 1
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of inline or configMapRef is required
+                      rule: has(self.inline) != has(self.configMapRef)
+                required:
+                - syncRules
+                type: object
               rest:
                 description: Rest service configuration (PostgREST)
                 properties:
@@ -1057,6 +1308,20 @@ spec:
                       JWT references an existing JWT secret containing 'secret', 'anonKey', and 'serviceKey' keys.
                       Required when autoGenerate is false.
                     type: string
+                  powersyncReplicationPassword:
+                    description: |-
+                      PowersyncReplicationPassword references an existing secret containing 'username' and 'password' keys
+                      for the powersync_replication database role.
+                      Required when PowerSync is enabled and autoGenerate is false.
+                    minLength: 1
+                    type: string
+                  powersyncStoragePassword:
+                    description: |-
+                      PowersyncStoragePassword references an existing secret containing 'username' and 'password' keys
+                      for the powersync_storage database role.
+                      Required when PowerSync is enabled and autoGenerate is false.
+                    minLength: 1
+                    type: string
                   supabaseAdmin:
                     description: |-
                       SupabaseAdmin references an existing secret containing 'username' and 'password' keys
@@ -1158,6 +1423,11 @@ spec:
             - auth
             - database
             type: object
+            x-kubernetes-validations:
+            - message: PowerSync secret refs are required when PowerSync is enabled
+                and autoGenerate is false
+              rule: '!has(self.powersync) || !has(self.secrets) || self.secrets.autoGenerate
+                || (has(self.secrets.powersyncStoragePassword) && has(self.secrets.powersyncReplicationPassword))'
           status:
             description: SupabaseProjectStatus defines the observed state of SupabaseProject
             properties:
@@ -1277,6 +1547,14 @@ spec:
                   jwt:
                     description: JWT is the name of the JWT secret
                     type: string
+                  powersyncReplicationPassword:
+                    description: PowersyncReplicationPassword is the name of the powersync_replication
+                      role password secret
+                    type: string
+                  powersyncStoragePassword:
+                    description: PowersyncStoragePassword is the name of the powersync_storage
+                      role password secret
+                    type: string
                   supabaseAdmin:
                     description: SupabaseAdmin is the name of the supabase_admin password
                       secret
@@ -1314,6 +1592,34 @@ spec:
                     - ready
                     type: object
                   meta:
+                    description: ServiceStatus defines individual service status
+                    properties:
+                      availableReplicas:
+                        description: AvailableReplicas is the number of available
+                          replicas
+                        format: int32
+                        type: integer
+                      ready:
+                        description: Ready indicates if the service is ready
+                        type: boolean
+                    required:
+                    - ready
+                    type: object
+                  powersyncApi:
+                    description: ServiceStatus defines individual service status
+                    properties:
+                      availableReplicas:
+                        description: AvailableReplicas is the number of available
+                          replicas
+                        format: int32
+                        type: integer
+                      ready:
+                        description: Ready indicates if the service is ready
+                        type: boolean
+                    required:
+                    - ready
+                    type: object
+                  powersyncReplication:
                     description: ServiceStatus defines individual service status
                     properties:
                       availableReplicas:

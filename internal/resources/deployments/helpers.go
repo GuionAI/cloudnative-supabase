@@ -17,6 +17,8 @@ limitations under the License.
 package deployments
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -24,6 +26,31 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
 )
+
+// ResolveImage resolves an ImageSpec to a full image reference with defaults.
+func ResolveImage(spec supabasev1alpha1.ImageSpec, defaultImage, defaultTag string) string {
+	repository := defaultImage
+	if spec.Repository != "" {
+		repository = spec.Repository
+	}
+	tag := defaultTag
+	if spec.Tag != "" {
+		tag = spec.Tag
+	}
+	image := fmt.Sprintf("%s:%s", repository, tag)
+	if spec.Registry != "" {
+		return fmt.Sprintf("%s/%s", spec.Registry, image)
+	}
+	return image
+}
+
+// ResolvePullPolicy returns IfNotPresent when no policy is specified.
+func ResolvePullPolicy(spec supabasev1alpha1.ImageSpec) corev1.PullPolicy {
+	if spec.PullPolicy != "" {
+		return spec.PullPolicy
+	}
+	return corev1.PullIfNotPresent
+}
 
 // ProbeConfig holds configuration for building HTTP probes.
 // All time-related fields are in seconds.
@@ -123,7 +150,7 @@ func DefaultKongResources() corev1.ResourceRequirements {
 			corev1.ResourceCPU:    resource.MustParse("50m"),
 		},
 		Limits: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("2Gi"),
+			corev1.ResourceMemory: resource.MustParse("1Gi"),
 			corev1.ResourceCPU:    resource.MustParse("500m"),
 		},
 	}

@@ -68,6 +68,35 @@ func BuildMetaService(project *supabasev1alpha1.SupabaseProject) *corev1.Service
 	return BuildService(project, project.Name+"-meta", "meta", 8080)
 }
 
+// BuildPowersyncAPIService creates the service for Powersync API with HTTP and metrics ports
+func BuildPowersyncAPIService(project *supabasev1alpha1.SupabaseProject) *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      project.Name + "-powersync-api",
+			Namespace: project.Namespace,
+			Labels:    common.ComponentLabels(project, "powersync-api"),
+		},
+		Spec: corev1.ServiceSpec{
+			Type:     corev1.ServiceTypeClusterIP,
+			Selector: common.SelectorLabels(project, "powersync-api"),
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "http",
+					Port:       8080,
+					TargetPort: intstr.FromInt(8080),
+					Protocol:   corev1.ProtocolTCP,
+				},
+				{
+					Name:       "metrics",
+					Port:       9464,
+					TargetPort: intstr.FromInt(9464),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+		},
+	}
+}
+
 // BuildKongService creates the service for Kong
 func BuildKongService(project *supabasev1alpha1.SupabaseProject) *corev1.Service {
 	return &corev1.Service{

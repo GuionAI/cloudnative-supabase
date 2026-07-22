@@ -13,15 +13,6 @@ spec:
       size: 10Gi
       storageClass: local-path
     enableSuperuserAccess: false
-    # Additional roles for CDC tools like Sequin/PowerSync
-    # Uses CNPG RoleConfiguration format directly
-    # additionalRoles:
-    #   - name: sequin_replication
-    #     login: true
-    #     replication: true
-    #     bypassRLS: true
-    #     passwordSecret:
-    #       name: sequin-replication-password
 
   auth:
     siteURL: https://app.example.com
@@ -45,3 +36,17 @@ spec:
     projectName: Example Project
 
   # meta and kong use defaults (always enabled)
+
+  # Optional PowerSync offline-first sync. Sync Streams are required and should
+  # select explicit columns guarded by auth.user_id().
+  # powersync:
+  #   api:
+  #     replicas: 1
+  #   syncRules:
+  #     inline: |
+  #       config:
+  #         edition: 3
+  #       streams:
+  #         notes:
+  #           auto_subscribe: true
+  #           query: SELECT id, title FROM notes WHERE user_id = auth.user_id()

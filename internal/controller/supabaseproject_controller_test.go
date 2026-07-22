@@ -19,10 +19,12 @@ package controller
 import (
 	"context"
 
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,9 +53,19 @@ var _ = Describe("SupabaseProject Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: supabasev1alpha1.SupabaseProjectSpec{
+						Database: supabasev1alpha1.DatabaseSpec{
+							Instances: 1,
+							Storage:   cnpgv1.StorageConfiguration{Size: "1Gi"},
+						},
+						Auth: supabasev1alpha1.AuthSpec{
+							SiteURL:     "https://app.example.com",
+							ExternalURL: "https://auth.example.com",
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+				Expect(k8sClient.Get(ctx, typeNamespacedName, supabaseproject)).To(Succeed())
 			}
 		})
 
@@ -68,8 +80,13 @@ var _ = Describe("SupabaseProject Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(k8sClient.Scheme()).
+				WithStatusSubresource(&supabasev1alpha1.SupabaseProject{}).
+				WithObjects(supabaseproject.DeepCopy()).
+				Build()
 			controllerReconciler := &SupabaseProjectReconciler{
-				Client: k8sClient,
+				Client: fakeClient,
 				Scheme: k8sClient.Scheme(),
 			}
 

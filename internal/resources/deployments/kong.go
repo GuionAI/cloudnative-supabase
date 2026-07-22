@@ -65,6 +65,7 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 		{Name: "KONG_DATABASE", Value: "off"},
 		{Name: "KONG_DECLARATIVE_CONFIG", Value: "/kong/config/kong.yml"},
 		{Name: "KONG_DNS_ORDER", Value: "LAST,A,CNAME"},
+		{Name: "KONG_NGINX_WORKER_PROCESSES", Value: "1"},
 		{Name: "KONG_PLUGINS", Value: "request-transformer,cors,key-auth,acl,basic-auth"},
 		{Name: "KONG_NGINX_PROXY_PROXY_BUFFER_SIZE", Value: "160k"},
 		{Name: "KONG_NGINX_PROXY_PROXY_BUFFERS", Value: "64 160k"},

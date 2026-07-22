@@ -33,11 +33,26 @@ rules:
       - patch
       - update
       - watch
-  # CNPG Clusters and ScheduledBackups
+  # Jobs and CronJobs (PowerSync permissions and compaction)
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # CNPG Clusters, ScheduledBackups, and Publications
   - apiGroups:
       - postgresql.cnpg.io
     resources:
       - clusters
+      - publications
       - scheduledbackups
     verbs:
       - create

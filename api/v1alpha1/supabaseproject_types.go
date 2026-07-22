@@ -89,9 +89,16 @@ const (
 
 	// ConditionTypeRecoveryReady indicates recovery infrastructure is ready
 	ConditionTypeRecoveryReady = "RecoveryReady"
+
+	// ConditionTypeCDCReady indicates CDC permissions have been applied
+	ConditionTypeCDCReady = "CDCReady"
+
+	// ConditionTypePowersyncReady indicates Powersync is ready
+	ConditionTypePowersyncReady = "PowersyncReady"
 )
 
 // SupabaseProjectSpec defines the desired state of SupabaseProject
+// +kubebuilder:validation:XValidation:rule="!has(self.powersync) || !has(self.secrets) || self.secrets.autoGenerate || (has(self.secrets.powersyncStoragePassword) && has(self.secrets.powersyncReplicationPassword))",message="PowerSync secret refs are required when PowerSync is enabled and autoGenerate is false"
 type SupabaseProjectSpec struct {
 	// Database configuration for CNPG PostgreSQL cluster
 	// +required
@@ -126,6 +133,10 @@ type SupabaseProjectSpec struct {
 	// Kong API gateway configuration
 	// +optional
 	Kong KongSpec `json:"kong,omitempty"`
+
+	// Powersync offline-first sync configuration (optional - presence enables Powersync)
+	// +optional
+	Powersync *PowersyncSpec `json:"powersync,omitempty"`
 
 	// ImagePullSecrets for all deployments
 	// +optional
@@ -173,7 +184,7 @@ type DatabaseSpec struct {
 	// +optional
 	Recovery *RecoverySpec `json:"recovery,omitempty"`
 
-	// AdditionalRoles beyond the standard Supabase roles (e.g., sequin_replication)
+	// AdditionalRoles beyond the roles managed by the operator
 	// Uses CNPG RoleConfiguration directly for full compatibility
 	// +optional
 	AdditionalRoles []cnpgv1.RoleConfiguration `json:"additionalRoles,omitempty"`
@@ -296,6 +307,20 @@ type SecretsSpec struct {
 	// Required when autoGenerate is false.
 	// +optional
 	AuthAdmin string `json:"authAdmin,omitempty"`
+
+	// PowersyncStoragePassword references an existing secret containing 'username' and 'password' keys
+	// for the powersync_storage database role.
+	// Required when PowerSync is enabled and autoGenerate is false.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	PowersyncStoragePassword string `json:"powersyncStoragePassword,omitempty"`
+
+	// PowersyncReplicationPassword references an existing secret containing 'username' and 'password' keys
+	// for the powersync_replication database role.
+	// Required when PowerSync is enabled and autoGenerate is false.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	PowersyncReplicationPassword string `json:"powersyncReplicationPassword,omitempty"`
 }
 
 // AuthSpec defines GoTrue auth service configuration
@@ -521,6 +546,107 @@ type IngressSpec struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
+// ImageSpec defines container image configuration for optional services
+type ImageSpec struct {
+	// Registry (default: docker.io)
+	// +optional
+	Registry string `json:"registry,omitempty"`
+
+	// Repository (e.g., journeyapps/powersync-service)
+	// +optional
+	Repository string `json:"repository,omitempty"`
+
+	// Tag (pinned stable version per service)
+	// +optional
+	Tag string `json:"tag,omitempty"`
+
+	// PullPolicy (default: IfNotPresent)
+	// +kubebuilder:default=IfNotPresent
+	// +optional
+	PullPolicy corev1.PullPolicy `json:"pullPolicy,omitempty"`
+}
+
+// PowersyncSpec defines Powersync offline-first sync configuration
+type PowersyncSpec struct {
+	// Image configuration (default: journeyapps/powersync-service:1.20.4)
+	// +optional
+	Image ImageSpec `json:"image,omitempty"`
+
+	// API deployment configuration (client-facing)
+	// +optional
+	API PowersyncAPISpec `json:"api,omitempty"`
+
+	// Replication deployment configuration (CDC processing)
+	// +optional
+	Replication PowersyncReplicationSpec `json:"replication,omitempty"`
+
+	// Sync Streams configuration. Exactly one of inline or configMapRef is required.
+	// +required
+	SyncRules SyncRulesSpec `json:"syncRules"`
+
+	// Compact CronJob configuration
+	// +optional
+	Compact PowersyncCompactSpec `json:"compact,omitempty"`
+}
+
+// PowersyncAPISpec defines Powersync API deployment configuration
+type PowersyncAPISpec struct {
+	// Replicas (default: 1)
+	// +kubebuilder:default=1
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Resources for Powersync API pods
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// NodeOptions for heap size (default: "--max-old-space-size=150")
+	// +optional
+	NodeOptions string `json:"nodeOptions,omitempty"`
+}
+
+// PowersyncReplicationSpec defines Powersync replication deployment configuration
+type PowersyncReplicationSpec struct {
+	// Resources for Powersync replication pods
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// NodeOptions for heap size (default: "--max-old-space-size=230")
+	// +optional
+	NodeOptions string `json:"nodeOptions,omitempty"`
+}
+
+// SyncRulesSpec defines the edition 3 Sync Streams configuration for Powersync.
+// +kubebuilder:validation:XValidation:rule="has(self.inline) != has(self.configMapRef)",message="exactly one of inline or configMapRef is required"
+type SyncRulesSpec struct {
+	// Inline Sync Streams YAML, including config.edition: 3.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	Inline string `json:"inline,omitempty"`
+
+	// Reference to an external ConfigMap containing sync_rules.yaml.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	ConfigMapRef string `json:"configMapRef,omitempty"`
+}
+
+// PowersyncCompactSpec defines Powersync compaction CronJob configuration
+type PowersyncCompactSpec struct {
+	// Enabled (default: true)
+	// +kubebuilder:default=true
+	// +optional
+	Enabled bool `json:"enabled"`
+
+	// Schedule in cron format (default: "0 3 * * *" = 3am daily)
+	// +kubebuilder:default="0 3 * * *"
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// Resources for compaction pods
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
 // SupabaseProjectStatus defines the observed state of SupabaseProject
 type SupabaseProjectStatus struct {
 	// Phase represents the current lifecycle phase
@@ -585,6 +711,10 @@ type ServicesStatus struct {
 	Meta ServiceStatus `json:"meta,omitempty"`
 	// +optional
 	Kong ServiceStatus `json:"kong,omitempty"`
+	// +optional
+	PowersyncAPI ServiceStatus `json:"powersyncApi,omitempty"`
+	// +optional
+	PowersyncReplication ServiceStatus `json:"powersyncReplication,omitempty"`
 }
 
 // ServiceStatus defines individual service status
@@ -597,7 +727,7 @@ type ServiceStatus struct {
 	AvailableReplicas int32 `json:"availableReplicas,omitempty"`
 }
 
-// SecretNamesStatus contains generated secret names
+// SecretNamesStatus contains resolved secret names
 type SecretNamesStatus struct {
 	// JWT is the name of the JWT secret
 	// +optional
@@ -614,6 +744,14 @@ type SecretNamesStatus struct {
 	// AuthAdmin is the name of the supabase_auth_admin password secret
 	// +optional
 	AuthAdmin string `json:"authAdmin,omitempty"`
+
+	// PowersyncStoragePassword is the name of the powersync_storage role password secret
+	// +optional
+	PowersyncStoragePassword string `json:"powersyncStoragePassword,omitempty"`
+
+	// PowersyncReplicationPassword is the name of the powersync_replication role password secret
+	// +optional
+	PowersyncReplicationPassword string `json:"powersyncReplicationPassword,omitempty"`
 }
 
 // EndpointsStatus contains service endpoints

@@ -92,7 +92,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 			StorageConfiguration: spec.Storage,
 
 			Managed: &cnpgv1.ManagedConfiguration{
-				Roles: buildRoles(&spec, secretNames),
+				Roles: buildAllRoles(project, secretNames),
 			},
 		},
 	}
@@ -192,6 +192,44 @@ func buildBootstrapConfiguration(project *supabasev1alpha1.SupabaseProject, secr
 					},
 				},
 			},
+		},
+	}
+}
+
+// buildAllRoles combines base Supabase roles with optional PowerSync roles.
+func buildAllRoles(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
+	roles := buildRoles(&project.Spec.Database, secretNames)
+	if project.Spec.Powersync != nil && secretNames.PowersyncStoragePassword != "" && secretNames.PowersyncReplicationPassword != "" {
+		roles = append(roles, BuildPowersyncRoles(secretNames)...)
+	}
+	return roles
+}
+
+// BuildPowersyncRoles returns additional CNPG roles required for Powersync.
+// Two roles are needed:
+//   - powersync_storage: stores Powersync's internal sync state (checkpoints, buckets)
+//   - powersync_replication: reads the WAL via logical replication for CDC
+func BuildPowersyncRoles(secretNames *supabasev1alpha1.SecretNamesStatus) []cnpgv1.RoleConfiguration {
+	return []cnpgv1.RoleConfiguration{
+		{
+			Name:   "powersync_storage",
+			Ensure: cnpgv1.EnsurePresent,
+			Login:  true,
+			PasswordSecret: &cnpgv1.LocalObjectReference{
+				Name: secretNames.PowersyncStoragePassword,
+			},
+			Comment: "Powersync internal storage role",
+		},
+		{
+			Name:        "powersync_replication",
+			Ensure:      cnpgv1.EnsurePresent,
+			Login:       true,
+			Replication: true,
+			BypassRLS:   true,
+			PasswordSecret: &cnpgv1.LocalObjectReference{
+				Name: secretNames.PowersyncReplicationPassword,
+			},
+			Comment: "Powersync CDC replication role",
 		},
 	}
 }

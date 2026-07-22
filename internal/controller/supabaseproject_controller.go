@@ -18,13 +18,17 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmancloudv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,12 +37,16 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/yaml"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/configmaps"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/deployments"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/jobs"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/secrets"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/services"
 )
@@ -87,11 +95,14 @@ type SupabaseProjectReconciler struct {
 // +kubebuilder:rbac:groups=supabase.guion.dev,resources=supabaseprojects/finalizers,verbs=update
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=scheduledbackups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=publications,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=barmancloud.cnpg.io,resources=objectstores,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -146,6 +157,28 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
+	// Phase 6: PowerSync (after core services)
+	if project.Spec.Powersync != nil {
+		syncRules, err := r.reconcilePowerSyncRulesValidation(ctx, project)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if result, err := r.waitForPowerSyncManagedRoles(ctx, project); err != nil || result.RequeueAfter > 0 {
+			return result, err
+		}
+		if result, err := r.reconcilePowerSyncPublication(ctx, project); err != nil || result.RequeueAfter > 0 {
+			return result, err
+		}
+		if result, err := r.reconcileCDCPermissions(ctx, project); err != nil || result.RequeueAfter > 0 {
+			return result, err
+		}
+		if result, err := r.reconcilePowersync(ctx, project, syncRules); err != nil || result.RequeueAfter > 0 {
+			return result, err
+		}
+	} else if err := r.cleanupPowerSync(ctx, project); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// All phases complete
 	project.Status.Phase = supabasev1alpha1.PhaseRunning
 	project.Status.ObservedGeneration = project.Generation
@@ -157,6 +190,88 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	log.Info("Reconciliation complete")
 	return ctrl.Result{}, nil
+}
+
+func (r *SupabaseProjectReconciler) reconcilePowerSyncRulesValidation(ctx context.Context, project *supabasev1alpha1.SupabaseProject) ([]byte, error) {
+	rules, err := r.loadAndValidatePowerSyncRules(ctx, project)
+	if err == nil {
+		return rules, nil
+	}
+	r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "InvalidSyncRules", err.Error())
+	if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+		return nil, statusErr
+	}
+	return nil, err
+}
+
+func (r *SupabaseProjectReconciler) loadAndValidatePowerSyncRules(ctx context.Context, project *supabasev1alpha1.SupabaseProject) ([]byte, error) {
+	rules := []byte(project.Spec.Powersync.SyncRules.Inline)
+	if ref := project.Spec.Powersync.SyncRules.ConfigMapRef; ref != "" {
+		configMap := &corev1.ConfigMap{}
+		if err := r.Get(ctx, types.NamespacedName{Name: ref, Namespace: project.Namespace}, configMap); err != nil {
+			return nil, fmt.Errorf("getting PowerSync sync rules ConfigMap %s: %w", ref, err)
+		}
+		content, ok := configMap.Data["sync_rules.yaml"]
+		if !ok || content == "" {
+			return nil, fmt.Errorf("PowerSync sync rules ConfigMap %s must contain non-empty sync_rules.yaml", ref)
+		}
+		rules = []byte(content)
+	}
+
+	var document struct {
+		Config struct {
+			Edition int `json:"edition"`
+		} `json:"config"`
+		Streams map[string]any `json:"streams"`
+	}
+	if err := yaml.Unmarshal(rules, &document); err != nil {
+		return nil, fmt.Errorf("parsing PowerSync sync_rules.yaml: %w", err)
+	}
+	if document.Config.Edition != 3 {
+		return nil, fmt.Errorf("PowerSync sync_rules.yaml requires config.edition: 3")
+	}
+	if document.Streams == nil {
+		return nil, fmt.Errorf("PowerSync sync_rules.yaml requires streams")
+	}
+	return rules, nil
+}
+
+func (r *SupabaseProjectReconciler) waitForPowerSyncManagedRoles(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+	cluster := &cnpgv1.Cluster{}
+	if err := r.Get(ctx, types.NamespacedName{Name: cnpg.ClusterName(project), Namespace: project.Namespace}, cluster); err != nil {
+		return ctrl.Result{}, err
+	}
+	ready, err := powerSyncManagedRolesReady(cluster)
+	if err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "ManagedRolesFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+	if !ready {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "ManagedRolesPending", "Waiting for CloudNativePG to reconcile PowerSync roles")
+		if err := r.Status().Update(ctx, project); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+	}
+	return ctrl.Result{}, nil
+}
+
+func powerSyncManagedRolesReady(cluster *cnpgv1.Cluster) (bool, error) {
+	for _, role := range []string{"powersync_storage", "powersync_replication"} {
+		if reasons := cluster.Status.ManagedRolesStatus.CannotReconcile[role]; len(reasons) > 0 {
+			return false, fmt.Errorf("CloudNativePG cannot reconcile role %s: %v", role, reasons)
+		}
+	}
+	reconciled := make(map[string]struct{})
+	for _, role := range cluster.Status.ManagedRolesStatus.ByStatus[cnpgv1.RoleStatusReconciled] {
+		reconciled[role] = struct{}{}
+	}
+	_, storageReady := reconciled["powersync_storage"]
+	_, replicationReady := reconciled["powersync_replication"]
+	return storageReady && replicationReady, nil
 }
 
 // reconcileSecrets ensures all required secrets exist
@@ -208,6 +323,10 @@ func (r *SupabaseProjectReconciler) reconcileUserSpecifiedSecrets(ctx context.Co
 		secretNames.SupabaseAdmin: "supabase_admin",
 		secretNames.Authenticator: "authenticator",
 		secretNames.AuthAdmin:     "supabase_auth_admin",
+	}
+	if project.Spec.Powersync != nil {
+		roleSecrets[secretNames.PowersyncStoragePassword] = "powersync_storage"
+		roleSecrets[secretNames.PowersyncReplicationPassword] = "powersync_replication"
 	}
 
 	for secretName, roleName := range roleSecrets {
@@ -281,6 +400,14 @@ func (r *SupabaseProjectReconciler) reconcileAutoGeneratedSecrets(ctx context.Co
 
 		if allExist {
 			log.Info("Secrets already exist in cluster, syncing status")
+
+			// Also sync optional service secrets
+			if project.Spec.Powersync != nil {
+				if err := r.reconcilePowersyncSecrets(ctx, project, &secretNames); err != nil {
+					return err
+				}
+			}
+
 			project.Status.SecretNames = secretNames
 			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionTrue, "SecretsExist", "All secrets exist")
 			if err := r.Status().Update(ctx, project); err != nil {
@@ -314,6 +441,13 @@ func (r *SupabaseProjectReconciler) reconcileAutoGeneratedSecrets(ctx context.Co
 		}
 	}
 
+	// Generate Powersync secrets if Powersync is enabled
+	if project.Spec.Powersync != nil {
+		if err := r.reconcilePowersyncSecrets(ctx, project, &secretNames); err != nil {
+			return err
+		}
+	}
+
 	// Update status with secret names
 	project.Status.SecretNames = secretNames
 
@@ -322,6 +456,56 @@ func (r *SupabaseProjectReconciler) reconcileAutoGeneratedSecrets(ctx context.Co
 		return err
 	}
 
+	return nil
+}
+
+// reconcilePowersyncSecrets generates Powersync-related secrets if they don't exist
+func (r *SupabaseProjectReconciler) reconcilePowersyncSecrets(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
+	log := logf.FromContext(ctx)
+
+	storagePwdName, replPwdName := secrets.PowersyncSecretNames(project)
+
+	allExist := true
+	for _, name := range []string{storagePwdName, replPwdName} {
+		existing := &corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: project.Namespace}, existing); err != nil {
+			if apierrors.IsNotFound(err) {
+				allExist = false
+				break
+			}
+			return err
+		}
+	}
+	if allExist {
+		log.Info("Powersync secrets already exist, syncing status")
+		secretNames.PowersyncStoragePassword = storagePwdName
+		secretNames.PowersyncReplicationPassword = replPwdName
+		return nil
+	}
+
+	// Generate Powersync secrets
+	log.Info("Generating Powersync secrets")
+	psSecrets, err := secrets.GeneratePowersyncSecrets(project)
+	if err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "PowersyncSecretsFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return statusErr
+		}
+		return err
+	}
+
+	for _, secret := range psSecrets {
+		if err := r.createOrUpdateSecret(ctx, project, secret); err != nil {
+			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "CreateFailed", err.Error())
+			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				return statusErr
+			}
+			return err
+		}
+	}
+
+	secretNames.PowersyncStoragePassword = storagePwdName
+	secretNames.PowersyncReplicationPassword = replPwdName
 	return nil
 }
 
@@ -370,7 +554,25 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 		return ctrl.Result{}, err
 	}
 
+	// Optional PowerSync roles may be added after the cluster already exists.
+	if syncManagedRoles(existing, cluster) {
+		if err := r.Update(ctx, existing); err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating CNPG managed roles: %w", err)
+		}
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func syncManagedRoles(existing, desired *cnpgv1.Cluster) bool {
+	if existing.Spec.Managed == nil {
+		existing.Spec.Managed = &cnpgv1.ManagedConfiguration{}
+	}
+	if apiequality.Semantic.DeepEqual(existing.Spec.Managed.Roles, desired.Spec.Managed.Roles) {
+		return false
+	}
+	existing.Spec.Managed.Roles = desired.Spec.Managed.Roles
+	return true
 }
 
 // waitForDatabase waits for the CNPG Cluster to be ready
@@ -938,15 +1140,423 @@ func (r *SupabaseProjectReconciler) createOrUpdateScheduledBackup(ctx context.Co
 	return nil
 }
 
+// reconcileCDCPermissions ensures CDC permissions are applied via a Job.
+// Returns RequeueAfter when the Job is still running so we don't proceed
+// to deploy PowerSync before permissions exist.
+func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Reconciling CDC permissions")
+
+	secretNames := &project.Status.SecretNames
+
+	// Create CDC migrations ConfigMap
+	configMap := jobs.BuildCDCMigrationsConfigMap(project)
+	if err := r.createOrUpdateConfigMap(ctx, project, configMap); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Compute a hash of the CDC script so we can detect spec changes
+	scriptHash := cdcScriptHash(project)
+
+	// Create or check CDC permissions Job
+	job := jobs.BuildCDCPermissionsJob(project, secretNames)
+	completed, err := r.createOrCheckJob(ctx, project, job, scriptHash)
+	if err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "JobFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	if !completed {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "JobRunning", "CDC permissions Job is still running")
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+	}
+
+	r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionTrue, "CDCPermissionsApplied", "CDC permissions applied successfully")
+	return ctrl.Result{}, nil
+}
+
+// cdcScriptHash computes a SHA-256 hash of the CDC setup script content.
+// Used to detect permission script changes so the Job can be recreated.
+func cdcScriptHash(project *supabasev1alpha1.SupabaseProject) string {
+	cm := jobs.BuildCDCMigrationsConfigMap(project)
+	h := sha256.Sum256([]byte(cm.Data["setup.sh"]))
+	return hex.EncodeToString(h[:])
+}
+
+func (r *SupabaseProjectReconciler) reconcilePowerSyncPublication(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
+	desired := cnpg.BuildPowerSyncPublication(project)
+	existing := &cnpgv1.Publication{}
+	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		if err := controllerutil.SetControllerReference(project, desired, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desired); err != nil {
+			return ctrl.Result{}, err
+		}
+		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "PublicationPending", "Waiting for the PowerSync publication")
+		if err := r.Status().Update(ctx, project); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+	}
+
+	before := existing.DeepCopy()
+	existing.Spec = desired.Spec
+	existing.Labels = desired.Labels
+	if err := controllerutil.SetControllerReference(project, existing, r.Scheme); err != nil {
+		return ctrl.Result{}, err
+	}
+	if !apiequality.Semantic.DeepEqual(before.Spec, existing.Spec) ||
+		!apiequality.Semantic.DeepEqual(before.Labels, existing.Labels) ||
+		!apiequality.Semantic.DeepEqual(before.OwnerReferences, existing.OwnerReferences) {
+		if err := r.Update(ctx, existing); err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating PowerSync publication: %w", err)
+		}
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+	}
+
+	if !publicationIsApplied(existing) {
+		message := "Waiting for the PowerSync publication"
+		if existing.Status.Message != "" {
+			message = existing.Status.Message
+		}
+		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "PublicationPending", message)
+		if err := r.Status().Update(ctx, project); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func publicationIsApplied(publication *cnpgv1.Publication) bool {
+	return publication.Status.ObservedGeneration == publication.Generation &&
+		publication.Status.Applied != nil && *publication.Status.Applied
+}
+
+// reconcilePowersync deploys the Powersync service (API + Replication + ConfigMaps + CronJob)
+func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, project *supabasev1alpha1.SupabaseProject, syncRulesContent []byte) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Reconciling Powersync service")
+
+	secretNames := &project.Status.SecretNames
+
+	// Create Powersync config ConfigMap
+	psConfig := configmaps.BuildPowersyncConfigMap(project)
+	if err := r.createOrUpdateConfigMap(ctx, project, psConfig); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Create sync rules ConfigMap (may be nil if external ConfigMapRef is used)
+	syncRulesConfigMap := configmaps.BuildPowersyncSyncRulesConfigMap(project)
+	if syncRulesConfigMap != nil {
+		if err := r.createOrUpdateConfigMap(ctx, project, syncRulesConfigMap); err != nil {
+			r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "SyncRulesConfigMapFailed", err.Error())
+			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				return ctrl.Result{}, statusErr
+			}
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Deploy Powersync API
+	apiDeployment := deployments.BuildPowersyncAPIDeployment(project, secretNames)
+	applyPowerSyncConfigHash(apiDeployment, psConfig.Data["config.json"], syncRulesContent)
+	if err := r.createOrUpdateDeployment(ctx, project, apiDeployment); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "APIDeploymentFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Create Powersync API service
+	apiService := services.BuildPowersyncAPIService(project)
+	if err := r.createOrUpdateService(ctx, project, apiService); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "APIServiceFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Deploy Powersync Replication
+	replDeployment := deployments.BuildPowersyncReplicationDeployment(project, secretNames)
+	applyPowerSyncConfigHash(replDeployment, psConfig.Data["config.json"], syncRulesContent)
+	if err := r.createOrUpdateDeployment(ctx, project, replDeployment); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "ReplicationDeploymentFailed", err.Error())
+		if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Deploy Powersync Compact CronJob
+	compactCronJob := deployments.BuildPowersyncCompactCronJob(project, secretNames)
+	if compactCronJob != nil {
+		if err := r.createOrUpdateCronJob(ctx, project, compactCronJob); err != nil {
+			r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "CronJobFailed", err.Error())
+			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
+				return ctrl.Result{}, statusErr
+			}
+			return ctrl.Result{}, err
+		}
+	} else if err := r.cleanupPowerSyncCompact(ctx, project); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	apiReady, apiAvailable, err := r.powersyncDeploymentStatus(ctx, apiDeployment)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	replicationReady, replicationAvailable, err := r.powersyncDeploymentStatus(ctx, replDeployment)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	project.Status.Services.PowersyncAPI = supabasev1alpha1.ServiceStatus{Ready: apiReady, AvailableReplicas: apiAvailable}
+	project.Status.Services.PowersyncReplication = supabasev1alpha1.ServiceStatus{Ready: replicationReady, AvailableReplicas: replicationAvailable}
+	if !apiReady || !replicationReady {
+		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "DeploymentsPending", "Waiting for PowerSync deployments to become ready")
+		if err := r.Status().Update(ctx, project); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+	}
+
+	r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionTrue, "Ready", "Powersync service is running")
+	return ctrl.Result{}, nil
+}
+
+const powerSyncConfigHashAnnotation = "supabase.guion.dev/powersync-config-hash"
+
+func applyPowerSyncConfigHash(deployment *appsv1.Deployment, config string, syncRules []byte) {
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(config))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(syncRules)
+	if deployment.Spec.Template.Annotations == nil {
+		deployment.Spec.Template.Annotations = make(map[string]string)
+	}
+	deployment.Spec.Template.Annotations[powerSyncConfigHashAnnotation] = hex.EncodeToString(hash.Sum(nil))
+}
+
+// cleanupPowerSync removes operator-owned runtime resources when PowerSync is
+// disabled. Database roles, generated credentials, and PowerSync's internal
+// database data are deliberately retained; deleting those requires an explicit
+// data-retention policy.
+func (r *SupabaseProjectReconciler) cleanupPowerSync(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	resources := []client.Object{
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: deployments.PowersyncAPIDeploymentName(project), Namespace: project.Namespace}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: deployments.PowersyncReplicationDeploymentName(project), Namespace: project.Namespace}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: project.Name + "-powersync-api", Namespace: project.Namespace}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configmaps.PowersyncConfigMapName(project), Namespace: project.Namespace}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configmaps.PowersyncSyncRulesConfigMapName(project), Namespace: project.Namespace}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: jobs.CDCConfigMapName(project), Namespace: project.Namespace}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: jobs.CDCJobName(project), Namespace: project.Namespace}},
+		&batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: deployments.PowersyncCompactCronJobName(project), Namespace: project.Namespace}},
+		&cnpgv1.Publication{ObjectMeta: metav1.ObjectMeta{Name: project.Name + "-powersync", Namespace: project.Namespace}},
+	}
+	for _, resource := range resources {
+		if err := r.deletePowerSyncOwnedResource(ctx, project, resource); err != nil {
+			return err
+		}
+	}
+
+	if !powerSyncStatusNeedsCleanup(project) {
+		return nil
+	}
+	project.Status.Services.PowersyncAPI = supabasev1alpha1.ServiceStatus{}
+	project.Status.Services.PowersyncReplication = supabasev1alpha1.ServiceStatus{}
+	meta.RemoveStatusCondition(&project.Status.Conditions, supabasev1alpha1.ConditionTypeCDCReady)
+	meta.RemoveStatusCondition(&project.Status.Conditions, supabasev1alpha1.ConditionTypePowersyncReady)
+	return r.Status().Update(ctx, project)
+}
+
+func powerSyncStatusNeedsCleanup(project *supabasev1alpha1.SupabaseProject) bool {
+	if !apiequality.Semantic.DeepEqual(project.Status.Services.PowersyncAPI, supabasev1alpha1.ServiceStatus{}) ||
+		!apiequality.Semantic.DeepEqual(project.Status.Services.PowersyncReplication, supabasev1alpha1.ServiceStatus{}) {
+		return true
+	}
+	return meta.FindStatusCondition(project.Status.Conditions, supabasev1alpha1.ConditionTypeCDCReady) != nil ||
+		meta.FindStatusCondition(project.Status.Conditions, supabasev1alpha1.ConditionTypePowersyncReady) != nil
+}
+
+func (r *SupabaseProjectReconciler) cleanupPowerSyncCompact(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{
+		Name:      deployments.PowersyncCompactCronJobName(project),
+		Namespace: project.Namespace,
+	}}
+	return r.deletePowerSyncOwnedResource(ctx, project, cronJob)
+}
+
+func (r *SupabaseProjectReconciler) deletePowerSyncOwnedResource(ctx context.Context, project *supabasev1alpha1.SupabaseProject, resource client.Object) error {
+	if err := r.Get(ctx, client.ObjectKeyFromObject(resource), resource); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if !metav1.IsControlledBy(resource, project) {
+		return nil
+	}
+	return client.IgnoreNotFound(r.Delete(ctx, resource))
+}
+
+func (r *SupabaseProjectReconciler) powersyncDeploymentStatus(ctx context.Context, desired *appsv1.Deployment) (bool, int32, error) {
+	existing := &appsv1.Deployment{}
+	if err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing); err != nil {
+		return false, 0, err
+	}
+	return powersyncDeploymentIsReady(existing), existing.Status.AvailableReplicas, nil
+}
+
+func powersyncDeploymentIsReady(deployment *appsv1.Deployment) bool {
+	expected := int32(1)
+	if deployment.Spec.Replicas != nil {
+		expected = *deployment.Spec.Replicas
+	}
+	return deployment.Status.ObservedGeneration == deployment.Generation &&
+		deployment.Status.UpdatedReplicas == expected &&
+		deployment.Status.ReadyReplicas == expected &&
+		deployment.Status.AvailableReplicas == expected &&
+		deployment.Status.UnavailableReplicas == 0
+}
+
+// createOrUpdateCronJob creates or updates a CronJob resource
+func (r *SupabaseProjectReconciler) createOrUpdateCronJob(ctx context.Context, project *supabasev1alpha1.SupabaseProject, cronJob *batchv1.CronJob) error {
+	log := logf.FromContext(ctx)
+
+	if err := controllerutil.SetControllerReference(project, cronJob, r.Scheme); err != nil {
+		return err
+	}
+
+	existing := &batchv1.CronJob{}
+	err := r.Get(ctx, types.NamespacedName{Name: cronJob.Name, Namespace: cronJob.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Creating CronJob", "name", cronJob.Name)
+			return r.Create(ctx, cronJob)
+		}
+		return err
+	}
+
+	// Update existing
+	existing.Spec = cronJob.Spec
+	return r.Update(ctx, existing)
+}
+
+const cdcScriptHashAnnotation = "supabase.guion.dev/cdc-script-hash"
+
+// createOrCheckJob creates a Job if it doesn't exist, or checks status of an existing Job.
+// scriptHash is compared against an annotation on the existing Job. When the
+// permission script changes, the old Job is deleted and a new one is created.
+// Returns (true, nil) when the Job has completed successfully, (false, nil) when still
+// running or just created, and (false, err) on failure.
+func (r *SupabaseProjectReconciler) createOrCheckJob(ctx context.Context, project *supabasev1alpha1.SupabaseProject, job *batchv1.Job, scriptHash string) (bool, error) {
+	log := logf.FromContext(ctx)
+
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(project, job, r.Scheme); err != nil {
+		return false, err
+	}
+
+	// Annotate the Job with the script hash
+	if job.Annotations == nil {
+		job.Annotations = make(map[string]string)
+	}
+	job.Annotations[cdcScriptHashAnnotation] = scriptHash
+
+	// Check if Job exists
+	existing := &batchv1.Job{}
+	err := r.Get(ctx, types.NamespacedName{Name: job.Name, Namespace: job.Namespace}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Creating Job", "name", job.Name)
+			return false, r.Create(ctx, job)
+		}
+		return false, err
+	}
+
+	// Check if the script has changed since the existing Job was created.
+	// If the hash differs, delete the old Job so a fresh one runs with the new script.
+	existingHash := existing.Annotations[cdcScriptHashAnnotation]
+	if existingHash != scriptHash {
+		log.Info("CDC script changed, recreating Job", "name", job.Name, "oldHash", existingHash, "newHash", scriptHash)
+		propagation := metav1.DeletePropagationForeground
+		if err := r.Delete(ctx, existing, &client.DeleteOptions{
+			PropagationPolicy: &propagation,
+		}); err != nil && !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("failed to delete outdated Job %s: %w", job.Name, err)
+		}
+		// Requeue — the next reconcile will create the new Job once the old one is gone
+		return false, nil
+	}
+
+	// Job exists with matching hash — only terminal conditions are authoritative.
+	for _, condition := range existing.Status.Conditions {
+		if condition.Status != corev1.ConditionTrue {
+			continue
+		}
+		switch condition.Type {
+		case batchv1.JobComplete:
+			log.V(1).Info("Job completed successfully", "name", job.Name)
+			return true, nil
+		case batchv1.JobFailed:
+			return false, fmt.Errorf("job %s has failed: %s", job.Name, condition.Message)
+		}
+	}
+
+	// Job still running
+	log.V(1).Info("Job still running", "name", job.Name, "active", existing.Status.Active)
+	return false, nil
+}
+
 func (r *SupabaseProjectReconciler) setCondition(project *supabasev1alpha1.SupabaseProject, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	condition := metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
+		ObservedGeneration: project.Generation,
 		LastTransitionTime: metav1.Now(),
 		Reason:             reason,
 		Message:            message,
 	}
 	meta.SetStatusCondition(&project.Status.Conditions, condition)
+}
+
+func (r *SupabaseProjectReconciler) mapPowerSyncConfigMapToProjects(ctx context.Context, object client.Object) []reconcile.Request {
+	projects := &supabasev1alpha1.SupabaseProjectList{}
+	if err := r.List(ctx, projects, client.InNamespace(object.GetNamespace())); err != nil {
+		logf.FromContext(ctx).Error(err, "listing SupabaseProjects for PowerSync ConfigMap", "configMap", object.GetName())
+		return nil
+	}
+	requests := make([]reconcile.Request, 0)
+	for i := range projects.Items {
+		project := &projects.Items[i]
+		if project.Spec.Powersync == nil || project.Spec.Powersync.SyncRules.ConfigMapRef != object.GetName() {
+			continue
+		}
+		requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: project.Name, Namespace: project.Namespace}})
+	}
+	return requests
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -955,9 +1565,13 @@ func (r *SupabaseProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&supabasev1alpha1.SupabaseProject{}).
 		Owns(&corev1.Secret{}).
 		Owns(&corev1.ConfigMap{}).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.mapPowerSyncConfigMapToProjects)).
 		Owns(&corev1.Service{}).
 		Owns(&appsv1.Deployment{}).
+		Owns(&batchv1.Job{}).
+		Owns(&batchv1.CronJob{}).
 		Owns(&cnpgv1.Cluster{}).
+		Owns(&cnpgv1.Publication{}).
 		Owns(&cnpgv1.ScheduledBackup{}).
 		Owns(&barmancloudv1.ObjectStore{}).
 		Named("supabaseproject").

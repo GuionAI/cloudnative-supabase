@@ -61,6 +61,36 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
+.PHONY: test-tanka
+test-tanka: ## Render and validate the self-contained Tanka environment.
+	bash hack/test-tanka.sh
+
+.PHONY: test-delivery
+test-delivery: ## Validate release and deployment invariants.
+	bash hack/test-delivery.sh
+
+TANKA_ENV ?= tanka/environments/guion
+TANKA_IMAGE ?=
+
+.PHONY: require-tanka-image
+require-tanka-image:
+	@printf '%s\n' "$(TANKA_IMAGE)" | grep -Eq '^(sha-[0-9a-f]{40}|[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$$' || { \
+		echo "TANKA_IMAGE must be a full sha-<40 hex> or semantic-version tag" >&2; \
+		exit 1; \
+	}
+
+.PHONY: tanka-show
+tanka-show: require-tanka-image ## Render the operator Tanka environment.
+	tk show $(TANKA_ENV) --ext-str imageTag=$(TANKA_IMAGE)
+
+.PHONY: tanka-diff
+tanka-diff: require-tanka-image ## Diff the operator Tanka environment against its cluster.
+	tk diff $(TANKA_ENV) --ext-str imageTag=$(TANKA_IMAGE)
+
+.PHONY: tanka-apply
+tanka-apply: require-tanka-image ## Apply the operator Tanka environment to its cluster.
+	tk apply $(TANKA_ENV) --ext-str imageTag=$(TANKA_IMAGE)
+
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
@@ -112,9 +142,6 @@ build: manifests generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
-# If you wish to build the manager image targeting other platforms you can use the --platform flag.
-# (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
-# More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
@@ -129,7 +156,7 @@ docker-push: ## Push docker image with the manager.
 # - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+PLATFORMS ?= linux/amd64
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile

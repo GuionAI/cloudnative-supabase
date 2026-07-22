@@ -1,0 +1,11 @@
+{
+  "apiVersion": "tanka.dev/v1alpha1",
+  "kind": "Environment",
+  "metadata": {
+    "name": "environments/guion"
+  },
+  "spec": {
+    "apiServer": "https://kube-new.flicknote.app",
+    "namespace": "cnsupa-system"
+  }
+}

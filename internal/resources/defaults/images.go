@@ -25,4 +25,8 @@ const (
 	// Kong image defaults
 	KongImage = "kong"
 	KongTag   = "2.8.1"
+
+	// Powersync image defaults
+	PowersyncImage = "journeyapps/powersync-service"
+	PowersyncTag   = "1.20.4"
 )
