@@ -1308,6 +1308,20 @@ spec:
                       JWT references an existing JWT secret containing 'secret', 'anonKey', and 'serviceKey' keys.
                       Required when autoGenerate is false.
                     type: string
+                  powersyncReplicationPassword:
+                    description: |-
+                      PowersyncReplicationPassword references an existing secret containing 'username' and 'password' keys
+                      for the powersync_replication database role.
+                      Required when PowerSync is enabled and autoGenerate is false.
+                    minLength: 1
+                    type: string
+                  powersyncStoragePassword:
+                    description: |-
+                      PowersyncStoragePassword references an existing secret containing 'username' and 'password' keys
+                      for the powersync_storage database role.
+                      Required when PowerSync is enabled and autoGenerate is false.
+                    minLength: 1
+                    type: string
                   supabaseAdmin:
                     description: |-
                       SupabaseAdmin references an existing secret containing 'username' and 'password' keys
@@ -1409,6 +1423,11 @@ spec:
             - auth
             - database
             type: object
+            x-kubernetes-validations:
+            - message: PowerSync secret refs are required when PowerSync is enabled
+                and autoGenerate is false
+              rule: '!has(self.powersync) || !has(self.secrets) || self.secrets.autoGenerate
+                || (has(self.secrets.powersyncStoragePassword) && has(self.secrets.powersyncReplicationPassword))'
           status:
             description: SupabaseProjectStatus defines the observed state of SupabaseProject
             properties:

@@ -98,6 +98,7 @@ const (
 )
 
 // SupabaseProjectSpec defines the desired state of SupabaseProject
+// +kubebuilder:validation:XValidation:rule="!has(self.powersync) || !has(self.secrets) || self.secrets.autoGenerate || (has(self.secrets.powersyncStoragePassword) && has(self.secrets.powersyncReplicationPassword))",message="PowerSync secret refs are required when PowerSync is enabled and autoGenerate is false"
 type SupabaseProjectSpec struct {
 	// Database configuration for CNPG PostgreSQL cluster
 	// +required
@@ -306,6 +307,20 @@ type SecretsSpec struct {
 	// Required when autoGenerate is false.
 	// +optional
 	AuthAdmin string `json:"authAdmin,omitempty"`
+
+	// PowersyncStoragePassword references an existing secret containing 'username' and 'password' keys
+	// for the powersync_storage database role.
+	// Required when PowerSync is enabled and autoGenerate is false.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	PowersyncStoragePassword string `json:"powersyncStoragePassword,omitempty"`
+
+	// PowersyncReplicationPassword references an existing secret containing 'username' and 'password' keys
+	// for the powersync_replication database role.
+	// Required when PowerSync is enabled and autoGenerate is false.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	PowersyncReplicationPassword string `json:"powersyncReplicationPassword,omitempty"`
 }
 
 // AuthSpec defines GoTrue auth service configuration
@@ -712,7 +727,7 @@ type ServiceStatus struct {
 	AvailableReplicas int32 `json:"availableReplicas,omitempty"`
 }
 
-// SecretNamesStatus contains generated secret names
+// SecretNamesStatus contains resolved secret names
 type SecretNamesStatus struct {
 	// JWT is the name of the JWT secret
 	// +optional

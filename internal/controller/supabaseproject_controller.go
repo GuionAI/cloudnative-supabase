@@ -324,6 +324,10 @@ func (r *SupabaseProjectReconciler) reconcileUserSpecifiedSecrets(ctx context.Co
 		secretNames.Authenticator: "authenticator",
 		secretNames.AuthAdmin:     "supabase_auth_admin",
 	}
+	if project.Spec.Powersync != nil {
+		roleSecrets[secretNames.PowersyncStoragePassword] = "powersync_storage"
+		roleSecrets[secretNames.PowersyncReplicationPassword] = "powersync_replication"
+	}
 
 	for secretName, roleName := range roleSecrets {
 		secret := &corev1.Secret{}
@@ -343,12 +347,6 @@ func (r *SupabaseProjectReconciler) reconcileUserSpecifiedSecrets(ctx context.Co
 			if statusErr := r.Status().Update(ctx, project); statusErr != nil {
 				return statusErr
 			}
-			return err
-		}
-	}
-
-	if project.Spec.Powersync != nil {
-		if err := r.reconcilePowersyncSecrets(ctx, project, &secretNames); err != nil {
 			return err
 		}
 	}
@@ -1437,7 +1435,10 @@ func powersyncDeploymentIsReady(deployment *appsv1.Deployment) bool {
 		expected = *deployment.Spec.Replicas
 	}
 	return deployment.Status.ObservedGeneration == deployment.Generation &&
-		deployment.Status.ReadyReplicas == expected
+		deployment.Status.UpdatedReplicas == expected &&
+		deployment.Status.ReadyReplicas == expected &&
+		deployment.Status.AvailableReplicas == expected &&
+		deployment.Status.UnavailableReplicas == 0
 }
 
 // createOrUpdateCronJob creates or updates a CronJob resource

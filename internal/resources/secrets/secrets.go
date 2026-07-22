@@ -166,10 +166,12 @@ func ValidateRoleSecret(secret *corev1.Secret, secretName string) error {
 // GetSecretNamesFromSpec extracts secret names from user-specified secrets configuration
 func GetSecretNamesFromSpec(spec *supabasev1alpha1.SecretsSpec) supabasev1alpha1.SecretNamesStatus {
 	return supabasev1alpha1.SecretNamesStatus{
-		JWT:           spec.JWT,
-		SupabaseAdmin: spec.SupabaseAdmin,
-		Authenticator: spec.Authenticator,
-		AuthAdmin:     spec.AuthAdmin,
+		JWT:                          spec.JWT,
+		SupabaseAdmin:                spec.SupabaseAdmin,
+		Authenticator:                spec.Authenticator,
+		AuthAdmin:                    spec.AuthAdmin,
+		PowersyncStoragePassword:     spec.PowersyncStoragePassword,
+		PowersyncReplicationPassword: spec.PowersyncReplicationPassword,
 	}
 }
 

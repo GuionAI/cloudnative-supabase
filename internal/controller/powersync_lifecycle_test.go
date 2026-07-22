@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -140,7 +141,9 @@ func TestPowersyncDeploymentIsReadyForCurrentGeneration(t *testing.T) {
 		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
 		Status: appsv1.DeploymentStatus{
 			ObservedGeneration: 3,
+			UpdatedReplicas:    2,
 			ReadyReplicas:      2,
+			AvailableReplicas:  2,
 		},
 	}
 	if !powersyncDeploymentIsReady(deployment) {
@@ -151,9 +154,72 @@ func TestPowersyncDeploymentIsReadyForCurrentGeneration(t *testing.T) {
 		t.Fatal("stale rollout status must not be ready")
 	}
 	deployment.Status.ObservedGeneration = 3
+	deployment.Status.UpdatedReplicas = 1
+	if powersyncDeploymentIsReady(deployment) {
+		t.Fatal("old ready pods must not make an incomplete rollout ready")
+	}
+	deployment.Status.UpdatedReplicas = 2
 	deployment.Status.ReadyReplicas = 1
 	if powersyncDeploymentIsReady(deployment) {
 		t.Fatal("partial rollout must not be ready")
+	}
+	deployment.Status.ReadyReplicas = 2
+	deployment.Status.AvailableReplicas = 1
+	deployment.Status.UnavailableReplicas = 1
+	if powersyncDeploymentIsReady(deployment) {
+		t.Fatal("unavailable rollout must not be ready")
+	}
+}
+
+func TestUserSpecifiedSecretsUsePowerSyncReferences(t *testing.T) {
+	t.Parallel()
+
+	scheme := newPowerSyncTestScheme(t)
+	secretSpec := &supabasev1alpha1.SecretsSpec{}
+	if err := json.Unmarshal([]byte(`{
+		"autoGenerate": false,
+		"jwt": "jwt",
+		"supabaseAdmin": "supabase-admin",
+		"authenticator": "authenticator",
+		"authAdmin": "auth-admin",
+		"powersyncStoragePassword": "powersync-storage",
+		"powersyncReplicationPassword": "powersync-replication"
+	}`), secretSpec); err != nil {
+		t.Fatal(err)
+	}
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default", UID: "project-uid"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{
+			Secrets:   secretSpec,
+			Powersync: &supabasev1alpha1.PowersyncSpec{},
+		},
+	}
+	jwt := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "jwt", Namespace: "default"}, Data: map[string][]byte{
+		"secret": {}, "anonKey": {}, "serviceKey": {},
+	}}
+	objects := []client.Object{project, jwt}
+	for _, name := range []string{"supabase-admin", "authenticator", "auth-admin", "powersync-storage", "powersync-replication"} {
+		objects = append(objects, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}, Data: map[string][]byte{
+			"username": {}, "password": {},
+		}})
+	}
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(objects...).Build(),
+		Scheme: scheme,
+	}
+
+	if err := reconciler.reconcileUserSpecifiedSecrets(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	if project.Status.SecretNames.PowersyncStoragePassword != "powersync-storage" ||
+		project.Status.SecretNames.PowersyncReplicationPassword != "powersync-replication" {
+		t.Fatalf("PowerSync secret refs not preserved in status: %#v", project.Status.SecretNames)
+	}
+	for _, name := range []string{"app-powersync-storage-password", "app-powersync-replication-password"} {
+		generated := &corev1.Secret{}
+		if err := reconciler.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: name}, generated); !apierrors.IsNotFound(err) {
+			t.Fatalf("operator generated %s in user-specified mode: %v", name, err)
+		}
 	}
 }
 
