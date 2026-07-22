@@ -123,7 +123,7 @@ func DefaultKongResources() corev1.ResourceRequirements {
 			corev1.ResourceCPU:    resource.MustParse("50m"),
 		},
 		Limits: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("2Gi"),
+			corev1.ResourceMemory: resource.MustParse("1Gi"),
 			corev1.ResourceCPU:    resource.MustParse("500m"),
 		},
 	}
