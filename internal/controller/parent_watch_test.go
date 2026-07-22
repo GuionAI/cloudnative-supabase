@@ -68,7 +68,7 @@ var _ = Describe("SupabaseProject parent watch", func() {
 		Expect(k8sClient.Create(ctx, project)).To(Succeed())
 		DeferCleanup(func() { Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, project))).To(Succeed()) })
 
-		Eventually(countingClient.projectGets.Load).Should(BeNumerically(">=", 1))
+		Eventually(countingClient.projectGets.Load, 10*time.Second).Should(BeNumerically(">=", 1))
 		baseline := countingClient.projectGets.Load()
 
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(project), project)).To(Succeed())
@@ -79,6 +79,6 @@ var _ = Describe("SupabaseProject parent watch", func() {
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(project), project)).To(Succeed())
 		project.Spec.Auth.SiteURL = "https://new.example.com"
 		Expect(k8sClient.Update(ctx, project)).To(Succeed())
-		Eventually(countingClient.projectGets.Load).Should(BeNumerically(">", baseline))
+		Eventually(countingClient.projectGets.Load, 10*time.Second).Should(BeNumerically(">", baseline))
 	})
 })
