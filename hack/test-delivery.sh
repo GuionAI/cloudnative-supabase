@@ -8,7 +8,7 @@ cd "${repo_root}"
 for workflow in .github/workflows/ci.yaml .github/workflows/pr.yaml .github/workflows/release.yaml; do
   grep -Fq 'platforms: linux/amd64' "${workflow}"
 done
-if rg -q 'linux/arm64' .github/workflows Makefile; then
+if grep -R -q 'linux/arm64' .github/workflows Makefile; then
   echo 'delivery must not build unused arm64 images' >&2
   exit 1
 fi
