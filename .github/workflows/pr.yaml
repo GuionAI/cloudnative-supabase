@@ -22,21 +22,15 @@ jobs:
         run: go mod download
 
       - name: Run tests
-        run: go test ./...
+        run: make test
 
       - name: Build
         run: go build -o bin/manager cmd/main.go
 
-      - name: Generate manifests
-        run: make generate manifests
-
-      - name: Check for uncommitted changes
+      - name: Check generated manifests
         run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "Generated files are out of date. Run 'make generate manifests' and commit the changes."
-            git status --porcelain
-            exit 1
-          fi
+          cp config/crd/bases/*.yaml charts/cloudnative-supabase/crds/
+          git diff --exit-code
 
   lint:
     runs-on: ubuntu-latest

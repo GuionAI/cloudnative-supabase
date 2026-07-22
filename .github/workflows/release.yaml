@@ -27,7 +27,7 @@ jobs:
           cache: true
 
       - name: Run tests
-        run: go test ./...
+        run: make test
 
       - name: Generate and check manifests
         run: |
