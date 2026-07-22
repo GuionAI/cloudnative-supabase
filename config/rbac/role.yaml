@@ -22,7 +22,6 @@ rules:
   - apps
   resources:
   - deployments
-  - statefulsets
   verbs:
   - create
   - delete
@@ -60,6 +59,7 @@ rules:
   - postgresql.cnpg.io
   resources:
   - clusters
+  - publications
   - scheduledbackups
   verbs:
   - create

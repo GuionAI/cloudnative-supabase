@@ -9,131 +9,22 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 )
 
-const (
-	testProjectName = "my-app"
-	testNamespace   = "test-ns"
-)
-
-func newTestProject(namespace string) *supabasev1alpha1.SupabaseProject {
-	return &supabasev1alpha1.SupabaseProject{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      testProjectName,
-			Namespace: namespace,
-		},
-	}
-}
-
-func TestBuildSequinService(t *testing.T) {
-	project := newTestProject(testNamespace)
-	svc := BuildSequinService(project)
-
-	if svc.Name != "my-app-sequin" {
-		t.Errorf("Name = %q, want %q", svc.Name, "my-app-sequin")
-	}
-	if svc.Namespace != testNamespace {
-		t.Errorf("Namespace = %q, want %q", svc.Namespace, testNamespace)
-	}
-	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
-		t.Errorf("Type = %q, want ClusterIP", svc.Spec.Type)
-	}
-
-	// Should have HTTP (7376) and metrics (4000) ports
-	if len(svc.Spec.Ports) != 2 {
-		t.Fatalf("expected 2 ports, got %d", len(svc.Spec.Ports))
-	}
-
-	portMap := make(map[string]int32)
-	for _, p := range svc.Spec.Ports {
-		portMap[p.Name] = p.Port
-	}
-
-	if portMap["http"] != 7376 {
-		t.Errorf("http port = %d, want 7376", portMap["http"])
-	}
-	if portMap["metrics"] != 4000 {
-		t.Errorf("metrics port = %d, want 4000", portMap["metrics"])
-	}
-}
-
 func TestBuildPowersyncAPIService(t *testing.T) {
-	project := newTestProject(testNamespace)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-app", Namespace: "test-ns"},
+	}
 	svc := BuildPowersyncAPIService(project)
 
-	if svc.Name != "my-app-powersync-api" {
-		t.Errorf("Name = %q, want %q", svc.Name, "my-app-powersync-api")
-	}
-	if svc.Namespace != testNamespace {
-		t.Errorf("Namespace = %q, want %q", svc.Namespace, testNamespace)
+	if svc.Name != "my-app-powersync-api" || svc.Namespace != "test-ns" {
+		t.Errorf("unexpected service identity: %s/%s", svc.Namespace, svc.Name)
 	}
 	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
 		t.Errorf("Type = %q, want ClusterIP", svc.Spec.Type)
 	}
-
-	// Should have HTTP (8080) and metrics (9464) ports
-	if len(svc.Spec.Ports) != 2 {
-		t.Fatalf("expected 2 ports, got %d", len(svc.Spec.Ports))
+	if len(svc.Spec.Ports) != 2 || svc.Spec.Ports[0].Port != 8080 || svc.Spec.Ports[1].Port != 9464 {
+		t.Errorf("unexpected ports: %v", svc.Spec.Ports)
 	}
-
-	portMap := make(map[string]int32)
-	for _, p := range svc.Spec.Ports {
-		portMap[p.Name] = p.Port
-	}
-
-	if portMap["http"] != 8080 {
-		t.Errorf("http port = %d, want 8080", portMap["http"])
-	}
-	if portMap["metrics"] != 9464 {
-		t.Errorf("metrics port = %d, want 9464", portMap["metrics"])
-	}
-}
-
-func TestBuildMeilisearchService(t *testing.T) {
-	project := newTestProject(testNamespace)
-	svc := BuildMeilisearchService(project)
-
-	if svc.Name != "my-app-meilisearch" {
-		t.Errorf("Name = %q, want %q", svc.Name, "my-app-meilisearch")
-	}
-	if svc.Namespace != testNamespace {
-		t.Errorf("Namespace = %q, want %q", svc.Namespace, testNamespace)
-	}
-	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
-		t.Errorf("Type = %q, want ClusterIP", svc.Spec.Type)
-	}
-
-	// Single HTTP port (7700)
-	if len(svc.Spec.Ports) != 1 {
-		t.Fatalf("expected 1 port, got %d", len(svc.Spec.Ports))
-	}
-	if svc.Spec.Ports[0].Port != 7700 {
-		t.Errorf("port = %d, want 7700", svc.Spec.Ports[0].Port)
-	}
-}
-
-func TestServiceLabels(t *testing.T) {
-	project := newTestProject("default")
-
-	tests := []struct {
-		name      string
-		svc       *corev1.Service
-		component string
-	}{
-		{"Sequin", BuildSequinService(project), "sequin"},
-		{"Powersync", BuildPowersyncAPIService(project), "powersync-api"},
-		{"Meilisearch", BuildMeilisearchService(project), "meilisearch"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			labels := tt.svc.Labels
-			if labels["app.kubernetes.io/component"] != tt.component {
-				t.Errorf("component label = %q, want %q", labels["app.kubernetes.io/component"], tt.component)
-			}
-
-			selector := tt.svc.Spec.Selector
-			if selector["app.kubernetes.io/component"] != tt.component {
-				t.Errorf("selector component = %q, want %q", selector["app.kubernetes.io/component"], tt.component)
-			}
-		})
+	if svc.Spec.Selector["app.kubernetes.io/component"] != "powersync-api" {
+		t.Errorf("unexpected selector: %v", svc.Spec.Selector)
 	}
 }

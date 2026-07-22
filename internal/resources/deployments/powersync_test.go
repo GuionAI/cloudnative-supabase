@@ -5,7 +5,19 @@ import (
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
+	corev1 "k8s.io/api/core/v1"
 )
+
+func TestPowersyncCompactUsesImagePullSecrets(t *testing.T) {
+	project := newTestProject("default")
+	project.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: "registry-auth"}}
+
+	cronJob := BuildPowersyncCompactCronJob(project, newTestSecretNames())
+	pullSecrets := cronJob.Spec.JobTemplate.Spec.Template.Spec.ImagePullSecrets
+	if len(pullSecrets) != 1 || pullSecrets[0].Name != "registry-auth" {
+		t.Errorf("ImagePullSecrets = %v", pullSecrets)
+	}
+}
 
 func TestPowersyncNames(t *testing.T) {
 	project := newTestProject("default")
@@ -56,9 +68,12 @@ func TestBuildPowersyncAPIDeployment(t *testing.T) {
 		t.Errorf("image = %q, want %q", c.Image, expectedImage)
 	}
 
-	// Command: entry-api.js
-	if len(c.Command) != 2 || c.Command[1] != "entry-api.js" {
-		t.Errorf("Command = %v, want [node entry-api.js]", c.Command)
+	// The image entrypoint is node service/lib/entry.js.
+	if len(c.Command) != 0 {
+		t.Errorf("Command = %v, want image entrypoint", c.Command)
+	}
+	if len(c.Args) != 3 || c.Args[0] != "start" || c.Args[1] != "-r" || c.Args[2] != "api" {
+		t.Errorf("Args = %v, want [start -r api]", c.Args)
 	}
 
 	// Ports: HTTP + metrics
@@ -72,12 +87,15 @@ func TestBuildPowersyncAPIDeployment(t *testing.T) {
 		t.Errorf("metrics port = %d, want %d", c.Ports[1].ContainerPort, PowersyncMetricsPort)
 	}
 
-	// Probes
-	if c.LivenessProbe == nil || c.LivenessProbe.HTTPGet.Path != "/api/status" {
-		t.Error("expected liveness probe on /api/status")
+	// PowerSync 1.20 filesystem probes.
+	if c.LivenessProbe == nil || c.LivenessProbe.Exec == nil || c.LivenessProbe.Exec.Command[1] != "/app/.probes/poll" {
+		t.Error("expected filesystem liveness probe")
 	}
-	if c.ReadinessProbe == nil || c.ReadinessProbe.HTTPGet.Path != "/api/status" {
-		t.Error("expected readiness probe on /api/status")
+	if c.ReadinessProbe == nil || c.ReadinessProbe.Exec == nil || c.ReadinessProbe.Exec.Command[1] != "/app/.probes/ready" {
+		t.Error("expected filesystem readiness probe")
+	}
+	if c.StartupProbe == nil || c.StartupProbe.Exec == nil || c.StartupProbe.Exec.Command[1] != "/app/.probes/startup" {
+		t.Error("expected filesystem startup probe")
 	}
 
 	// Volume mounts
@@ -145,9 +163,8 @@ func TestBuildPowersyncReplicationDeployment(t *testing.T) {
 
 	c := dep.Spec.Template.Spec.Containers[0]
 
-	// Command: entry-replication.js
-	if len(c.Command) != 2 || c.Command[1] != "entry-replication.js" {
-		t.Errorf("Command = %v, want [node entry-replication.js]", c.Command)
+	if len(c.Args) != 3 || c.Args[0] != "start" || c.Args[1] != "-r" || c.Args[2] != "sync" {
+		t.Errorf("Args = %v, want [start -r sync]", c.Args)
 	}
 
 	// Only metrics port (no HTTP)
@@ -158,8 +175,8 @@ func TestBuildPowersyncReplicationDeployment(t *testing.T) {
 	// Default NODE_OPTIONS for replication
 	for _, e := range c.Env {
 		if e.Name == "NODE_OPTIONS" {
-			if e.Value != "--max-old-space-size=482" {
-				t.Errorf("NODE_OPTIONS = %q, want --max-old-space-size=482", e.Value)
+			if e.Value != "--max-old-space-size=230" {
+				t.Errorf("NODE_OPTIONS = %q, want --max-old-space-size=230", e.Value)
 			}
 			return
 		}
@@ -185,10 +202,13 @@ func TestBuildPowersyncCompactCronJob(t *testing.T) {
 		t.Errorf("Schedule = %q, want %q", cj.Spec.Schedule, "0 3 * * *")
 	}
 
-	// Command: entry-compact.js
+	// Compact uses the image entrypoint.
 	c := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
-	if len(c.Command) != 2 || c.Command[1] != "entry-compact.js" {
-		t.Errorf("Command = %v, want [node entry-compact.js]", c.Command)
+	if len(c.Args) != 1 || c.Args[0] != "compact" {
+		t.Errorf("Args = %v, want [compact]", c.Args)
+	}
+	if cj.Spec.ConcurrencyPolicy != "Forbid" {
+		t.Errorf("ConcurrencyPolicy = %q, want Forbid", cj.Spec.ConcurrencyPolicy)
 	}
 }
 
@@ -226,7 +246,7 @@ func TestBuildPowersyncEnvVars(t *testing.T) {
 		envMap[e.Name] = struct{}{}
 	}
 
-	required := []string{"POWERSYNC_CONFIG_PATH", "NODE_OPTIONS", "PS_STORAGE_PASSWORD", "PS_REPLICATION_PASSWORD", "PS_POWERSYNC_STORAGE_URI", "PS_POWERSYNC_REPLICATION_URI", "PS_JWT_SECRET"}
+	required := []string{"POWERSYNC_CONFIG_PATH", "NODE_OPTIONS", "LOG_FORMAT", "METRICS_PORT", "MICRO_PROBE_TYPE", "PS_STORAGE_PASSWORD", "PS_REPLICATION_PASSWORD", "PS_POWERSYNC_STORAGE_URI", "PS_POWERSYNC_REPLICATION_URI", "PS_JWT_SECRET"}
 	for _, name := range required {
 		if _, ok := envMap[name]; !ok {
 			t.Errorf("missing required env var: %s", name)

@@ -59,45 +59,13 @@ func BuildCDCMigrationsConfigMap(project *supabasev1alpha1.SupabaseProject) *cor
 	}
 }
 
-// buildCDCSetupScript generates the CDC setup shell script based on enabled services
+// buildCDCSetupScript generates the PowerSync database setup script.
 func buildCDCSetupScript(project *supabasev1alpha1.SupabaseProject) string {
 	script := `#!/bin/sh
 set -e
 
 echo "=== CDC Permissions Setup ==="
 `
-
-	// Sequin-specific grants
-	if project.Spec.Sequin != nil {
-		script += `
-# Create sequin database if it doesn't exist
-echo "Checking if sequin database exists..."
-DB_EXISTS=$(psql "$PGCONNSTR" -tAc "SELECT 1 FROM pg_database WHERE datname='sequin'" 2>/dev/null || echo "0")
-if [ "$DB_EXISTS" != "1" ]; then
-  echo "Creating sequin database..."
-  psql "$PGCONNSTR" -c "CREATE DATABASE sequin OWNER sequin"
-  echo "Sequin database created"
-else
-  echo "Sequin database already exists"
-fi
-
-# Apply Sequin CDC grants
-echo "Applying Sequin CDC grants..."
-psql "$PGCONNSTR" <<'EOSQL'
--- Grant CDC role (sequin_replication) read access to public schema
-GRANT USAGE ON SCHEMA public TO sequin_replication;
-
--- Grant sequin CREATE ON DATABASE for its migrations
-GRANT CREATE ON DATABASE supabase TO sequin;
-
--- Grant SELECT on future tables created by supabase_admin in public schema
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT SELECT ON TABLES TO sequin_replication;
-
--- Grant SELECT on existing tables in public schema
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO sequin_replication;
-EOSQL
-`
-	}
 
 	// Powersync-specific grants
 	if project.Spec.Powersync != nil {
@@ -113,6 +81,7 @@ GRANT USAGE ON SCHEMA public TO powersync_replication;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO powersync_replication;
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT SELECT ON TABLES TO powersync_replication;
 EOSQL
+
 `
 	}
 

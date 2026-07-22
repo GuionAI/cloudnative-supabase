@@ -2,7 +2,8 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/guionai/cloudnative-supabase
-  tag: "0.1.8"
+  # Defaults to Chart.appVersion so OCI chart releases select the matching image.
+  tag: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

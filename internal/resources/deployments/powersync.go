@@ -59,12 +59,12 @@ func PowersyncCompactCronJobName(project *supabasev1alpha1.SupabaseProject) stri
 func DefaultPowersyncAPIResources() corev1.ResourceRequirements {
 	return corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("256Mi"),
+			corev1.ResourceMemory: resource.MustParse("180Mi"),
 			corev1.ResourceCPU:    resource.MustParse("100m"),
 		},
 		Limits: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("512Mi"),
-			corev1.ResourceCPU:    resource.MustParse("500m"),
+			corev1.ResourceMemory: resource.MustParse("360Mi"),
+			corev1.ResourceCPU:    resource.MustParse("1"),
 		},
 	}
 }
@@ -77,8 +77,8 @@ func DefaultPowersyncReplicationResources() corev1.ResourceRequirements {
 			corev1.ResourceCPU:    resource.MustParse("100m"),
 		},
 		Limits: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("768Mi"),
-			corev1.ResourceCPU:    resource.MustParse("500m"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+			corev1.ResourceCPU:    resource.MustParse("1"),
 		},
 	}
 }
@@ -94,7 +94,7 @@ func BuildPowersyncAPIDeployment(project *supabasev1alpha1.SupabaseProject, secr
 
 	nodeOptions := spec.API.NodeOptions
 	if nodeOptions == "" {
-		nodeOptions = "--max-old-space-size=330"
+		nodeOptions = "--max-old-space-size=150"
 	}
 
 	env := buildPowersyncEnv(project, secretNames, nodeOptions)
@@ -122,7 +122,7 @@ func BuildPowersyncAPIDeployment(project *supabasev1alpha1.SupabaseProject, secr
 							Name:            "powersync-api",
 							Image:           image,
 							ImagePullPolicy: pullPolicy,
-							Command:         []string{"node", "entry-api.js"},
+							Args:            []string{"start", "-r", "api"},
 							Env:             env,
 							Ports: []corev1.ContainerPort{
 								{
@@ -136,8 +136,10 @@ func BuildPowersyncAPIDeployment(project *supabasev1alpha1.SupabaseProject, secr
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							LivenessProbe:  BuildLivenessProbe("/api/status", PowersyncHTTPPort),
-							ReadinessProbe: BuildReadinessProbe("/api/status", PowersyncHTTPPort),
+							LivenessProbe:  powersyncFileProbe("/app/.probes/poll", 5, 10, 30),
+							ReadinessProbe: powersyncFileProbe("/app/.probes/ready", 5, 10, 30),
+							StartupProbe:   powersyncFileProbe("/app/.probes/startup", 200, 1, 1),
+							Lifecycle:      powersyncLifecycle(),
 							Resources:      resources,
 							VolumeMounts:   powersyncVolumeMounts(),
 						},
@@ -163,7 +165,7 @@ func BuildPowersyncReplicationDeployment(project *supabasev1alpha1.SupabaseProje
 
 	nodeOptions := spec.Replication.NodeOptions
 	if nodeOptions == "" {
-		nodeOptions = "--max-old-space-size=482"
+		nodeOptions = "--max-old-space-size=230"
 	}
 
 	env := buildPowersyncEnv(project, secretNames, nodeOptions)
@@ -191,7 +193,7 @@ func BuildPowersyncReplicationDeployment(project *supabasev1alpha1.SupabaseProje
 							Name:            "powersync-replication",
 							Image:           image,
 							ImagePullPolicy: pullPolicy,
-							Command:         []string{"node", "entry-replication.js"},
+							Args:            []string{"start", "-r", "sync"},
 							Env:             env,
 							Ports: []corev1.ContainerPort{
 								{
@@ -200,8 +202,12 @@ func BuildPowersyncReplicationDeployment(project *supabasev1alpha1.SupabaseProje
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							Resources:    resources,
-							VolumeMounts: powersyncVolumeMounts(),
+							LivenessProbe:  powersyncFileProbe("/app/.probes/poll", 5, 10, 30),
+							ReadinessProbe: powersyncFileProbe("/app/.probes/ready", 5, 10, 30),
+							StartupProbe:   powersyncFileProbe("/app/.probes/startup", 200, 1, 1),
+							Lifecycle:      powersyncLifecycle(),
+							Resources:      resources,
+							VolumeMounts:   powersyncVolumeMounts(),
 						},
 					},
 					Volumes: powersyncVolumes(project),
@@ -234,28 +240,34 @@ func BuildPowersyncCompactCronJob(project *supabasev1alpha1.SupabaseProject, sec
 
 	env := buildPowersyncEnv(project, secretNames, "--max-old-space-size=330")
 
-	return &batchv1.CronJob{
+	cronJob := &batchv1.CronJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: project.Namespace,
 			Labels:    common.ComponentLabels(project, PowersyncCompactComponentName),
 		},
 		Spec: batchv1.CronJobSpec{
-			Schedule: schedule,
+			Schedule:                   schedule,
+			ConcurrencyPolicy:          batchv1.ForbidConcurrent,
+			SuccessfulJobsHistoryLimit: int32Ptr(3),
+			FailedJobsHistoryLimit:     int32Ptr(1),
+			StartingDeadlineSeconds:    int64Ptr(300),
 			JobTemplate: batchv1.JobTemplateSpec{
 				Spec: batchv1.JobSpec{
+					BackoffLimit:            int32Ptr(2),
+					TTLSecondsAfterFinished: int32Ptr(3600),
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: common.ComponentLabels(project, PowersyncCompactComponentName),
 						},
 						Spec: corev1.PodSpec{
-							RestartPolicy: corev1.RestartPolicyOnFailure,
+							RestartPolicy: corev1.RestartPolicyNever,
 							Containers: []corev1.Container{
 								{
 									Name:            "powersync-compact",
 									Image:           image,
 									ImagePullPolicy: pullPolicy,
-									Command:         []string{"node", "entry-compact.js"},
+									Args:            []string{"compact"},
 									Env:             env,
 									Resources:       resources,
 									VolumeMounts:    powersyncVolumeMounts(),
@@ -268,6 +280,28 @@ func BuildPowersyncCompactCronJob(project *supabasev1alpha1.SupabaseProject, sec
 			},
 		},
 	}
+	AddImagePullSecrets(&cronJob.Spec.JobTemplate.Spec.Template.Spec, project)
+	return cronJob
+}
+
+func powersyncFileProbe(path string, failureThreshold, periodSeconds, timeoutSeconds int32) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			Exec: &corev1.ExecAction{Command: []string{"cat", path}},
+		},
+		FailureThreshold:    failureThreshold,
+		InitialDelaySeconds: 5,
+		PeriodSeconds:       periodSeconds,
+		TimeoutSeconds:      timeoutSeconds,
+	}
+}
+
+func powersyncLifecycle() *corev1.Lifecycle {
+	return &corev1.Lifecycle{
+		PreStop: &corev1.LifecycleHandler{
+			Exec: &corev1.ExecAction{Command: []string{"sh", "-c", "sleep 5"}},
+		},
+	}
 }
 
 // buildPowersyncEnv builds environment variables shared by all Powersync containers
@@ -277,6 +311,11 @@ func buildPowersyncEnv(project *supabasev1alpha1.SupabaseProject, secretNames *s
 	return []corev1.EnvVar{
 		{Name: "POWERSYNC_CONFIG_PATH", Value: "/powersync/config/config.json"},
 		{Name: "NODE_OPTIONS", Value: nodeOptions},
+		{Name: "LOG_FORMAT", Value: "json"},
+		{Name: "METRICS_PORT", Value: "9464"},
+		{Name: "MICRO_ENVIRONMENT_NAME", Value: "production"},
+		{Name: "MICRO_PROBE_TYPE", Value: "fs"},
+		{Name: "MICRO_SERVICE_NAME", Value: "powersync"},
 		// Storage password (powersync_storage role — internal sync state tables)
 		{
 			Name: "PS_STORAGE_PASSWORD",
@@ -372,4 +411,12 @@ func normalizePowersyncResources(resources corev1.ResourceRequirements, fallback
 		return fallback
 	}
 	return resources
+}
+
+func int32Ptr(value int32) *int32 {
+	return &value
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
 }

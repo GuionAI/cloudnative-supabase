@@ -22,7 +22,7 @@ jobs:
         run: go mod download
 
       - name: Run tests
-        run: go test ./pkg/... -v
+        run: go test ./...
 
       - name: Build
         run: go build -o bin/manager cmd/main.go
@@ -53,5 +53,5 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.6
+          version: v2.5.0
           args: --timeout=5m

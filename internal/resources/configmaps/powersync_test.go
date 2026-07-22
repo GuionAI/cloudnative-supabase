@@ -22,7 +22,11 @@ func newTestProject(namespace string) *supabasev1alpha1.SupabaseProject {
 			Namespace: namespace,
 		},
 		Spec: supabasev1alpha1.SupabaseProjectSpec{
-			Powersync: &supabasev1alpha1.PowersyncSpec{},
+			Powersync: &supabasev1alpha1.PowersyncSpec{
+				SyncRules: supabasev1alpha1.SyncRulesSpec{
+					Inline: "config:\n  edition: 3\nstreams:\n  notes:\n    auto_subscribe: true\n    query: SELECT id FROM notes WHERE user_id = auth.user_id()",
+				},
+			},
 		},
 	}
 }
@@ -76,9 +80,7 @@ func TestSyncRulesConfigMapName(t *testing.T) {
 
 func TestBuildPowersyncConfigMap(t *testing.T) {
 	project := newTestProject(testNamespace)
-	dbHost := "my-app-rw"
-
-	cm := BuildPowersyncConfigMap(project, dbHost)
+	cm := BuildPowersyncConfigMap(project)
 
 	if cm.Name != "my-app-powersync-config" {
 		t.Errorf("Name = %q, want %q", cm.Name, "my-app-powersync-config")
@@ -102,8 +104,8 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 	if config.Storage.Type != "postgresql" {
 		t.Errorf("storage type = %q, want postgresql", config.Storage.Type)
 	}
-	if !strings.Contains(config.Storage.URI, dbHost) {
-		t.Errorf("storage URI %q should contain %q", config.Storage.URI, dbHost)
+	if config.Storage.URI != "{{ env.PS_POWERSYNC_STORAGE_URI }}" {
+		t.Errorf("storage URI = %q, want environment template", config.Storage.URI)
 	}
 
 	// Replication
@@ -116,6 +118,9 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 	}
 	if conn.Tag != "default" {
 		t.Errorf("connection tag = %q, want default", conn.Tag)
+	}
+	if conn.URI != "{{ env.PS_POWERSYNC_REPLICATION_URI }}" {
+		t.Errorf("replication URI = %q, want environment template", conn.URI)
 	}
 
 	// Client auth
@@ -132,7 +137,7 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 	}
 }
 
-func TestBuildPowersyncSyncRulesConfigMap_Default(t *testing.T) {
+func TestBuildPowersyncSyncRulesConfigMap_UsesSyncStreams(t *testing.T) {
 	project := newTestProject(testNamespace)
 
 	cm := BuildPowersyncSyncRulesConfigMap(project)
@@ -148,14 +153,24 @@ func TestBuildPowersyncSyncRulesConfigMap_Default(t *testing.T) {
 	if !ok {
 		t.Fatal("sync_rules.yaml key not found")
 	}
-	if !strings.Contains(syncRules, "bucket_definitions") {
-		t.Error("default sync rules should contain bucket_definitions")
+	if !strings.Contains(syncRules, "edition: 3") || !strings.Contains(syncRules, "streams:") {
+		t.Error("sync config should contain edition 3 streams")
+	}
+}
+
+func TestBuildPowersyncSyncRulesConfigMap_RequiresConfiguration(t *testing.T) {
+	project := newTestProject(testNamespace)
+	project.Spec.Powersync.SyncRules.Inline = ""
+
+	cm := BuildPowersyncSyncRulesConfigMap(project)
+	if cm != nil {
+		t.Error("expected nil ConfigMap when no sync config is provided")
 	}
 }
 
 func TestBuildPowersyncSyncRulesConfigMap_Inline(t *testing.T) {
 	project := newTestProject("default")
-	project.Spec.Powersync.SyncRules.Inline = "bucket_definitions:\n  custom:\n    data:\n      - SELECT * FROM users"
+	project.Spec.Powersync.SyncRules.Inline = "config:\n  edition: 3\nstreams:\n  custom:\n    query: SELECT id FROM users WHERE id = auth.user_id()"
 
 	cm := BuildPowersyncSyncRulesConfigMap(project)
 	if cm == nil {

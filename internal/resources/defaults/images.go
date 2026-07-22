@@ -26,21 +26,7 @@ const (
 	KongImage = "kong"
 	KongTag   = "2.8.1"
 
-	// Sequin image defaults
-	SequinImage = "sequin/sequin"
-	SequinTag   = "v0.13.25"
-
 	// Powersync image defaults
 	PowersyncImage = "journeyapps/powersync-service"
-	PowersyncTag   = "1.18.2"
-
-	// Meilisearch image defaults
-	MeilisearchImage = "getmeili/meilisearch"
-	MeilisearchTag   = "v1.11.0"
-
-	// Redis image defaults (bundled Redis for Sequin)
-	RedisImage = "redis"
-	RedisTag   = "7"
-
-	// Note: CDC permissions Job uses the same PostgresImage for psql compatibility
+	PowersyncTag   = "1.20.4"
 )

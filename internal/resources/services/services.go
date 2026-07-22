@@ -68,35 +68,6 @@ func BuildMetaService(project *supabasev1alpha1.SupabaseProject) *corev1.Service
 	return BuildService(project, project.Name+"-meta", "meta", 8080)
 }
 
-// BuildSequinService creates the service for Sequin with HTTP and metrics ports
-func BuildSequinService(project *supabasev1alpha1.SupabaseProject) *corev1.Service {
-	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      project.Name + "-sequin",
-			Namespace: project.Namespace,
-			Labels:    common.ComponentLabels(project, "sequin"),
-		},
-		Spec: corev1.ServiceSpec{
-			Type:     corev1.ServiceTypeClusterIP,
-			Selector: common.SelectorLabels(project, "sequin"),
-			Ports: []corev1.ServicePort{
-				{
-					Name:       "http",
-					Port:       7376,
-					TargetPort: intstr.FromInt(7376),
-					Protocol:   corev1.ProtocolTCP,
-				},
-				{
-					Name:       "metrics",
-					Port:       4000,
-					TargetPort: intstr.FromInt(4000),
-					Protocol:   corev1.ProtocolTCP,
-				},
-			},
-		},
-	}
-}
-
 // BuildPowersyncAPIService creates the service for Powersync API with HTTP and metrics ports
 func BuildPowersyncAPIService(project *supabasev1alpha1.SupabaseProject) *corev1.Service {
 	return &corev1.Service{
@@ -124,11 +95,6 @@ func BuildPowersyncAPIService(project *supabasev1alpha1.SupabaseProject) *corev1
 			},
 		},
 	}
-}
-
-// BuildMeilisearchService creates the service for Meilisearch
-func BuildMeilisearchService(project *supabasev1alpha1.SupabaseProject) *corev1.Service {
-	return BuildService(project, project.Name+"-meilisearch", "meilisearch", 7700)
 }
 
 // BuildKongService creates the service for Kong

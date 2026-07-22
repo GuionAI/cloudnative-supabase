@@ -12,6 +12,7 @@ CloudNative Supabase provides a single `SupabaseProject` Custom Resource that ma
 - **Studio**: Supabase Studio dashboard
 - **Meta**: postgres-meta database introspection service
 - **Kong**: API gateway with declarative routing
+- **PowerSync**: optional offline-first sync with edition 3 Sync Streams
 
 ## Features
 
@@ -26,27 +27,28 @@ CloudNative Supabase provides a single `SupabaseProject` Custom Resource that ma
 
 ## Prerequisites
 
-- Kubernetes v1.11.3+
+- A Kubernetes version supported by your CloudNativePG release
 - [CloudNativePG operator](https://cloudnative-pg.io/documentation/current/installation_upgrade/) installed
 - [CNPG Barman Cloud Plugin](https://github.com/cloudnative-pg/plugin-barman-cloud) (for backup/recovery features)
-- kubectl v1.11.3+
+- Helm 3.8+
 - (Optional) [Reloader](https://github.com/stakater/Reloader) - for automatic pod restarts on secret/configmap changes
 
 ## Installation
 
-### Install CRDs
+### Install with Helm
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/GuionAI/cloudnative-supabase/main/config/crd/bases/supabase.guion.dev_supabaseprojects.yaml
+helm install cloudnative-supabase \
+  oci://ghcr.io/guionai/charts/cloudnative-supabase \
+  --namespace cloudnative-supabase-system \
+  --create-namespace \
+  --version 0.1.8
 ```
 
-### Deploy Operator
+The public controller image is available at
+`ghcr.io/guionai/cloudnative-supabase` and does not require registry credentials.
 
-```bash
-kubectl apply -f https://raw.githubusercontent.com/GuionAI/cloudnative-supabase/main/dist/install.yaml
-```
-
-Or using the Makefile:
+### Install from source
 
 ```bash
 make deploy IMG=ghcr.io/guionai/cloudnative-supabase:latest
@@ -168,6 +170,7 @@ Status conditions:
 - `StudioReady` - Studio is running
 - `MetaReady` - postgres-meta is running
 - `KongReady` - Kong gateway is running
+- `PowersyncReady` - optional PowerSync service is running
 
 ## Configuration
 
@@ -230,6 +233,30 @@ Status conditions:
 | `organizationName` | Organization name in UI | Default Organization |
 | `projectName` | Project name in UI | Default Project |
 
+### PowerSync
+
+PowerSync is optional. Exactly one of `syncRules.inline` or
+`syncRules.configMapRef` is required when it is enabled. The content must use
+edition 3 Sync Streams; the operator does not install a broad default stream.
+
+```yaml
+spec:
+  powersync:
+    api:
+      replicas: 1
+    syncRules:
+      inline: |
+        config:
+          edition: 3
+        streams:
+          notes:
+            auto_subscribe: true
+            query: SELECT id, title FROM notes WHERE user_id = auth.user_id()
+```
+
+The operator creates the two database roles, grants CDC access, creates the
+`powersync` publication, and runs separate API and replication deployments.
+
 ## Generated Secrets
 
 The operator auto-generates these secrets:
@@ -240,6 +267,8 @@ The operator auto-generates these secrets:
 | `{name}-supabase-admin-password` | `username`, `password` |
 | `{name}-authenticator-password` | `username`, `password` |
 | `{name}-auth-admin-password` | `username`, `password` |
+| `{name}-powersync-storage-password` | `username`, `password` |
+| `{name}-powersync-replication-password` | `username`, `password` |
 
 To use an existing JWT secret, set `spec.jwt.secretRef`.
 

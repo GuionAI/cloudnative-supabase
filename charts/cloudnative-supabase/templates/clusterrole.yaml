@@ -20,12 +20,11 @@ rules:
       - patch
       - update
       - watch
-  # Deployments and StatefulSets
+  # Deployments
   - apiGroups:
       - apps
     resources:
       - deployments
-      - statefulsets
     verbs:
       - create
       - delete
@@ -34,7 +33,7 @@ rules:
       - patch
       - update
       - watch
-  # Jobs and CronJobs (CDC permissions, Powersync compact)
+  # Jobs and CronJobs (PowerSync permissions and compaction)
   - apiGroups:
       - batch
     resources:
@@ -48,11 +47,12 @@ rules:
       - patch
       - update
       - watch
-  # CNPG Clusters and ScheduledBackups
+  # CNPG Clusters, ScheduledBackups, and Publications
   - apiGroups:
       - postgresql.cnpg.io
     resources:
       - clusters
+      - publications
       - scheduledbackups
     verbs:
       - create

@@ -37,33 +37,16 @@ spec:
 
   # meta and kong use defaults (always enabled)
 
-  # --- Optional CDC/Search Services ---
-  # Uncomment sections below to enable. Presence = enabled, absence = disabled.
-  # All secrets, roles, and permissions are auto-generated.
-
-  # Sequin CDC/event streaming (bundled Redis auto-deployed)
-  # sequin: {}
-
-  # Sequin with external Redis
-  # sequin:
-  #   replicas: 1
-  #   redis:
-  #     external:
-  #       host: redis.infra.svc
-  #       port: 6379
-
-  # Powersync offline-first sync
+  # Optional PowerSync offline-first sync. Sync Streams are required and should
+  # select explicit columns guarded by auth.user_id().
   # powersync:
   #   api:
-  #     replicas: 2
+  #     replicas: 1
   #   syncRules:
   #     inline: |
-  #       bucket_definitions:
-  #         global:
-  #           data:
-  #             - SELECT * FROM public.*
-
-  # Meilisearch full-text search
-  # meilisearch:
-  #   persistence:
-  #     size: 10Gi
+  #       config:
+  #         edition: 3
+  #       streams:
+  #         notes:
+  #           auto_subscribe: true
+  #           query: SELECT id, title FROM notes WHERE user_id = auth.user_id()

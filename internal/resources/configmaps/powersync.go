@@ -18,7 +18,6 @@ package configmaps
 
 import (
 	"encoding/json"
-	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,8 +45,12 @@ func PowersyncSyncRulesConfigMapName(project *supabasev1alpha1.SupabaseProject) 
 type powersyncConfig struct {
 	Storage     powersyncStorage     `json:"storage"`
 	Replication powersyncReplication `json:"replication"`
+	Dev         powersyncDev         `json:"dev"`
 	ClientAuth  powersyncClientAuth  `json:"client_auth"`
+	Migrations  powersyncMigrations  `json:"migrations"`
+	Port        int                  `json:"port"`
 	SyncRules   powersyncSyncRules   `json:"sync_rules"`
+	Telemetry   powersyncTelemetry   `json:"telemetry"`
 }
 
 type powersyncStorage struct {
@@ -71,43 +74,54 @@ type powersyncClientAuth struct {
 	Audience          []string `json:"audience"`
 }
 
+type powersyncDev struct {
+	DemoAuth bool `json:"demo_auth"`
+}
+
+type powersyncMigrations struct {
+	DisableAutoMigration bool `json:"disable_auto_migration"`
+}
+
 type powersyncSyncRules struct {
-	Path string `json:"path"`
+	Path        string `json:"path"`
+	ExitOnError bool   `json:"exit_on_error"`
+}
+
+type powersyncTelemetry struct {
+	DisableTelemetrySharing bool `json:"disable_telemetry_sharing"`
 }
 
 // BuildPowersyncConfigMap creates the PowerSync config.json ConfigMap.
-// Database credentials are injected via environment variables that PowerSync resolves at runtime.
-// The config uses connection strings with env var placeholders.
-// dbHost is the database hostname (e.g., from cnpg.ClusterRWServiceName) - passed as parameter to avoid import cycle.
-func BuildPowersyncConfigMap(project *supabasev1alpha1.SupabaseProject, dbHost string) *corev1.ConfigMap {
-
-	// PowerSync config uses connection URIs with credentials from env vars
-	// Environment variables PS_STORAGE_URI, PS_REPLICATION_URI, PS_JWT_SECRET
-	// are set on the deployment from K8s secrets
+// Database credentials are injected via environment variable templates that
+// PowerSync resolves at runtime.
+func BuildPowersyncConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.ConfigMap {
 	config := powersyncConfig{
 		Storage: powersyncStorage{
 			Type: "postgresql",
-			// Will be overridden by PS_POWERSYNC_STORAGE_URI env var
-			URI: fmt.Sprintf("postgresql://powersync_storage@%s:5432/supabase?sslmode=disable", dbHost),
+			URI:  "{{ env.PS_POWERSYNC_STORAGE_URI }}",
 		},
 		Replication: powersyncReplication{
 			Connections: []powersyncConnection{
 				{
 					Type: "postgresql",
-					// Will be overridden by PS_POWERSYNC_REPLICATION_URI env var
-					URI: fmt.Sprintf("postgresql://powersync_replication@%s:5432/supabase?sslmode=disable", dbHost),
-					Tag: "default",
+					URI:  "{{ env.PS_POWERSYNC_REPLICATION_URI }}",
+					Tag:  "default",
 				},
 			},
 		},
+		Dev: powersyncDev{DemoAuth: false},
 		ClientAuth: powersyncClientAuth{
 			Supabase:          true,
 			SupabaseJWTSecret: "{{ env.PS_JWT_SECRET }}",
 			Audience:          []string{"authenticated"},
 		},
+		Migrations: powersyncMigrations{DisableAutoMigration: false},
+		Port:       8080,
 		SyncRules: powersyncSyncRules{
-			Path: "/powersync/sync_rules/sync_rules.yaml",
+			Path:        "/powersync/sync_rules/sync_rules.yaml",
+			ExitOnError: false,
 		},
+		Telemetry: powersyncTelemetry{DisableTelemetrySharing: false},
 	}
 
 	configJSON, _ := json.MarshalIndent(config, "", "  ")
@@ -134,10 +148,11 @@ func BuildPowersyncSyncRulesConfigMap(project *supabasev1alpha1.SupabaseProject)
 		return nil
 	}
 
-	// Use inline sync rules or default
+	// An empty sync config would either fail startup or accidentally broaden access
+	// if a permissive default were used. Admission validation also rejects this case.
 	syncRules := spec.SyncRules.Inline
 	if syncRules == "" {
-		syncRules = defaultSyncRules()
+		return nil
 	}
 
 	return &corev1.ConfigMap{
@@ -159,12 +174,4 @@ func SyncRulesConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
 		return project.Spec.Powersync.SyncRules.ConfigMapRef
 	}
 	return PowersyncSyncRulesConfigMapName(project)
-}
-
-func defaultSyncRules() string {
-	return `bucket_definitions:
-  global:
-    data:
-      - SELECT * FROM public.*
-`
 }
