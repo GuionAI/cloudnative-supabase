@@ -83,6 +83,20 @@ func DefaultPowersyncReplicationResources() corev1.ResourceRequirements {
 	}
 }
 
+// DefaultPowersyncCompactResources returns default resource requirements for Powersync compaction.
+func DefaultPowersyncCompactResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("1Gi"),
+			corev1.ResourceCPU:    resource.MustParse("1"),
+		},
+	}
+}
+
 // BuildPowersyncAPIDeployment creates the Powersync API deployment (client-facing)
 func BuildPowersyncAPIDeployment(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) *appsv1.Deployment {
 	spec := project.Spec.Powersync
@@ -136,7 +150,7 @@ func BuildPowersyncAPIDeployment(project *supabasev1alpha1.SupabaseProject, secr
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							LivenessProbe:  powersyncFileProbe("/app/.probes/poll", 5, 10, 30),
+							LivenessProbe:  powersyncLivenessProbe(),
 							ReadinessProbe: powersyncFileProbe("/app/.probes/ready", 5, 10, 30),
 							StartupProbe:   powersyncFileProbe("/app/.probes/startup", 200, 1, 1),
 							Lifecycle:      powersyncLifecycle(),
@@ -202,7 +216,7 @@ func BuildPowersyncReplicationDeployment(project *supabasev1alpha1.SupabaseProje
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							LivenessProbe:  powersyncFileProbe("/app/.probes/poll", 5, 10, 30),
+							LivenessProbe:  powersyncLivenessProbe(),
 							ReadinessProbe: powersyncFileProbe("/app/.probes/ready", 5, 10, 30),
 							StartupProbe:   powersyncFileProbe("/app/.probes/startup", 200, 1, 1),
 							Lifecycle:      powersyncLifecycle(),
@@ -231,14 +245,14 @@ func BuildPowersyncCompactCronJob(project *supabasev1alpha1.SupabaseProject, sec
 	name := PowersyncCompactCronJobName(project)
 	image := ResolveImage(spec.Image, defaults.PowersyncImage, defaults.PowersyncTag)
 	pullPolicy := ResolvePullPolicy(spec.Image)
-	resources := normalizePowersyncResources(spec.Compact.Resources, DefaultPowersyncAPIResources())
+	resources := normalizePowersyncResources(spec.Compact.Resources, DefaultPowersyncCompactResources())
 
 	schedule := spec.Compact.Schedule
 	if schedule == "" {
 		schedule = "0 3 * * *"
 	}
 
-	env := buildPowersyncEnv(project, secretNames, "--max-old-space-size=330")
+	env := buildPowersyncEnv(project, secretNames, "--max-old-space-size=512")
 
 	cronJob := &batchv1.CronJob{
 		ObjectMeta: metav1.ObjectMeta{
@@ -293,6 +307,22 @@ func powersyncFileProbe(path string, failureThreshold, periodSeconds, timeoutSec
 		InitialDelaySeconds: 5,
 		PeriodSeconds:       periodSeconds,
 		TimeoutSeconds:      timeoutSeconds,
+	}
+}
+
+func powersyncLivenessProbe() *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			Exec: &corev1.ExecAction{Command: []string{
+				"sh",
+				"-ec",
+				`age=$(( $(date +%s) - $(stat -c %Y /app/.probes/poll) )); [ "$age" -lt 10 ]`,
+			}},
+		},
+		FailureThreshold:    5,
+		InitialDelaySeconds: 5,
+		PeriodSeconds:       10,
+		TimeoutSeconds:      30,
 	}
 }
 

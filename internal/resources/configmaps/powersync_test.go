@@ -135,6 +135,9 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 	if config.SyncRules.Path != "/powersync/sync_rules/sync_rules.yaml" {
 		t.Errorf("sync rules path = %q", config.SyncRules.Path)
 	}
+	if !config.SyncRules.ExitOnError {
+		t.Error("sync rules must fail startup when invalid")
+	}
 }
 
 func TestBuildPowersyncSyncRulesConfigMap_UsesSyncStreams(t *testing.T) {

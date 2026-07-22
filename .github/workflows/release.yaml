@@ -33,7 +33,7 @@ jobs:
         run: go install github.com/grafana/tanka/cmd/tk@v0.37.4
 
       - name: Run tests
-        run: make test test-tanka
+        run: make test test-tanka test-delivery
 
       - name: Generate and check manifests
         run: |
@@ -59,7 +59,6 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -79,6 +78,7 @@ jobs:
           mkdir -p dist
           helm package charts/cloudnative-supabase --version "${VERSION}" --app-version "${VERSION}" --destination dist
           helm push "dist/cloudnative-supabase-${VERSION}.tgz" "${CHART_REGISTRY}"
+          helm pull "${CHART_REGISTRY}/cloudnative-supabase" --version "${VERSION}" --destination /tmp
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

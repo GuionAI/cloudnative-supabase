@@ -9,6 +9,8 @@ image:
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
+# Overrides app.kubernetes.io/version when deploying an immutable image tag.
+versionOverride: ""
 
 serviceAccount:
   # Specifies whether a service account should be created

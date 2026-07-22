@@ -39,15 +39,19 @@ CloudNative Supabase provides a single `SupabaseProject` Custom Resource that ma
 ### Install with Helm
 
 ```bash
+# Replace PUBLISHED_VERSION with a version listed in GitHub Releases.
+VERSION="PUBLISHED_VERSION"
 helm install cloudnative-supabase \
   oci://ghcr.io/guionai/charts/cloudnative-supabase \
   --namespace cloudnative-supabase-system \
   --create-namespace \
-  --version 0.1.8
+  --version "${VERSION}"
 ```
 
 The public controller image is available at
 `ghcr.io/guionai/cloudnative-supabase` and does not require registry credentials.
+The OCI chart becomes installable after a tagged release is published and its
+GHCR package has been made public.
 
 ### Deploy the Guion operator with Tanka
 
@@ -55,9 +59,9 @@ The self-contained environment in [`tanka/`](tanka/) renders this repository's
 chart and CRD without Jsonnet dependencies:
 
 ```bash
-make tanka-show
-make tanka-diff
-make tanka-apply
+TANKA_IMAGE=sha-COMMIT make tanka-show
+TANKA_IMAGE=sha-COMMIT make tanka-diff
+TANKA_IMAGE=sha-COMMIT make tanka-apply
 ```
 
 This installs only the shared operator in `cnsupa-system`. Application-specific

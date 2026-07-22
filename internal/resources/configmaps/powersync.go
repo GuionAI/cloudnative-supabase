@@ -119,7 +119,7 @@ func BuildPowersyncConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.
 		Port:       8080,
 		SyncRules: powersyncSyncRules{
 			Path:        "/powersync/sync_rules/sync_rules.yaml",
-			ExitOnError: false,
+			ExitOnError: true,
 		},
 		Telemetry: powersyncTelemetry{DisableTelemetrySharing: false},
 	}

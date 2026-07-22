@@ -36,8 +36,9 @@ Common labels
 {{- define "cloudnative-supabase.labels" -}}
 helm.sh/chart: {{ include "cloudnative-supabase.chart" . }}
 {{ include "cloudnative-supabase.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- $appVersion := default .Chart.AppVersion .Values.versionOverride }}
+{{- if $appVersion }}
+app.kubernetes.io/version: {{ $appVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}

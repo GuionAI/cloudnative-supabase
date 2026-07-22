@@ -1,6 +1,7 @@
 package deployments
 
 import (
+	"slices"
 	"testing"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
@@ -88,9 +89,7 @@ func TestBuildPowersyncAPIDeployment(t *testing.T) {
 	}
 
 	// PowerSync 1.20 filesystem probes.
-	if c.LivenessProbe == nil || c.LivenessProbe.Exec == nil || c.LivenessProbe.Exec.Command[1] != "/app/.probes/poll" {
-		t.Error("expected filesystem liveness probe")
-	}
+	assertFreshPowersyncLivenessProbe(t, c.LivenessProbe)
 	if c.ReadinessProbe == nil || c.ReadinessProbe.Exec == nil || c.ReadinessProbe.Exec.Command[1] != "/app/.probes/ready" {
 		t.Error("expected filesystem readiness probe")
 	}
@@ -128,17 +127,21 @@ func TestBuildPowersyncAPIDeployment_CustomReplicas(t *testing.T) {
 }
 
 func TestBuildPowersyncAPIDeployment_CustomNodeOptions(t *testing.T) {
+	const (
+		nodeOptionsName  = "NODE_OPTIONS"
+		nodeOptionsValue = "--max-old-space-size=512"
+	)
 	project := newTestProject("default")
-	project.Spec.Powersync.API.NodeOptions = "--max-old-space-size=512"
+	project.Spec.Powersync.API.NodeOptions = nodeOptionsValue
 	secretNames := newTestSecretNames()
 
 	dep := BuildPowersyncAPIDeployment(project, secretNames)
 	env := dep.Spec.Template.Spec.Containers[0].Env
 
 	for _, e := range env {
-		if e.Name == "NODE_OPTIONS" {
-			if e.Value != "--max-old-space-size=512" {
-				t.Errorf("NODE_OPTIONS = %q, want --max-old-space-size=512", e.Value)
+		if e.Name == nodeOptionsName {
+			if e.Value != nodeOptionsValue {
+				t.Errorf("NODE_OPTIONS = %q, want %s", e.Value, nodeOptionsValue)
 			}
 			return
 		}
@@ -171,6 +174,7 @@ func TestBuildPowersyncReplicationDeployment(t *testing.T) {
 	if len(c.Ports) != 1 || c.Ports[0].ContainerPort != PowersyncMetricsPort {
 		t.Errorf("expected only metrics port %d", PowersyncMetricsPort)
 	}
+	assertFreshPowersyncLivenessProbe(t, c.LivenessProbe)
 
 	// Default NODE_OPTIONS for replication
 	for _, e := range c.Env {
@@ -182,6 +186,21 @@ func TestBuildPowersyncReplicationDeployment(t *testing.T) {
 		}
 	}
 	t.Error("NODE_OPTIONS env var not found")
+}
+
+func assertFreshPowersyncLivenessProbe(t *testing.T, probe *corev1.Probe) {
+	t.Helper()
+	want := []string{
+		"sh",
+		"-ec",
+		`age=$(( $(date +%s) - $(stat -c %Y /app/.probes/poll) )); [ "$age" -lt 10 ]`,
+	}
+	if probe == nil || probe.Exec == nil {
+		t.Fatal("expected exec liveness probe")
+	}
+	if !slices.Equal(probe.Exec.Command, want) {
+		t.Errorf("liveness command = %v, want %v", probe.Exec.Command, want)
+	}
 }
 
 func TestBuildPowersyncCompactCronJob(t *testing.T) {
@@ -210,6 +229,30 @@ func TestBuildPowersyncCompactCronJob(t *testing.T) {
 	if cj.Spec.ConcurrencyPolicy != "Forbid" {
 		t.Errorf("ConcurrencyPolicy = %q, want Forbid", cj.Spec.ConcurrencyPolicy)
 	}
+
+	resources := c.Resources
+	if got := resources.Requests.Memory().String(); got != "256Mi" {
+		t.Errorf("memory request = %q, want 256Mi", got)
+	}
+	if got := resources.Requests.Cpu().String(); got != "100m" {
+		t.Errorf("CPU request = %q, want 100m", got)
+	}
+	if got := resources.Limits.Memory().String(); got != "1Gi" {
+		t.Errorf("memory limit = %q, want 1Gi", got)
+	}
+	if got := resources.Limits.Cpu().String(); got != "1" {
+		t.Errorf("CPU limit = %q, want 1", got)
+	}
+
+	for _, env := range c.Env {
+		if env.Name == "NODE_OPTIONS" {
+			if env.Value != "--max-old-space-size=512" {
+				t.Errorf("NODE_OPTIONS = %q, want --max-old-space-size=512", env.Value)
+			}
+			return
+		}
+	}
+	t.Error("NODE_OPTIONS env var not found")
 }
 
 func TestBuildPowersyncCompactCronJob_CustomSchedule(t *testing.T) {

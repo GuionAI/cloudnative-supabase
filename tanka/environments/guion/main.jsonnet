@@ -1,4 +1,5 @@
 local namespace = 'cnsupa-system';
+local imageTag = std.extVar('imageTag');
 local chart = std.native('helmTemplate')(
   'cloudnative-supabase',
   '../../../charts/cloudnative-supabase',
@@ -6,9 +7,10 @@ local chart = std.native('helmTemplate')(
     calledFrom: std.thisFile,
     namespace: namespace,
     values: {
+      versionOverride: imageTag,
       image: {
-        tag: 'latest',
-        pullPolicy: 'Always',
+        tag: imageTag,
+        pullPolicy: 'IfNotPresent',
       },
     },
   },

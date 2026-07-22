@@ -5,12 +5,14 @@ self-contained: the environment renders the Helm chart and CRD from this
 repository and has no Jsonnet library dependencies.
 
 The `guion` environment targets `https://kube-new.flicknote.app` and deploys
-the operator into `cnsupa-system` using the public GHCR image.
+the operator into `cnsupa-system` using the public GHCR image. Supply an
+immutable release or `sha-...` image tag so each change produces a real rollout
+and can be reproduced or rolled back.
 
 ```sh
-make tanka-show
-make tanka-diff
-make tanka-apply
+TANKA_IMAGE=sha-COMMIT make tanka-show
+TANKA_IMAGE=sha-COMMIT make tanka-diff
+TANKA_IMAGE=sha-COMMIT make tanka-apply
 ```
 
 Run `make test-tanka` after changing the chart, CRD, or Jsonnet environment.

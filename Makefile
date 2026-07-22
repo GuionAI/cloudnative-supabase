@@ -65,19 +65,31 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 test-tanka: ## Render and validate the self-contained Tanka environment.
 	bash hack/test-tanka.sh
 
+.PHONY: test-delivery
+test-delivery: ## Validate release and deployment invariants.
+	bash hack/test-delivery.sh
+
 TANKA_ENV ?= tanka/environments/guion
+TANKA_IMAGE ?=
+
+.PHONY: require-tanka-image
+require-tanka-image:
+	@printf '%s\n' "$(TANKA_IMAGE)" | grep -Eq '^(sha-[0-9a-f]{40}|[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$$' || { \
+		echo "TANKA_IMAGE must be a full sha-<40 hex> or semantic-version tag" >&2; \
+		exit 1; \
+	}
 
 .PHONY: tanka-show
-tanka-show: ## Render the operator Tanka environment.
-	tk show $(TANKA_ENV)
+tanka-show: require-tanka-image ## Render the operator Tanka environment.
+	tk show $(TANKA_ENV) --ext-str imageTag=$(TANKA_IMAGE)
 
 .PHONY: tanka-diff
-tanka-diff: ## Diff the operator Tanka environment against its cluster.
-	tk diff $(TANKA_ENV)
+tanka-diff: require-tanka-image ## Diff the operator Tanka environment against its cluster.
+	tk diff $(TANKA_ENV) --ext-str imageTag=$(TANKA_IMAGE)
 
 .PHONY: tanka-apply
-tanka-apply: ## Apply the operator Tanka environment to its cluster.
-	tk apply $(TANKA_ENV)
+tanka-apply: require-tanka-image ## Apply the operator Tanka environment to its cluster.
+	tk apply $(TANKA_ENV) --ext-str imageTag=$(TANKA_IMAGE)
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
