@@ -61,6 +61,24 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
+.PHONY: test-tanka
+test-tanka: ## Render and validate the self-contained Tanka environment.
+	bash hack/test-tanka.sh
+
+TANKA_ENV ?= tanka/environments/guion
+
+.PHONY: tanka-show
+tanka-show: ## Render the operator Tanka environment.
+	tk show $(TANKA_ENV)
+
+.PHONY: tanka-diff
+tanka-diff: ## Diff the operator Tanka environment against its cluster.
+	tk diff $(TANKA_ENV)
+
+.PHONY: tanka-apply
+tanka-apply: ## Apply the operator Tanka environment to its cluster.
+	tk apply $(TANKA_ENV)
+
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:

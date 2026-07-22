@@ -31,6 +31,7 @@ CloudNative Supabase provides a single `SupabaseProject` Custom Resource that ma
 - [CloudNativePG operator](https://cloudnative-pg.io/documentation/current/installation_upgrade/) installed
 - [CNPG Barman Cloud Plugin](https://github.com/cloudnative-pg/plugin-barman-cloud) (for backup/recovery features)
 - Helm 3.8+
+- [Tanka](https://tanka.dev/install/) (for the repository-owned Guion deployment)
 - (Optional) [Reloader](https://github.com/stakater/Reloader) - for automatic pod restarts on secret/configmap changes
 
 ## Installation
@@ -47,6 +48,20 @@ helm install cloudnative-supabase \
 
 The public controller image is available at
 `ghcr.io/guionai/cloudnative-supabase` and does not require registry credentials.
+
+### Deploy the Guion operator with Tanka
+
+The self-contained environment in [`tanka/`](tanka/) renders this repository's
+chart and CRD without Jsonnet dependencies:
+
+```bash
+make tanka-show
+make tanka-diff
+make tanka-apply
+```
+
+This installs only the shared operator in `cnsupa-system`. Application-specific
+`SupabaseProject` resources remain owned by their application repositories.
 
 ### Install from source
 

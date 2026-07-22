@@ -27,8 +27,14 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up Tanka
+        run: go install github.com/grafana/tanka/cmd/tk@v0.37.4
+
       - name: Run tests
-        run: make test
+        run: make test test-tanka
 
       - name: Build
         run: go build -o bin/manager cmd/main.go
