@@ -19,10 +19,13 @@ package controller
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	barmancloudv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -64,12 +67,20 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	err = cnpgv1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
+	err = barmancloudv1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
+	cnpgModuleDir := goModuleDir("github.com/cloudnative-pg/cloudnative-pg")
+	barmanModuleDir := goModuleDir("github.com/cloudnative-pg/plugin-barman-cloud")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "..", "config", "crd", "bases"),
+			filepath.Join(cnpgModuleDir, "config", "crd", "bases"),
+			filepath.Join(barmanModuleDir, "config", "crd", "bases"),
+		},
 		ErrorIfCRDPathMissing: true,
 	}
 
@@ -87,6 +98,12 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 })
+
+func goModuleDir(module string) string {
+	output, err := exec.Command("go", "list", "-m", "-f={{.Dir}}", module).Output()
+	Expect(err).NotTo(HaveOccurred())
+	return strings.TrimSpace(string(output))
+}
 
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
