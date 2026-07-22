@@ -34,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -873,16 +874,102 @@ func (r *SupabaseProjectReconciler) createOrUpdateDeployment(ctx context.Context
 		return err
 	}
 
-	if apiequality.Semantic.DeepEqual(existing.Spec.Replicas, deployment.Spec.Replicas) &&
-		apiequality.Semantic.DeepDerivative(deployment.Spec.Template, existing.Spec.Template) {
+	desired := deployment.DeepCopy()
+	actual := existing.DeepCopy()
+	normalizePodTemplateDefaults(&desired.Spec.Template)
+	normalizePodTemplateDefaults(&actual.Spec.Template)
+	if apiequality.Semantic.DeepEqual(actual.Spec.Replicas, desired.Spec.Replicas) &&
+		apiequality.Semantic.DeepEqual(actual.Spec.Template, desired.Spec.Template) {
 		return nil
 	}
 
 	// Update existing - only update operator-owned fields.
 	log.V(1).Info("Updating deployment", "name", deployment.Name)
-	existing.Spec.Replicas = deployment.Spec.Replicas
-	existing.Spec.Template = deployment.Spec.Template
+	existing.Spec.Replicas = desired.Spec.Replicas
+	existing.Spec.Template = desired.Spec.Template
 	return r.Update(ctx, existing)
+}
+
+func normalizePodTemplateDefaults(template *corev1.PodTemplateSpec) {
+	spec := &template.Spec
+	if spec.RestartPolicy == "" {
+		spec.RestartPolicy = corev1.RestartPolicyAlways
+	}
+	if spec.TerminationGracePeriodSeconds == nil {
+		spec.TerminationGracePeriodSeconds = ptr.To[int64](30)
+	}
+	if spec.DNSPolicy == "" {
+		spec.DNSPolicy = corev1.DNSClusterFirst
+	}
+	if spec.SecurityContext == nil {
+		spec.SecurityContext = &corev1.PodSecurityContext{}
+	}
+	if spec.SchedulerName == "" {
+		spec.SchedulerName = corev1.DefaultSchedulerName
+	}
+	for i := range spec.Volumes {
+		normalizeVolumeDefaults(&spec.Volumes[i])
+	}
+	for i := range spec.InitContainers {
+		normalizeContainerDefaults(&spec.InitContainers[i])
+	}
+	for i := range spec.Containers {
+		normalizeContainerDefaults(&spec.Containers[i])
+	}
+}
+
+func normalizeVolumeDefaults(volume *corev1.Volume) {
+	const defaultMode int32 = 0o644
+	if volume.ConfigMap != nil && volume.ConfigMap.DefaultMode == nil {
+		volume.ConfigMap.DefaultMode = ptr.To(defaultMode)
+	}
+	if volume.Secret != nil && volume.Secret.DefaultMode == nil {
+		volume.Secret.DefaultMode = ptr.To(defaultMode)
+	}
+	if volume.DownwardAPI != nil && volume.DownwardAPI.DefaultMode == nil {
+		volume.DownwardAPI.DefaultMode = ptr.To(defaultMode)
+	}
+	if volume.Projected != nil && volume.Projected.DefaultMode == nil {
+		volume.Projected.DefaultMode = ptr.To(defaultMode)
+	}
+}
+
+func normalizeContainerDefaults(container *corev1.Container) {
+	if container.TerminationMessagePath == "" {
+		container.TerminationMessagePath = corev1.TerminationMessagePathDefault
+	}
+	if container.TerminationMessagePolicy == "" {
+		container.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+	}
+	for i := range container.Ports {
+		if container.Ports[i].Protocol == "" {
+			container.Ports[i].Protocol = corev1.ProtocolTCP
+		}
+	}
+	normalizeProbeDefaults(container.LivenessProbe)
+	normalizeProbeDefaults(container.ReadinessProbe)
+	normalizeProbeDefaults(container.StartupProbe)
+}
+
+func normalizeProbeDefaults(probe *corev1.Probe) {
+	if probe == nil {
+		return
+	}
+	if probe.TimeoutSeconds == 0 {
+		probe.TimeoutSeconds = 1
+	}
+	if probe.PeriodSeconds == 0 {
+		probe.PeriodSeconds = 10
+	}
+	if probe.SuccessThreshold == 0 {
+		probe.SuccessThreshold = 1
+	}
+	if probe.FailureThreshold == 0 {
+		probe.FailureThreshold = 3
+	}
+	if probe.HTTPGet != nil && probe.HTTPGet.Scheme == "" {
+		probe.HTTPGet.Scheme = corev1.URISchemeHTTP
+	}
 }
 
 func (r *SupabaseProjectReconciler) createOrUpdateService(ctx context.Context, project *supabasev1alpha1.SupabaseProject, service *corev1.Service) error {
@@ -907,7 +994,7 @@ func (r *SupabaseProjectReconciler) createOrUpdateService(ctx context.Context, p
 	}
 
 	// Update existing (preserve ClusterIP)
-	if apiequality.Semantic.DeepDerivative(service.Spec.Ports, existing.Spec.Ports) &&
+	if apiequality.Semantic.DeepEqual(existing.Spec.Ports, service.Spec.Ports) &&
 		apiequality.Semantic.DeepEqual(existing.Spec.Selector, service.Spec.Selector) {
 		return nil
 	}
@@ -1123,12 +1210,15 @@ func (r *SupabaseProjectReconciler) createOrUpdateObjectStore(ctx context.Contex
 		return fmt.Errorf("failed to get ObjectStore: %w", err)
 	}
 
-	if apiequality.Semantic.DeepDerivative(objectStore.Spec, existing.Spec) {
+	if apiequality.Semantic.DeepEqual(existing.Spec.Configuration, objectStore.Spec.Configuration) &&
+		existing.Spec.RetentionPolicy == objectStore.Spec.RetentionPolicy {
 		return nil
 	}
 
-	// Update existing ObjectStore.
-	existing.Spec = objectStore.Spec
+	// Update only fields owned by this controller. The ObjectStore CRD defaults
+	// instanceSidecarConfiguration, so preserve that API-managed field.
+	existing.Spec.Configuration = objectStore.Spec.Configuration
+	existing.Spec.RetentionPolicy = objectStore.Spec.RetentionPolicy
 	if err := r.Update(ctx, existing); err != nil {
 		return fmt.Errorf("failed to update ObjectStore: %w", err)
 	}
@@ -1152,7 +1242,7 @@ func (r *SupabaseProjectReconciler) createOrUpdateScheduledBackup(ctx context.Co
 		return fmt.Errorf("failed to get ScheduledBackup: %w", err)
 	}
 
-	if apiequality.Semantic.DeepDerivative(scheduledBackup.Spec, existing.Spec) {
+	if apiequality.Semantic.DeepEqual(existing.Spec, scheduledBackup.Spec) {
 		return nil
 	}
 
@@ -1238,7 +1328,7 @@ func (r *SupabaseProjectReconciler) reconcilePowerSyncPublication(ctx context.Co
 		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
 	}
 
-	needsUpdate := !apiequality.Semantic.DeepDerivative(desired.Spec, existing.Spec)
+	needsUpdate := !apiequality.Semantic.DeepEqual(desired.Spec, existing.Spec)
 	if needsUpdate {
 		existing.Spec = desired.Spec
 	}
@@ -1506,13 +1596,24 @@ func (r *SupabaseProjectReconciler) createOrUpdateCronJob(ctx context.Context, p
 		return err
 	}
 
-	if apiequality.Semantic.DeepDerivative(cronJob.Spec, existing.Spec) {
+	desired := cronJob.DeepCopy()
+	actual := existing.DeepCopy()
+	normalizeCronJobDefaults(&desired.Spec)
+	normalizeCronJobDefaults(&actual.Spec)
+	if apiequality.Semantic.DeepEqual(actual.Spec, desired.Spec) {
 		return nil
 	}
 
 	// Update existing.
-	existing.Spec = cronJob.Spec
+	existing.Spec = desired.Spec
 	return r.Update(ctx, existing)
+}
+
+func normalizeCronJobDefaults(spec *batchv1.CronJobSpec) {
+	if spec.Suspend == nil {
+		spec.Suspend = ptr.To(false)
+	}
+	normalizePodTemplateDefaults(&spec.JobTemplate.Spec.Template)
 }
 
 const cdcScriptHashAnnotation = "supabase.guion.dev/cdc-script-hash"

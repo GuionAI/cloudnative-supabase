@@ -17,6 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
+	cnpgresources "github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
+	deploymentresources "github.com/GuionAI/cloudnative-supabase/internal/resources/deployments"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 )
 
@@ -111,6 +113,92 @@ func TestOwnedResourceHelpersSkipNoOpUpdates(t *testing.T) {
 	}
 }
 
+func TestOwnedResourceHelpersRepairClearedFields(t *testing.T) {
+	t.Parallel()
+
+	scheme := newIdempotencyTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		TypeMeta:   metav1.TypeMeta{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject"},
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default", UID: "project-uid"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Auth: supabasev1alpha1.AuthSpec{
+			EmailHook: &supabasev1alpha1.EmailHookSpec{Enabled: true, URI: "https://hook.example.com"},
+		}},
+	}
+	secretNames := supabasev1alpha1.SecretNamesStatus{
+		JWT: "app-jwt", AuthAdmin: "app-auth-admin-password",
+	}
+	existingDeployment := deploymentresources.BuildAuthDeployment(project, &secretNames)
+	project.Spec.Auth.EmailHook.Enabled = false
+	deployment := deploymentresources.BuildAuthDeployment(project, &secretNames)
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default"}}
+	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "cron", Namespace: "default"}}
+	for _, object := range []client.Object{deployment, service, cronJob} {
+		if err := setTestControllerReference(project, object, scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	objectStore := &barmancloudv1.ObjectStore{ObjectMeta: metav1.ObjectMeta{Name: "store", Namespace: "default"}}
+	scheduledBackup := &cnpgv1.ScheduledBackup{ObjectMeta: metav1.ObjectMeta{Name: "backup", Namespace: "default"}}
+
+	existingService := service.DeepCopy()
+	existingService.Spec.Ports = []corev1.ServicePort{{Name: "stale", Port: 80}}
+	existingCronJob := cronJob.DeepCopy()
+	existingCronJob.Spec.Schedule = "0 3 * * *"
+	existingObjectStore := objectStore.DeepCopy()
+	existingObjectStore.Spec.RetentionPolicy = "30d"
+	existingObjectStore.Spec.InstanceSidecarConfiguration.LogLevel = "info"
+	existingScheduledBackup := scheduledBackup.DeepCopy()
+	existingScheduledBackup.Spec.Schedule = "0 0 2 * * *"
+
+	countingClient := &updateCountingClient{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		existingDeployment, existingService, existingCronJob, existingObjectStore, existingScheduledBackup,
+	).Build()}
+	reconciler := &SupabaseProjectReconciler{Client: countingClient, Scheme: scheme}
+	ctx := context.Background()
+
+	for _, call := range []func() error{
+		func() error { return reconciler.createOrUpdateDeployment(ctx, project, deployment.DeepCopy()) },
+		func() error { return reconciler.createOrUpdateService(ctx, project, service.DeepCopy()) },
+		func() error { return reconciler.createOrUpdateCronJob(ctx, project, cronJob.DeepCopy()) },
+		func() error { return reconciler.createOrUpdateObjectStore(ctx, objectStore.DeepCopy()) },
+		func() error { return reconciler.createOrUpdateScheduledBackup(ctx, scheduledBackup.DeepCopy()) },
+	} {
+		if err := call(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := countingClient.updates.Load(); got != 5 {
+		t.Fatalf("cleared-field updates = %d, want 5", got)
+	}
+
+	updatedDeployment := &appsv1.Deployment{}
+	if err := countingClient.Get(ctx, client.ObjectKeyFromObject(deployment), updatedDeployment); err != nil {
+		t.Fatal(err)
+	}
+	for _, env := range updatedDeployment.Spec.Template.Spec.Containers[0].Env {
+		if env.Name == "GOTRUE_HOOK_SEND_EMAIL_ENABLED" || env.Name == "GOTRUE_HOOK_SEND_EMAIL_URI" {
+			t.Fatalf("disabled email hook env was not removed: %#v", env)
+		}
+	}
+	updatedService := &corev1.Service{}
+	if err := countingClient.Get(ctx, client.ObjectKeyFromObject(service), updatedService); err != nil {
+		t.Fatal(err)
+	}
+	if got := updatedService.Spec.Ports; len(got) != 0 {
+		t.Fatalf("service ports were not cleared: %#v", got)
+	}
+	updatedObjectStore := &barmancloudv1.ObjectStore{}
+	if err := countingClient.Get(ctx, client.ObjectKeyFromObject(objectStore), updatedObjectStore); err != nil {
+		t.Fatal(err)
+	}
+	if updatedObjectStore.Spec.RetentionPolicy != "" {
+		t.Fatalf("retention policy = %q, want empty", updatedObjectStore.Spec.RetentionPolicy)
+	}
+	if updatedObjectStore.Spec.InstanceSidecarConfiguration.LogLevel != "info" {
+		t.Fatalf("API-managed sidecar settings were overwritten: %#v", updatedObjectStore.Spec.InstanceSidecarConfiguration)
+	}
+}
+
 func TestReconcileSecretsSkipsUnchangedStatusUpdate(t *testing.T) {
 	t.Parallel()
 
@@ -141,6 +229,39 @@ func TestReconcileSecretsSkipsUnchangedStatusUpdate(t *testing.T) {
 	}
 	if got := countingClient.statusUpdates.Load(); got != 0 {
 		t.Fatalf("unchanged status updates = %d, want 0", got)
+	}
+}
+
+func TestReconcilePowerSyncPublicationRemovesStaleParameters(t *testing.T) {
+	t.Parallel()
+
+	scheme := newIdempotencyTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		TypeMeta:   metav1.TypeMeta{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject"},
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default", UID: "project-uid"},
+	}
+	existing := cnpgresources.BuildPowerSyncPublication(project)
+	existing.Spec.Parameters = map[string]string{"publish": "insert"}
+	existing.Status.Applied = ptr.To(true)
+	if err := setTestControllerReference(project, existing, scheme); err != nil {
+		t.Fatal(err)
+	}
+	countingClient := &updateCountingClient{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()}
+	reconciler := &SupabaseProjectReconciler{Client: countingClient, Scheme: scheme}
+	ctx := context.Background()
+
+	if _, err := reconciler.reconcilePowerSyncPublication(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	if got := countingClient.updates.Load(); got != 1 {
+		t.Fatalf("publication updates = %d, want 1", got)
+	}
+	updated := &cnpgv1.Publication{}
+	if err := countingClient.Get(ctx, client.ObjectKeyFromObject(existing), updated); err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Spec.Parameters) != 0 {
+		t.Fatalf("publication parameters were not cleared: %#v", updated.Spec.Parameters)
 	}
 }
 
