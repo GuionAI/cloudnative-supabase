@@ -9,6 +9,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -169,6 +170,56 @@ func TestReconcileAuthRollsDeploymentWhenEmailHookSecretChanges(t *testing.T) {
 	secondHash := deployment.Spec.Template.Annotations["supabase.guion.dev/email-hook-secret-hash"]
 	if secondHash == firstHash {
 		t.Fatal("auth pod template hash did not change after the email-hook secret rotated")
+	}
+}
+
+func TestReconcileSecretsReportsInvalidEmailHookSecretAndRecovers(t *testing.T) {
+	t.Parallel()
+
+	scheme := newIdempotencyTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		TypeMeta:   metav1.TypeMeta{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject"},
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default", UID: "project-uid"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Auth: supabasev1alpha1.AuthSpec{
+			EmailHook: &supabasev1alpha1.EmailHookSpec{Enabled: true, URI: "https://email.example.com/auth"},
+		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{
+			EmailHook: "app-email-hook",
+		}},
+	}
+	objects := []client.Object{
+		project,
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "app-email-hook", Namespace: "default"}, Data: map[string][]byte{"secret": []byte("v1,whsec_invalid")}},
+	}
+	for _, name := range []string{"app-jwt", "app-supabase-admin-password", "app-authenticator-password", "app-auth-admin-password"} {
+		objects = append(objects, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}})
+	}
+	kubeClient := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(objects...).Build()
+	reconciler := &SupabaseProjectReconciler{Client: kubeClient, Scheme: scheme}
+	ctx := context.Background()
+
+	if err := reconciler.reconcileSecrets(ctx, project); err == nil {
+		t.Fatal("reconcileSecrets() accepted an invalid email-hook secret")
+	}
+	condition := meta.FindStatusCondition(project.Status.Conditions, supabasev1alpha1.ConditionTypeSecretsReady)
+	if condition == nil || condition.Status != metav1.ConditionFalse {
+		t.Fatalf("SecretsReady condition after invalid secret = %#v, want False", condition)
+	}
+
+	hookSecret := &corev1.Secret{}
+	if err := kubeClient.Get(ctx, client.ObjectKey{Name: "app-email-hook", Namespace: "default"}, hookSecret); err != nil {
+		t.Fatal(err)
+	}
+	hookSecret.Data["secret"] = emailHookSecretValue(3)
+	if err := kubeClient.Update(ctx, hookSecret); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconciler.reconcileSecrets(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	condition = meta.FindStatusCondition(project.Status.Conditions, supabasev1alpha1.ConditionTypeSecretsReady)
+	if condition == nil || condition.Status != metav1.ConditionTrue {
+		t.Fatalf("SecretsReady condition after recovery = %#v, want True", condition)
 	}
 }
 
