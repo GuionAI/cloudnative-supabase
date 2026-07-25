@@ -745,6 +745,11 @@ type SecretNamesStatus struct {
 	// +optional
 	AuthAdmin string `json:"authAdmin,omitempty"`
 
+	// EmailHook is the name of the send-email webhook signing secret.
+	// The secret contains the fixed key 'secret'.
+	// +optional
+	EmailHook string `json:"emailHook,omitempty"`
+
 	// PowersyncStoragePassword is the name of the powersync_storage role password secret
 	// +optional
 	PowersyncStoragePassword string `json:"powersyncStoragePassword,omitempty"`

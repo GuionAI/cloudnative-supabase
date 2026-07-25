@@ -27,6 +27,7 @@ import (
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
+	secretresources "github.com/GuionAI/cloudnative-supabase/internal/resources/secrets"
 )
 
 const (
@@ -221,9 +222,20 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 
 	// Add email hook configuration
 	if spec.EmailHook != nil && spec.EmailHook.Enabled {
+		emailHookSecretName := secretNames.EmailHook
+		if emailHookSecretName == "" {
+			emailHookSecretName = secretresources.EmailHookSecretName(project)
+		}
 		env = append(env,
 			corev1.EnvVar{Name: "GOTRUE_HOOK_SEND_EMAIL_ENABLED", Value: "true"},
 			corev1.EnvVar{Name: "GOTRUE_HOOK_SEND_EMAIL_URI", Value: spec.EmailHook.URI},
+			corev1.EnvVar{
+				Name: "GOTRUE_HOOK_SEND_EMAIL_SECRETS",
+				ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: emailHookSecretName},
+					Key:                  "secret",
+				}},
+			},
 		)
 	}
 

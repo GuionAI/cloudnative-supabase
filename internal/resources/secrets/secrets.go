@@ -18,6 +18,7 @@ package secrets
 
 import (
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +33,9 @@ var RequiredJWTKeys = []string{"secret", "anonKey", "serviceKey"}
 
 // RequiredRoleKeys are the required keys in a database role secret
 var RequiredRoleKeys = []string{"username", "password"}
+
+// EmailHookSecretKey is the fixed key containing the Standard Webhooks secret.
+const EmailHookSecretKey = "secret"
 
 // GenerateSecrets generates all required secrets for a SupabaseProject
 func GenerateSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secret, supabasev1alpha1.SecretNamesStatus, error) {
@@ -141,6 +145,43 @@ func generateRoleSecret(project *supabasev1alpha1.SupabaseProject, nameSuffix, u
 	}
 
 	return secret, secretName, nil
+}
+
+// GenerateEmailHookSecret creates the per-project Standard Webhooks signing secret.
+func GenerateEmailHookSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secret, string, error) {
+	secretName := EmailHookSecretName(project)
+	value, err := crypto.GenerateWebhookSecret()
+	if err != nil {
+		return nil, "", fmt.Errorf("generating webhook secret: %w", err)
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: project.Namespace,
+			Labels:    common.ComponentLabels(project, "email-hook"),
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			EmailHookSecretKey: []byte(value),
+		},
+	}
+
+	return secret, secretName, nil
+}
+
+// EmailHookSecretName returns the fixed per-project email-hook secret name.
+func EmailHookSecretName(project *supabasev1alpha1.SupabaseProject) string {
+	return project.Name + "-email-hook"
+}
+
+// ValidateEmailHookSecret validates the fixed email-hook secret contract.
+func ValidateEmailHookSecret(secret *corev1.Secret) error {
+	value := string(secret.Data[EmailHookSecretKey])
+	if !strings.HasPrefix(value, "v1,whsec_") {
+		return fmt.Errorf("email hook secret %s/%s missing valid key: %s", secret.Namespace, secret.Name, EmailHookSecretKey)
+	}
+	return nil
 }
 
 // ValidateJWTSecret validates that a secret contains all required JWT keys
