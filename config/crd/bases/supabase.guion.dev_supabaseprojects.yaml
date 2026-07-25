@@ -1544,6 +1544,11 @@ spec:
                     description: Authenticator is the name of the authenticator password
                       secret
                     type: string
+                  emailHook:
+                    description: |-
+                      EmailHook is the name of the send-email webhook signing secret.
+                      The secret contains the fixed key 'secret'.
+                    type: string
                   jwt:
                     description: JWT is the name of the JWT secret
                     type: string
