@@ -17,6 +17,7 @@ limitations under the License.
 package secrets
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -36,6 +37,8 @@ var RequiredRoleKeys = []string{"username", "password"}
 
 // EmailHookSecretKey is the fixed key containing the Standard Webhooks secret.
 const EmailHookSecretKey = "secret"
+
+const emailHookSecretBytes = 32
 
 // GenerateSecrets generates all required secrets for a SupabaseProject
 func GenerateSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secret, supabasev1alpha1.SecretNamesStatus, error) {
@@ -180,6 +183,10 @@ func ValidateEmailHookSecret(secret *corev1.Secret) error {
 	value := string(secret.Data[EmailHookSecretKey])
 	if !strings.HasPrefix(value, "v1,whsec_") {
 		return fmt.Errorf("email hook secret %s/%s missing valid key: %s", secret.Namespace, secret.Name, EmailHookSecretKey)
+	}
+	payload, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(value, "v1,whsec_"))
+	if err != nil || len(payload) != emailHookSecretBytes {
+		return fmt.Errorf("email hook secret %s/%s has invalid Standard Webhooks value", secret.Namespace, secret.Name)
 	}
 	return nil
 }
