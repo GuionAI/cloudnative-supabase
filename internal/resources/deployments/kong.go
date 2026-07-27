@@ -63,7 +63,7 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 	env := []corev1.EnvVar{
 		// Kong configuration
 		{Name: "KONG_DATABASE", Value: "off"},
-		{Name: "KONG_DECLARATIVE_CONFIG", Value: "/kong/config/kong.yml"},
+		{Name: "KONG_DECLARATIVE_CONFIG", Value: "/tmp/kong.yml"},
 		{Name: "KONG_DNS_ORDER", Value: "LAST,A,CNAME"},
 		{Name: "KONG_NGINX_WORKER_PROCESSES", Value: "1"},
 		{Name: "KONG_PLUGINS", Value: "request-transformer,cors,key-auth,acl,basic-auth"},
@@ -128,7 +128,13 @@ func BuildKongDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 							Name:            KongComponentName,
 							Image:           fmt.Sprintf("%s:%s", defaults.KongImage, imageTag),
 							ImagePullPolicy: corev1.PullIfNotPresent,
-							Env:             env,
+							Command:         []string{"/bin/sh", "-ec"},
+							Args: []string{`sed \
+  -e "s|\${SUPABASE_ANON_KEY}|${SUPABASE_ANON_KEY}|g" \
+  -e "s|\${SUPABASE_SERVICE_KEY}|${SUPABASE_SERVICE_KEY}|g" \
+  /kong/config/kong.yml > /tmp/kong.yml
+exec /docker-entrypoint.sh kong docker-start`},
+							Env: env,
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "http",
