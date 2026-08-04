@@ -18,6 +18,7 @@ spec:
     siteURL: https://app.example.com
     externalURL: https://auth.example.com
     autoConfirmEmail: true
+    enableAnonymousUsers: false
     providers:
       google:
         enabled: true

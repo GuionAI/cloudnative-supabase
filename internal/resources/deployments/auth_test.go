@@ -6,6 +6,46 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 )
 
+func TestAuthDeploymentRendersAnonymousSignInsSetting(t *testing.T) {
+	tests := []struct {
+		name                 string
+		enableAnonymousUsers bool
+		want                 string
+	}{
+		{
+			name: "omitted defaults to disabled",
+			want: "false",
+		},
+		{
+			name:                 "enabled",
+			enableAnonymousUsers: true,
+			want:                 "true",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			project := newTestProject(testNamespace)
+			project.Spec.Auth.EnableAnonymousUsers = tt.enableAnonymousUsers
+
+			deployment := BuildAuthDeployment(project, newTestSecretNames())
+			count := 0
+			for _, variable := range deployment.Spec.Template.Spec.Containers[0].Env {
+				if variable.Name != "GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED" {
+					continue
+				}
+				count++
+				if variable.Value != tt.want {
+					t.Errorf("GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED = %q, want %q", variable.Value, tt.want)
+				}
+			}
+			if count != 1 {
+				t.Errorf("GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED count = %d, want 1", count)
+			}
+		})
+	}
+}
+
 func TestAuthEmailHookUsesGeneratedSigningSecret(t *testing.T) {
 	project := newTestProject(testNamespace)
 	project.Spec.Auth.EmailHook = &supabasev1alpha1.EmailHookSpec{

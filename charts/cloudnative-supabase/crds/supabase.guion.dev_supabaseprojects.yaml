@@ -75,6 +75,12 @@ spec:
                     - enabled
                     - uri
                     type: object
+                  enableAnonymousUsers:
+                    default: false
+                    description: |-
+                      EnableAnonymousUsers permits sign-in without email or another identity.
+                      Anonymous users use the authenticated Postgres role and receive an is_anonymous JWT claim.
+                    type: boolean
                   externalURL:
                     description: ExternalURL is the public URL of the auth service
                     type: string

@@ -145,6 +145,7 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 
 		// Signup configuration
 		corev1.EnvVar{Name: "GOTRUE_DISABLE_SIGNUP", Value: fmt.Sprintf("%t", spec.DisableSignup)},
+		corev1.EnvVar{Name: "GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED", Value: fmt.Sprintf("%t", spec.EnableAnonymousUsers)},
 
 		// Email configuration
 		corev1.EnvVar{Name: "GOTRUE_EXTERNAL_EMAIL_ENABLED", Value: "true"},
