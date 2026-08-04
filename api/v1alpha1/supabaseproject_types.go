@@ -347,6 +347,12 @@ type AuthSpec struct {
 	// +optional
 	DisableSignup bool `json:"disableSignup,omitempty"`
 
+	// EnableAnonymousUsers permits sign-in without email or another identity.
+	// Anonymous users use the authenticated Postgres role and receive an is_anonymous JWT claim.
+	// +kubebuilder:default=false
+	// +optional
+	EnableAnonymousUsers bool `json:"enableAnonymousUsers,omitempty"`
+
 	// AutoConfirmEmail enables automatic email confirmation
 	// +kubebuilder:default=true
 	// +optional

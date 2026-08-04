@@ -236,7 +236,12 @@ Status conditions:
 | `siteURL` | Application URL | Required |
 | `externalURL` | Auth service URL | Required |
 | `autoConfirmEmail` | Skip email confirmation | false |
+| `enableAnonymousUsers` | Allow sign-in without email or another identity | false |
 | `providers.secretRef` | Secret with OAuth credentials | - |
+
+Anonymous users still use the `authenticated` PostgreSQL role and receive an
+`is_anonymous` JWT claim. Add abuse controls before enabling anonymous sign-ins
+on a publicly advertised service.
 
 ### REST (PostgREST)
 
