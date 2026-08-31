@@ -249,13 +249,14 @@ func applyGoTrueEnv(env []corev1.EnvVar, configured []supabasev1alpha1.GoTrueEnv
 		indexes[variable.Name] = index
 	}
 	for _, configuredVariable := range configured {
-		valueFrom := configuredVariable.ValueFrom
-		variable := corev1.EnvVar{
-			Name: configuredVariable.Name,
-			ValueFrom: &corev1.EnvVarSource{
+		variable := corev1.EnvVar{Name: configuredVariable.Name}
+		if configuredVariable.Value != nil {
+			variable.Value = *configuredVariable.Value
+		} else if valueFrom := configuredVariable.ValueFrom; valueFrom != nil {
+			variable.ValueFrom = &corev1.EnvVarSource{
 				SecretKeyRef:    goTrueEnvSecretKeyRef(valueFrom.SecretKeyRef),
 				ConfigMapKeyRef: goTrueEnvConfigMapKeyRef(valueFrom.ConfigMapKeyRef),
-			},
+			}
 		}
 		if index, exists := indexes[variable.Name]; exists {
 			env[index] = variable

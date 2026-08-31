@@ -21,14 +21,20 @@ func TestReconcileAuthValidatesGoTrueEnvSources(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		valueFrom  supabasev1alpha1.GoTrueEnvValueFrom
+		value      *string
+		valueFrom  *supabasev1alpha1.GoTrueEnvValueFrom
 		objects    []client.Object
 		wantErr    string
 		wantDeploy bool
 	}{
 		{
+			name:       "literal value",
+			value:      ptr.To("true"),
+			wantDeploy: true,
+		},
+		{
 			name: "missing required Secret",
-			valueFrom: supabasev1alpha1.GoTrueEnvValueFrom{SecretKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+			valueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{SecretKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
 				Name: "auth-settings",
 				Key:  "phone-enabled",
 			}},
@@ -36,7 +42,7 @@ func TestReconcileAuthValidatesGoTrueEnvSources(t *testing.T) {
 		},
 		{
 			name: "missing required ConfigMap key",
-			valueFrom: supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+			valueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
 				Name: "auth-settings",
 				Key:  "phone-enabled",
 			}},
@@ -47,7 +53,7 @@ func TestReconcileAuthValidatesGoTrueEnvSources(t *testing.T) {
 		},
 		{
 			name: "optional missing Secret",
-			valueFrom: supabasev1alpha1.GoTrueEnvValueFrom{SecretKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+			valueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{SecretKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
 				Name:     "auth-settings",
 				Key:      "phone-enabled",
 				Optional: ptr.To(true),
@@ -56,7 +62,7 @@ func TestReconcileAuthValidatesGoTrueEnvSources(t *testing.T) {
 		},
 		{
 			name: "existing ConfigMap key",
-			valueFrom: supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+			valueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
 				Name: "auth-settings",
 				Key:  "phone-enabled",
 			}},
@@ -80,6 +86,7 @@ func TestReconcileAuthValidatesGoTrueEnvSources(t *testing.T) {
 				Spec: supabasev1alpha1.SupabaseProjectSpec{Auth: supabasev1alpha1.AuthSpec{
 					GoTrueEnv: []supabasev1alpha1.GoTrueEnvVar{{
 						Name:      "GOTRUE_EXTERNAL_PHONE_ENABLED",
+						Value:     tt.value,
 						ValueFrom: tt.valueFrom,
 					}},
 				}},

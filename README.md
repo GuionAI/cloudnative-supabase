@@ -125,10 +125,7 @@ spec:
     autoConfirmEmail: true
     goTrueEnv:
       - name: GOTRUE_EXTERNAL_PHONE_ENABLED
-        valueFrom:
-          configMapKeyRef:
-            name: auth-settings
-            key: external-phone-enabled
+        value: "true"
       - name: GOTRUE_SMS_TWILIO_AUTH_TOKEN
         valueFrom:
           secretKeyRef:
@@ -248,7 +245,7 @@ Status conditions:
 | `externalURL` | Auth service URL | Required |
 | `autoConfirmEmail` | Skip email confirmation | false |
 | `enableAnonymousUsers` | Allow sign-in without email or another identity | false |
-| `goTrueEnv` | Add or override any `GOTRUE_*` variable from one Secret/ConfigMap key | - |
+| `goTrueEnv` | Add or override any `GOTRUE_*` variable with one literal or Secret/ConfigMap key source | - |
 | `providers.secretRef` | Secret with OAuth credentials | - |
 
 Anonymous users still use the `authenticated` PostgreSQL role and receive an
@@ -256,10 +253,11 @@ Anonymous users still use the `authenticated` PostgreSQL role and receive an
 on a publicly advertised service.
 
 `auth.goTrueEnv` is the escape hatch for `GOTRUE_*` configuration not yet
-modeled by a dedicated field. Each item supplies exactly one Secret or
-ConfigMap key, so credentials cannot be stored in the custom resource. A
-same-named entry replaces the value generated from the higher-level Auth
-fields.
+modeled by a dedicated field. Each item supplies exactly one literal value,
+Secret key, or ConfigMap key. A same-named entry replaces the value generated
+from the higher-level Auth fields. Use `valueFrom.secretKeyRef` for every
+credential: a literal `value` is persisted in the custom resource and visible
+to anyone who can read it.
 
 ### REST (PostgREST)
 

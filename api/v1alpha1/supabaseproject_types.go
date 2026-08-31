@@ -359,8 +359,7 @@ type AuthSpec struct {
 	AutoConfirmEmail bool `json:"autoConfirmEmail,omitempty"`
 
 	// GoTrueEnv adds or overrides GOTRUE_ process configuration. Each value is
-	// sourced from one key in a Secret or ConfigMap, so credentials are never
-	// stored in the custom resource.
+	// supplied directly or sourced from one key in a Secret or ConfigMap.
 	// +listType=map
 	// +listMapKey=name
 	// +optional
@@ -384,14 +383,21 @@ type AuthSpec struct {
 }
 
 // GoTrueEnvVar configures one GOTRUE_ process environment variable.
+// +kubebuilder:validation:XValidation:rule="has(self.value) != has(self.valueFrom)",message="exactly one of value or valueFrom is required"
 type GoTrueEnvVar struct {
 	// Name is an arbitrary GOTRUE_ configuration variable.
 	// +kubebuilder:validation:Pattern=`^GOTRUE_[A-Z0-9_]+$`
 	Name string `json:"name"`
 
+	// Value is the literal configuration value. Do not use it for credentials:
+	// custom resources are ordinarily readable by their viewers.
+	// +optional
+	Value *string `json:"value,omitempty"`
+
 	// ValueFrom selects the configuration value from one key in a Secret or
 	// ConfigMap.
-	ValueFrom GoTrueEnvValueFrom `json:"valueFrom"`
+	// +optional
+	ValueFrom *GoTrueEnvValueFrom `json:"valueFrom,omitempty"`
 }
 
 // GoTrueEnvValueFrom selects one GOTRUE_ configuration value.

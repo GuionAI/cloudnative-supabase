@@ -5,6 +5,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 )
@@ -24,18 +25,22 @@ var _ = Describe("GoTrue environment admission", func() {
 		}
 	}
 
-	It("accepts one populated source and rejects ambiguous or empty sources", func() {
+	It("accepts one literal or source and rejects ambiguous or empty values", func() {
 		valid := project("gotrue-env-valid", []supabasev1alpha1.GoTrueEnvVar{
 			{
+				Name:  "GOTRUE_EXTERNAL_EMAIL_ENABLED",
+				Value: ptr.To("true"),
+			},
+			{
 				Name: "GOTRUE_EXTERNAL_PHONE_ENABLED",
-				ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+				ValueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
 					Name: "auth-settings",
 					Key:  "phone-enabled",
 				}},
 			},
 			{
 				Name: "GOTRUE_SMS_TWILIO_AUTH_TOKEN",
-				ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{SecretKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+				ValueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{SecretKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
 					Name: "twilio",
 					Key:  "auth-token",
 				}},
@@ -50,27 +55,35 @@ var _ = Describe("GoTrue environment admission", func() {
 			}}),
 			project("gotrue-env-both-sources", []supabasev1alpha1.GoTrueEnvVar{{
 				Name: "GOTRUE_EXTERNAL_PHONE_ENABLED",
-				ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{
+				ValueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{
 					SecretKeyRef:    &supabasev1alpha1.GoTrueEnvKeySelector{Name: "auth-settings", Key: "phone-enabled"},
 					ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{Name: "auth-settings", Key: "phone-enabled"},
 				},
 			}}),
+			project("gotrue-env-literal-and-source", []supabasev1alpha1.GoTrueEnvVar{{
+				Name:  "GOTRUE_EXTERNAL_PHONE_ENABLED",
+				Value: ptr.To("true"),
+				ValueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+					Name: "auth-settings",
+					Key:  "phone-enabled",
+				}},
+			}}),
 			project("gotrue-env-empty-secret-reference", []supabasev1alpha1.GoTrueEnvVar{{
 				Name:      "GOTRUE_EXTERNAL_PHONE_ENABLED",
-				ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{SecretKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{}},
+				ValueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{SecretKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{}},
 			}}),
 			project("gotrue-env-empty-configmap-reference", []supabasev1alpha1.GoTrueEnvVar{{
 				Name:      "GOTRUE_EXTERNAL_PHONE_ENABLED",
-				ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{}},
+				ValueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{}},
 			}}),
 			project("gotrue-env-duplicate-name", []supabasev1alpha1.GoTrueEnvVar{
 				{
 					Name:      "GOTRUE_EXTERNAL_PHONE_ENABLED",
-					ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{Name: "auth-settings", Key: "phone-enabled"}},
+					ValueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{Name: "auth-settings", Key: "phone-enabled"}},
 				},
 				{
 					Name:      "GOTRUE_EXTERNAL_PHONE_ENABLED",
-					ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{Name: "auth-settings", Key: "email-enabled"}},
+					ValueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{Name: "auth-settings", Key: "email-enabled"}},
 				},
 			}),
 		}

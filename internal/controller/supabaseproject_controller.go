@@ -783,7 +783,13 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 
 func (r *SupabaseProjectReconciler) validateGoTrueEnvSources(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
 	for _, configured := range project.Spec.Auth.GoTrueEnv {
+		if configured.Value != nil {
+			continue
+		}
 		valueFrom := configured.ValueFrom
+		if valueFrom == nil {
+			return fmt.Errorf("GoTrue environment variable %q must select exactly one Secret or ConfigMap key", configured.Name)
+		}
 		if (valueFrom.SecretKeyRef == nil) == (valueFrom.ConfigMapKeyRef == nil) {
 			return fmt.Errorf("GoTrue environment variable %q must select exactly one Secret or ConfigMap key", configured.Name)
 		}

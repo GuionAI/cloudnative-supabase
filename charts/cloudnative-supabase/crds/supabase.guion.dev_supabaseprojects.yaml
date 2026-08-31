@@ -87,8 +87,7 @@ spec:
                   goTrueEnv:
                     description: |-
                       GoTrueEnv adds or overrides GOTRUE_ process configuration. Each value is
-                      sourced from one key in a Secret or ConfigMap, so credentials are never
-                      stored in the custom resource.
+                      supplied directly or sourced from one key in a Secret or ConfigMap.
                     items:
                       description: GoTrueEnvVar configures one GOTRUE_ process environment
                         variable.
@@ -97,6 +96,11 @@ spec:
                           description: Name is an arbitrary GOTRUE_ configuration
                             variable.
                           pattern: ^GOTRUE_[A-Z0-9_]+$
+                          type: string
+                        value:
+                          description: |-
+                            Value is the literal configuration value. Do not use it for credentials:
+                            custom resources are ordinarily readable by their viewers.
                           type: string
                         valueFrom:
                           description: |-
@@ -152,8 +156,10 @@ spec:
                             rule: has(self.secretKeyRef) != has(self.configMapKeyRef)
                       required:
                       - name
-                      - valueFrom
                       type: object
+                      x-kubernetes-validations:
+                      - message: exactly one of value or valueFrom is required
+                        rule: has(self.value) != has(self.valueFrom)
                     type: array
                     x-kubernetes-list-map-keys:
                     - name
