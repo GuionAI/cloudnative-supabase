@@ -758,6 +758,9 @@ func (r *SupabaseProjectReconciler) reconcileServiceComponent(ctx context.Contex
 
 // reconcileAuth deploys the Auth service
 func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
+	if err := r.validateGoTrueEnvSources(ctx, project); err != nil {
+		return r.failAuthGoTrueEnv(ctx, project, err)
+	}
 	deployment, err := r.buildAuthDeployment(ctx, project, secretNames)
 	if err != nil {
 		return err
@@ -776,6 +779,68 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 		"hasEmailHook", project.Spec.Auth.EmailHook != nil && project.Spec.Auth.EmailHook.Enabled,
 	}
 	return r.reconcileServiceComponent(ctx, project, config)
+}
+
+func (r *SupabaseProjectReconciler) validateGoTrueEnvSources(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	for _, configured := range project.Spec.Auth.GoTrueEnv {
+		valueFrom := configured.ValueFrom
+		if (valueFrom.SecretKeyRef == nil) == (valueFrom.ConfigMapKeyRef == nil) {
+			return fmt.Errorf("GoTrue environment variable %q must select exactly one Secret or ConfigMap key", configured.Name)
+		}
+		if ref := valueFrom.SecretKeyRef; ref != nil {
+			if err := r.validateGoTrueEnvSecretKey(ctx, project.Namespace, ref); err != nil {
+				return fmt.Errorf("GoTrue environment variable %q: %w", configured.Name, err)
+			}
+			continue
+		}
+		if err := r.validateGoTrueEnvConfigMapKey(ctx, project.Namespace, valueFrom.ConfigMapKeyRef); err != nil {
+			return fmt.Errorf("GoTrue environment variable %q: %w", configured.Name, err)
+		}
+	}
+	return nil
+}
+
+func (r *SupabaseProjectReconciler) validateGoTrueEnvSecretKey(ctx context.Context, namespace string, ref *supabasev1alpha1.GoTrueEnvKeySelector) error {
+	if ref.Name == "" || ref.Key == "" {
+		return fmt.Errorf("secret reference must include a name and key")
+	}
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: namespace}, secret); err != nil {
+		if ref.Optional != nil && *ref.Optional && apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("getting secret %q: %w", ref.Name, err)
+	}
+	if _, exists := secret.Data[ref.Key]; !exists && (ref.Optional == nil || !*ref.Optional) {
+		return fmt.Errorf("secret %q is missing key %q", ref.Name, ref.Key)
+	}
+	return nil
+}
+
+func (r *SupabaseProjectReconciler) validateGoTrueEnvConfigMapKey(ctx context.Context, namespace string, ref *supabasev1alpha1.GoTrueEnvKeySelector) error {
+	if ref.Name == "" || ref.Key == "" {
+		return fmt.Errorf("config map reference must include a name and key")
+	}
+	configMap := &corev1.ConfigMap{}
+	if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: namespace}, configMap); err != nil {
+		if ref.Optional != nil && *ref.Optional && apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("getting config map %q: %w", ref.Name, err)
+	}
+	if _, exists := configMap.Data[ref.Key]; !exists && (ref.Optional == nil || !*ref.Optional) {
+		return fmt.Errorf("config map %q is missing key %q", ref.Name, ref.Key)
+	}
+	return nil
+}
+
+func (r *SupabaseProjectReconciler) failAuthGoTrueEnv(ctx context.Context, project *supabasev1alpha1.SupabaseProject, reconcileErr error) error {
+	project.Status.Services.Auth = supabasev1alpha1.ServiceStatus{Ready: false}
+	r.setCondition(project, supabasev1alpha1.ConditionTypeAuthReady, metav1.ConditionFalse, "GoTrueEnvSourceInvalid", reconcileErr.Error())
+	if err := r.updateProjectStatus(ctx, project); err != nil {
+		return err
+	}
+	return reconcileErr
 }
 
 func (r *SupabaseProjectReconciler) buildAuthDeployment(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) (*appsv1.Deployment, error) {

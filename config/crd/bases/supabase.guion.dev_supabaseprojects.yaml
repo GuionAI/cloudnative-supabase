@@ -86,73 +86,65 @@ spec:
                     type: string
                   goTrueEnv:
                     description: |-
-                      GoTrueEnv adds or overrides GoTrue process configuration. Each name must
-                      start with GOTRUE_. A value can be supplied directly or sourced from one
-                      key in a Secret or ConfigMap.
+                      GoTrueEnv adds or overrides GOTRUE_ process configuration. Each value is
+                      sourced from one key in a Secret or ConfigMap, so credentials are never
+                      stored in the custom resource.
                     items:
-                      description: GoTrueEnvVar configures one GoTrue process environment
+                      description: GoTrueEnvVar configures one GOTRUE_ process environment
                         variable.
                       properties:
                         name:
-                          description: Name is an arbitrary GoTrue configuration variable.
+                          description: Name is an arbitrary GOTRUE_ configuration
+                            variable.
                           pattern: ^GOTRUE_[A-Z0-9_]+$
                           type: string
-                        value:
-                          description: Value is the literal configuration value.
-                          type: string
                         valueFrom:
-                          description: ValueFrom selects the value from one key in
-                            a Secret or ConfigMap.
+                          description: |-
+                            ValueFrom selects the configuration value from one key in a Secret or
+                            ConfigMap.
                           properties:
                             configMapKeyRef:
                               description: ConfigMapKeyRef selects a value from a
                                 ConfigMap in the SupabaseProject namespace.
                               properties:
                                 key:
-                                  description: The key to select.
+                                  description: Key is the selected Secret or ConfigMap
+                                    key.
+                                  minLength: 1
                                   type: string
                                 name:
-                                  default: ""
-                                  description: |-
-                                    Name of the referent.
-                                    This field is effectively required, but due to backwards compatibility is
-                                    allowed to be empty. Instances of this type with an empty value here are
-                                    almost certainly wrong.
-                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  description: Name is the name of the Secret or ConfigMap.
+                                  minLength: 1
                                   type: string
                                 optional:
-                                  description: Specify whether the ConfigMap or its
-                                    key must be defined
+                                  description: Optional preserves Kubernetes optional
+                                    Secret/ConfigMap key semantics.
                                   type: boolean
                               required:
                               - key
+                              - name
                               type: object
-                              x-kubernetes-map-type: atomic
                             secretKeyRef:
                               description: SecretKeyRef selects a value from a Secret
                                 in the SupabaseProject namespace.
                               properties:
                                 key:
-                                  description: The key of the secret to select from.  Must
-                                    be a valid secret key.
+                                  description: Key is the selected Secret or ConfigMap
+                                    key.
+                                  minLength: 1
                                   type: string
                                 name:
-                                  default: ""
-                                  description: |-
-                                    Name of the referent.
-                                    This field is effectively required, but due to backwards compatibility is
-                                    allowed to be empty. Instances of this type with an empty value here are
-                                    almost certainly wrong.
-                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  description: Name is the name of the Secret or ConfigMap.
+                                  minLength: 1
                                   type: string
                                 optional:
-                                  description: Specify whether the Secret or its key
-                                    must be defined
+                                  description: Optional preserves Kubernetes optional
+                                    Secret/ConfigMap key semantics.
                                   type: boolean
                               required:
                               - key
+                              - name
                               type: object
-                              x-kubernetes-map-type: atomic
                           type: object
                           x-kubernetes-validations:
                           - message: exactly one of secretKeyRef or configMapKeyRef
@@ -160,10 +152,8 @@ spec:
                             rule: has(self.secretKeyRef) != has(self.configMapKeyRef)
                       required:
                       - name
+                      - valueFrom
                       type: object
-                      x-kubernetes-validations:
-                      - message: exactly one of value or valueFrom is required
-                        rule: has(self.value) != has(self.valueFrom)
                     type: array
                     x-kubernetes-list-map-keys:
                     - name

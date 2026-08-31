@@ -358,9 +358,9 @@ type AuthSpec struct {
 	// +optional
 	AutoConfirmEmail bool `json:"autoConfirmEmail,omitempty"`
 
-	// GoTrueEnv adds or overrides GoTrue process configuration. Each name must
-	// start with GOTRUE_. A value can be supplied directly or sourced from one
-	// key in a Secret or ConfigMap.
+	// GoTrueEnv adds or overrides GOTRUE_ process configuration. Each value is
+	// sourced from one key in a Secret or ConfigMap, so credentials are never
+	// stored in the custom resource.
 	// +listType=map
 	// +listMapKey=name
 	// +optional
@@ -383,32 +383,42 @@ type AuthSpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
-// GoTrueEnvVar configures one GoTrue process environment variable.
-// +kubebuilder:validation:XValidation:rule="has(self.value) != has(self.valueFrom)",message="exactly one of value or valueFrom is required"
+// GoTrueEnvVar configures one GOTRUE_ process environment variable.
 type GoTrueEnvVar struct {
-	// Name is an arbitrary GoTrue configuration variable.
+	// Name is an arbitrary GOTRUE_ configuration variable.
 	// +kubebuilder:validation:Pattern=`^GOTRUE_[A-Z0-9_]+$`
 	Name string `json:"name"`
 
-	// Value is the literal configuration value.
-	// +optional
-	Value *string `json:"value,omitempty"`
-
-	// ValueFrom selects the value from one key in a Secret or ConfigMap.
-	// +optional
-	ValueFrom *GoTrueEnvValueFrom `json:"valueFrom,omitempty"`
+	// ValueFrom selects the configuration value from one key in a Secret or
+	// ConfigMap.
+	ValueFrom GoTrueEnvValueFrom `json:"valueFrom"`
 }
 
-// GoTrueEnvValueFrom selects one non-literal GoTrue configuration value.
+// GoTrueEnvValueFrom selects one GOTRUE_ configuration value.
 // +kubebuilder:validation:XValidation:rule="has(self.secretKeyRef) != has(self.configMapKeyRef)",message="exactly one of secretKeyRef or configMapKeyRef is required"
 type GoTrueEnvValueFrom struct {
 	// SecretKeyRef selects a value from a Secret in the SupabaseProject namespace.
 	// +optional
-	SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
+	SecretKeyRef *GoTrueEnvKeySelector `json:"secretKeyRef,omitempty"`
 
 	// ConfigMapKeyRef selects a value from a ConfigMap in the SupabaseProject namespace.
 	// +optional
-	ConfigMapKeyRef *corev1.ConfigMapKeySelector `json:"configMapKeyRef,omitempty"`
+	ConfigMapKeyRef *GoTrueEnvKeySelector `json:"configMapKeyRef,omitempty"`
+}
+
+// GoTrueEnvKeySelector selects one key from a namespaced object.
+type GoTrueEnvKeySelector struct {
+	// Name is the name of the Secret or ConfigMap.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Key is the selected Secret or ConfigMap key.
+	// +kubebuilder:validation:MinLength=1
+	Key string `json:"key"`
+
+	// Optional preserves Kubernetes optional Secret/ConfigMap key semantics.
+	// +optional
+	Optional *bool `json:"optional,omitempty"`
 }
 
 // AuthProvidersSpec defines OAuth provider configuration

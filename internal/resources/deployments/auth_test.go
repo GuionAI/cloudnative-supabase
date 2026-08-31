@@ -5,7 +5,6 @@ import (
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/ptr"
 )
 
 func TestAuthDeploymentRendersAnonymousSignInsSetting(t *testing.T) {
@@ -102,30 +101,40 @@ func TestAuthDeploymentRendersGoTrueEnv(t *testing.T) {
 	project := newTestProject(testNamespace)
 	project.Spec.Auth.GoTrueEnv = []supabasev1alpha1.GoTrueEnvVar{
 		{
-			Name:  "GOTRUE_EXTERNAL_PHONE_ENABLED",
-			Value: ptr.To("true"),
+			Name: "GOTRUE_EXTERNAL_PHONE_ENABLED",
+			ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{
+				ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+					Name: "auth-settings",
+					Key:  "external-phone-enabled",
+				},
+			},
 		},
 		{
 			Name: "GOTRUE_SMS_TWILIO_AUTH_TOKEN",
-			ValueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: "twilio"},
-					Key:                  "auth-token",
+			ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{
+				SecretKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+					Name: "twilio",
+					Key:  "auth-token",
 				},
 			},
 		},
 		{
 			Name: "GOTRUE_RATE_LIMIT_TOKEN_REFRESH",
-			ValueFrom: &supabasev1alpha1.GoTrueEnvValueFrom{
-				ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: "auth-limits"},
-					Key:                  "token-refresh",
+			ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{
+				ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+					Name: "auth-limits",
+					Key:  "token-refresh",
 				},
 			},
 		},
 		{
-			Name:  "GOTRUE_EXTERNAL_EMAIL_ENABLED",
-			Value: ptr.To("false"),
+			Name: "GOTRUE_EXTERNAL_EMAIL_ENABLED",
+			ValueFrom: supabasev1alpha1.GoTrueEnvValueFrom{
+				ConfigMapKeyRef: &supabasev1alpha1.GoTrueEnvKeySelector{
+					Name: "auth-settings",
+					Key:  "external-email-enabled",
+				},
+			},
 		},
 	}
 
@@ -135,8 +144,9 @@ func TestAuthDeploymentRendersGoTrueEnv(t *testing.T) {
 		got[variable.Name] = variable
 	}
 
-	if variable := got["GOTRUE_EXTERNAL_PHONE_ENABLED"]; variable.Value != "true" || variable.ValueFrom != nil {
-		t.Fatalf("GOTRUE_EXTERNAL_PHONE_ENABLED = %#v, want literal true", variable)
+	if variable := got["GOTRUE_EXTERNAL_PHONE_ENABLED"]; variable.ValueFrom == nil || variable.ValueFrom.ConfigMapKeyRef == nil ||
+		variable.ValueFrom.ConfigMapKeyRef.Name != "auth-settings" || variable.ValueFrom.ConfigMapKeyRef.Key != "external-phone-enabled" {
+		t.Fatalf("GOTRUE_EXTERNAL_PHONE_ENABLED = %#v, want auth-settings/external-phone-enabled ConfigMap key", variable)
 	}
 	if variable := got["GOTRUE_SMS_TWILIO_AUTH_TOKEN"]; variable.ValueFrom == nil || variable.ValueFrom.SecretKeyRef == nil ||
 		variable.ValueFrom.SecretKeyRef.Name != "twilio" || variable.ValueFrom.SecretKeyRef.Key != "auth-token" {
@@ -146,7 +156,8 @@ func TestAuthDeploymentRendersGoTrueEnv(t *testing.T) {
 		variable.ValueFrom.ConfigMapKeyRef.Name != "auth-limits" || variable.ValueFrom.ConfigMapKeyRef.Key != "token-refresh" {
 		t.Fatalf("GOTRUE_RATE_LIMIT_TOKEN_REFRESH = %#v, want auth-limits/token-refresh ConfigMap key", variable)
 	}
-	if variable := got["GOTRUE_EXTERNAL_EMAIL_ENABLED"]; variable.Value != "false" || variable.ValueFrom != nil {
+	if variable := got["GOTRUE_EXTERNAL_EMAIL_ENABLED"]; variable.ValueFrom == nil || variable.ValueFrom.ConfigMapKeyRef == nil ||
+		variable.ValueFrom.ConfigMapKeyRef.Name != "auth-settings" || variable.ValueFrom.ConfigMapKeyRef.Key != "external-email-enabled" {
 		t.Fatalf("GOTRUE_EXTERNAL_EMAIL_ENABLED = %#v, want configured override", variable)
 	}
 

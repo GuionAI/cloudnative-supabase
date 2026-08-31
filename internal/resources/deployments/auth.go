@@ -249,14 +249,13 @@ func applyGoTrueEnv(env []corev1.EnvVar, configured []supabasev1alpha1.GoTrueEnv
 		indexes[variable.Name] = index
 	}
 	for _, configuredVariable := range configured {
-		variable := corev1.EnvVar{Name: configuredVariable.Name}
-		if configuredVariable.Value != nil {
-			variable.Value = *configuredVariable.Value
-		} else if configuredVariable.ValueFrom != nil {
-			variable.ValueFrom = &corev1.EnvVarSource{
-				SecretKeyRef:    configuredVariable.ValueFrom.SecretKeyRef,
-				ConfigMapKeyRef: configuredVariable.ValueFrom.ConfigMapKeyRef,
-			}
+		valueFrom := configuredVariable.ValueFrom
+		variable := corev1.EnvVar{
+			Name: configuredVariable.Name,
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef:    goTrueEnvSecretKeyRef(valueFrom.SecretKeyRef),
+				ConfigMapKeyRef: goTrueEnvConfigMapKeyRef(valueFrom.ConfigMapKeyRef),
+			},
 		}
 		if index, exists := indexes[variable.Name]; exists {
 			env[index] = variable
@@ -266,4 +265,26 @@ func applyGoTrueEnv(env []corev1.EnvVar, configured []supabasev1alpha1.GoTrueEnv
 		env = append(env, variable)
 	}
 	return env
+}
+
+func goTrueEnvSecretKeyRef(ref *supabasev1alpha1.GoTrueEnvKeySelector) *corev1.SecretKeySelector {
+	if ref == nil {
+		return nil
+	}
+	return &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: ref.Name},
+		Key:                  ref.Key,
+		Optional:             ref.Optional,
+	}
+}
+
+func goTrueEnvConfigMapKeyRef(ref *supabasev1alpha1.GoTrueEnvKeySelector) *corev1.ConfigMapKeySelector {
+	if ref == nil {
+		return nil
+	}
+	return &corev1.ConfigMapKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: ref.Name},
+		Key:                  ref.Key,
+		Optional:             ref.Optional,
+	}
 }
