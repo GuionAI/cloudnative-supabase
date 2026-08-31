@@ -240,5 +240,52 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 		)
 	}
 
+	return applyGoTrueEnv(env, spec.GoTrueEnv)
+}
+
+func applyGoTrueEnv(env []corev1.EnvVar, configured []supabasev1alpha1.GoTrueEnvVar) []corev1.EnvVar {
+	indexes := make(map[string]int, len(env))
+	for index, variable := range env {
+		indexes[variable.Name] = index
+	}
+	for _, configuredVariable := range configured {
+		variable := corev1.EnvVar{Name: configuredVariable.Name}
+		if configuredVariable.Value != nil {
+			variable.Value = *configuredVariable.Value
+		} else if valueFrom := configuredVariable.ValueFrom; valueFrom != nil {
+			variable.ValueFrom = &corev1.EnvVarSource{
+				SecretKeyRef:    goTrueEnvSecretKeyRef(valueFrom.SecretKeyRef),
+				ConfigMapKeyRef: goTrueEnvConfigMapKeyRef(valueFrom.ConfigMapKeyRef),
+			}
+		}
+		if index, exists := indexes[variable.Name]; exists {
+			env[index] = variable
+			continue
+		}
+		indexes[variable.Name] = len(env)
+		env = append(env, variable)
+	}
 	return env
+}
+
+func goTrueEnvSecretKeyRef(ref *supabasev1alpha1.GoTrueEnvKeySelector) *corev1.SecretKeySelector {
+	if ref == nil {
+		return nil
+	}
+	return &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: ref.Name},
+		Key:                  ref.Key,
+		Optional:             ref.Optional,
+	}
+}
+
+func goTrueEnvConfigMapKeyRef(ref *supabasev1alpha1.GoTrueEnvKeySelector) *corev1.ConfigMapKeySelector {
+	if ref == nil {
+		return nil
+	}
+	return &corev1.ConfigMapKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: ref.Name},
+		Key:                  ref.Key,
+		Optional:             ref.Optional,
+	}
 }

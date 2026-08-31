@@ -123,6 +123,14 @@ spec:
     siteURL: https://app.example.com
     externalURL: https://auth.example.com
     autoConfirmEmail: true
+    goTrueEnv:
+      - name: GOTRUE_EXTERNAL_PHONE_ENABLED
+        value: "true"
+      - name: GOTRUE_SMS_TWILIO_AUTH_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: twilio
+            key: auth-token
     providers:
       google:
         enabled: true
@@ -237,11 +245,19 @@ Status conditions:
 | `externalURL` | Auth service URL | Required |
 | `autoConfirmEmail` | Skip email confirmation | false |
 | `enableAnonymousUsers` | Allow sign-in without email or another identity | false |
+| `goTrueEnv` | Add or override any `GOTRUE_*` variable with one literal or Secret/ConfigMap key source | - |
 | `providers.secretRef` | Secret with OAuth credentials | - |
 
 Anonymous users still use the `authenticated` PostgreSQL role and receive an
 `is_anonymous` JWT claim. Add abuse controls before enabling anonymous sign-ins
 on a publicly advertised service.
+
+`auth.goTrueEnv` is the escape hatch for `GOTRUE_*` configuration not yet
+modeled by a dedicated field. Each item supplies exactly one literal value,
+Secret key, or ConfigMap key. A same-named entry replaces the value generated
+from the higher-level Auth fields. Use `valueFrom.secretKeyRef` for every
+credential: a literal `value` is persisted in the custom resource and visible
+to anyone who can read it.
 
 ### REST (PostgREST)
 

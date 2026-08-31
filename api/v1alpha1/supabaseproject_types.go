@@ -358,6 +358,13 @@ type AuthSpec struct {
 	// +optional
 	AutoConfirmEmail bool `json:"autoConfirmEmail,omitempty"`
 
+	// GoTrueEnv adds or overrides GOTRUE_ process configuration. Each value is
+	// supplied directly or sourced from one key in a Secret or ConfigMap.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	GoTrueEnv []GoTrueEnvVar `json:"goTrueEnv,omitempty"`
+
 	// Providers configuration for OAuth
 	// +optional
 	Providers *AuthProvidersSpec `json:"providers,omitempty"`
@@ -373,6 +380,51 @@ type AuthSpec struct {
 	// Resources for Auth pods
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// GoTrueEnvVar configures one GOTRUE_ process environment variable.
+// +kubebuilder:validation:XValidation:rule="has(self.value) != has(self.valueFrom)",message="exactly one of value or valueFrom is required"
+type GoTrueEnvVar struct {
+	// Name is an arbitrary GOTRUE_ configuration variable.
+	// +kubebuilder:validation:Pattern=`^GOTRUE_[A-Z0-9_]+$`
+	Name string `json:"name"`
+
+	// Value is the literal configuration value. Do not use it for credentials:
+	// custom resources are ordinarily readable by their viewers.
+	// +optional
+	Value *string `json:"value,omitempty"`
+
+	// ValueFrom selects the configuration value from one key in a Secret or
+	// ConfigMap.
+	// +optional
+	ValueFrom *GoTrueEnvValueFrom `json:"valueFrom,omitempty"`
+}
+
+// GoTrueEnvValueFrom selects one GOTRUE_ configuration value.
+// +kubebuilder:validation:XValidation:rule="has(self.secretKeyRef) != has(self.configMapKeyRef)",message="exactly one of secretKeyRef or configMapKeyRef is required"
+type GoTrueEnvValueFrom struct {
+	// SecretKeyRef selects a value from a Secret in the SupabaseProject namespace.
+	// +optional
+	SecretKeyRef *GoTrueEnvKeySelector `json:"secretKeyRef,omitempty"`
+
+	// ConfigMapKeyRef selects a value from a ConfigMap in the SupabaseProject namespace.
+	// +optional
+	ConfigMapKeyRef *GoTrueEnvKeySelector `json:"configMapKeyRef,omitempty"`
+}
+
+// GoTrueEnvKeySelector selects one key from a namespaced object.
+type GoTrueEnvKeySelector struct {
+	// Name is the name of the Secret or ConfigMap.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Key is the selected Secret or ConfigMap key.
+	// +kubebuilder:validation:MinLength=1
+	Key string `json:"key"`
+
+	// Optional preserves Kubernetes optional Secret/ConfigMap key semantics.
+	// +optional
+	Optional *bool `json:"optional,omitempty"`
 }
 
 // AuthProvidersSpec defines OAuth provider configuration
