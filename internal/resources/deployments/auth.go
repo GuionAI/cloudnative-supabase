@@ -240,5 +240,30 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 		)
 	}
 
+	return applyGoTrueEnv(env, spec.GoTrueEnv)
+}
+
+func applyGoTrueEnv(env []corev1.EnvVar, configured []supabasev1alpha1.GoTrueEnvVar) []corev1.EnvVar {
+	indexes := make(map[string]int, len(env))
+	for index, variable := range env {
+		indexes[variable.Name] = index
+	}
+	for _, configuredVariable := range configured {
+		variable := corev1.EnvVar{Name: configuredVariable.Name}
+		if configuredVariable.Value != nil {
+			variable.Value = *configuredVariable.Value
+		} else if configuredVariable.ValueFrom != nil {
+			variable.ValueFrom = &corev1.EnvVarSource{
+				SecretKeyRef:    configuredVariable.ValueFrom.SecretKeyRef,
+				ConfigMapKeyRef: configuredVariable.ValueFrom.ConfigMapKeyRef,
+			}
+		}
+		if index, exists := indexes[variable.Name]; exists {
+			env[index] = variable
+			continue
+		}
+		indexes[variable.Name] = len(env)
+		env = append(env, variable)
+	}
 	return env
 }

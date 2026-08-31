@@ -84,6 +84,90 @@ spec:
                   externalURL:
                     description: ExternalURL is the public URL of the auth service
                     type: string
+                  goTrueEnv:
+                    description: |-
+                      GoTrueEnv adds or overrides GoTrue process configuration. Each name must
+                      start with GOTRUE_. A value can be supplied directly or sourced from one
+                      key in a Secret or ConfigMap.
+                    items:
+                      description: GoTrueEnvVar configures one GoTrue process environment
+                        variable.
+                      properties:
+                        name:
+                          description: Name is an arbitrary GoTrue configuration variable.
+                          pattern: ^GOTRUE_[A-Z0-9_]+$
+                          type: string
+                        value:
+                          description: Value is the literal configuration value.
+                          type: string
+                        valueFrom:
+                          description: ValueFrom selects the value from one key in
+                            a Secret or ConfigMap.
+                          properties:
+                            configMapKeyRef:
+                              description: ConfigMapKeyRef selects a value from a
+                                ConfigMap in the SupabaseProject namespace.
+                              properties:
+                                key:
+                                  description: The key to select.
+                                  type: string
+                                name:
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  type: string
+                                optional:
+                                  description: Specify whether the ConfigMap or its
+                                    key must be defined
+                                  type: boolean
+                              required:
+                              - key
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            secretKeyRef:
+                              description: SecretKeyRef selects a value from a Secret
+                                in the SupabaseProject namespace.
+                              properties:
+                                key:
+                                  description: The key of the secret to select from.  Must
+                                    be a valid secret key.
+                                  type: string
+                                name:
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  type: string
+                                optional:
+                                  description: Specify whether the Secret or its key
+                                    must be defined
+                                  type: boolean
+                              required:
+                              - key
+                              type: object
+                              x-kubernetes-map-type: atomic
+                          type: object
+                          x-kubernetes-validations:
+                          - message: exactly one of secretKeyRef or configMapKeyRef
+                              is required
+                            rule: has(self.secretKeyRef) != has(self.configMapKeyRef)
+                      required:
+                      - name
+                      type: object
+                      x-kubernetes-validations:
+                      - message: exactly one of value or valueFrom is required
+                        rule: has(self.value) != has(self.valueFrom)
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                   imageTag:
                     description: Image tag for supabase/gotrue (defaults to operator
                       version if empty)

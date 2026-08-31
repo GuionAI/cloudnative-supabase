@@ -358,6 +358,14 @@ type AuthSpec struct {
 	// +optional
 	AutoConfirmEmail bool `json:"autoConfirmEmail,omitempty"`
 
+	// GoTrueEnv adds or overrides GoTrue process configuration. Each name must
+	// start with GOTRUE_. A value can be supplied directly or sourced from one
+	// key in a Secret or ConfigMap.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	GoTrueEnv []GoTrueEnvVar `json:"goTrueEnv,omitempty"`
+
 	// Providers configuration for OAuth
 	// +optional
 	Providers *AuthProvidersSpec `json:"providers,omitempty"`
@@ -373,6 +381,34 @@ type AuthSpec struct {
 	// Resources for Auth pods
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// GoTrueEnvVar configures one GoTrue process environment variable.
+// +kubebuilder:validation:XValidation:rule="has(self.value) != has(self.valueFrom)",message="exactly one of value or valueFrom is required"
+type GoTrueEnvVar struct {
+	// Name is an arbitrary GoTrue configuration variable.
+	// +kubebuilder:validation:Pattern=`^GOTRUE_[A-Z0-9_]+$`
+	Name string `json:"name"`
+
+	// Value is the literal configuration value.
+	// +optional
+	Value *string `json:"value,omitempty"`
+
+	// ValueFrom selects the value from one key in a Secret or ConfigMap.
+	// +optional
+	ValueFrom *GoTrueEnvValueFrom `json:"valueFrom,omitempty"`
+}
+
+// GoTrueEnvValueFrom selects one non-literal GoTrue configuration value.
+// +kubebuilder:validation:XValidation:rule="has(self.secretKeyRef) != has(self.configMapKeyRef)",message="exactly one of secretKeyRef or configMapKeyRef is required"
+type GoTrueEnvValueFrom struct {
+	// SecretKeyRef selects a value from a Secret in the SupabaseProject namespace.
+	// +optional
+	SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
+
+	// ConfigMapKeyRef selects a value from a ConfigMap in the SupabaseProject namespace.
+	// +optional
+	ConfigMapKeyRef *corev1.ConfigMapKeySelector `json:"configMapKeyRef,omitempty"`
 }
 
 // AuthProvidersSpec defines OAuth provider configuration
