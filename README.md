@@ -124,6 +124,16 @@ operator defaults. `auth.goTrueEnv` remains available for provider settings,
 but JWT keys, fallback secret, key ID, issuer, audience, lifetime, valid
 methods, and role settings are operator-owned and cannot be overridden.
 
+## CNPG configuration source of truth
+
+`SupabaseProject` is the single supported customization interface for the
+generated CNPG PostgreSQL projection. Its current `database.parameters`,
+additional roles, platform HBA rules, and platform preload libraries are
+assigned exactly on every reconcile, so removing a declaration or correcting a
+direct edit converges on the project declaration. Direct edits to those
+managed CNPG fields are unsupported and are reconciled away; fields outside
+this explicit projection retain their existing CNPG/operator behavior.
+
 ## Recovery and steady-state backup
 
 Recovery and backup are independent. A new cluster can recover from one

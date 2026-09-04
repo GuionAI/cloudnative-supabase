@@ -31,8 +31,11 @@ charts/cloudnative-supabase/crds # chart copy of generated CRD
 4. Validate immutable recovery intent, then create init SQL and public JWKS
    ConfigMaps.
 5. Reconcile independent recovery and steady-state backup resources.
-6. Create or reconcile the CNPG Cluster, preserving foreign/defaulted fields,
-   rejecting bootstrap mutation and storage shrink.
+6. Create or reconcile the CNPG Cluster, assigning the complete generated
+   PostgreSQL projection (parameters, platform HBA rules, preload libraries,
+   and managed roles) from the current SupabaseProject while preserving
+   fields outside that projection, rejecting bootstrap mutation and storage
+   shrink.
 7. Wait for ready database instances.
 8. Reconcile Auth, REST, Studio, Meta, Envoy, then optional PowerSync.
 
@@ -48,6 +51,13 @@ Valid credential rotation updates a deterministic non-secret pod-template hash
 on Auth, REST, Studio, and Envoy so Kubernetes performs only the required
 rollouts. Meta and PowerSync consume no bundle value directly and do not roll.
 Hashes are not credentials.
+
+`SupabaseProject` is the single source of truth for the generated CNPG
+PostgreSQL projection. Callers change `database.parameters` and
+`database.additionalRoles` on the project; direct edits to those managed
+Cluster fields, platform HBA rules, or preload libraries are unsupported and
+are overwritten on the next reconcile. No historical ownership ledger is
+consulted or persisted.
 
 ## Credential and service boundaries
 
