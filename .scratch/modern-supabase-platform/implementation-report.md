@@ -11,8 +11,9 @@
   `993e28d` (`fix(platform): tighten durable and recovery contracts`),
   `8b29173` (`fix(platform): finalize gateway and recovery contracts`),
   `1d029bb` (`fix(platform): clear readiness and remove inert ingress`),
-  `84f190f` (`fix(cnpg): track retained field ownership`), and
-  `0a7e0f2` (`fix(platform): align recovery validation seam`)
+  `84f190f` (`fix(cnpg): track retained field ownership`),
+  `0a7e0f2` (`fix(platform): align recovery validation seam`), and
+  `eba0d90` (`test(platform): cover production recovery validation`)
 - Worker pane: `w5P:p6`
 - Owner pane: `w5P:p1`
 - Scope: the complete `spec.md` and tickets 01–05, in dependency order
@@ -152,7 +153,7 @@ code-review pass was performed, per scope.
 
 The preceding variance table is the original implementation snapshot and
 predates the review-fix commits. The final post-fix counts below are measured
-with the final implementation commit range `git diff --numstat 9995056..0a7e0f2 -- . ':!.scratch/modern-supabase-platform/implementation-report.md'`;
+with the final implementation commit range `git diff --numstat 9995056..eba0d90 -- . ':!.scratch/modern-supabase-platform/implementation-report.md'`;
 they include all implementation and review-fix changes, exclude generated
 CRD/deepcopy artifacts and this report, and classify Go files by product code
 versus behavioral tests. This keeps the reported implementation delta stable
@@ -161,9 +162,9 @@ when the report itself is revised.
 | Category | Additions | Deletions | Line events |
 | --- | ---: | ---: | ---: |
 | Product code and gateway assets | 2,748 | 1,146 | 3,894 |
-| Behavioural tests and fixtures | 1,753 | 776 | 2,529 |
+| Behavioural tests and fixtures | 1,815 | 776 | 2,591 |
 | Docs and configuration | 343 | 466 | 809 |
-| **Non-generated implementation total** | **4,844** | **2,388** | **7,232** |
+| **Non-generated implementation total** | **4,906** | **2,388** | **7,294** |
 
 The recovery-order fix in `9d90d95` contributes 18 product-code additions, one
 deletion, and 44 behavioral-test additions. The final contract-tightening batch
@@ -182,7 +183,8 @@ for malformed or unsupported annotations before any Cluster update. Focused
 tests cover creation, parameter and role removal, missing-ledger adoption,
 same-name project recreation, malformed JSON, and unsupported versions.
 
-The final standards-triage fix in `0a7e0f2` corrected the Infisical example with
-the official 60-second refresh interval, kept recovery bootstrap validation at
-the single pre-backup Reconcile guard, and moved recovery safety/rotation tests
-to the production reconciliation seams.
+The final standards-triage fixes in `0a7e0f2` and `eba0d90` corrected the
+Infisical example with the official 60-second refresh interval, kept recovery
+bootstrap validation at the single pre-backup Reconcile guard, and moved
+recovery safety/rotation tests to the production reconciliation seams with a
+test-owned valid credential fixture.
