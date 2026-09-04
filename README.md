@@ -192,6 +192,17 @@ The status conditions include `SecretsReady`, `DatabaseReady`,
 endpoint is `<project>-api-gw:8000`; the database endpoint is the CNPG
 `<project>-pg-rw:5432` Service.
 
+Each core service condition and its `availableReplicas` value reflects the
+observed Deployment, not merely the existence of its Kubernetes objects. A
+core service is ready only after the Deployment controller has observed its
+current generation and all desired replicas are updated, ready, and available
+with no unavailable replicas. During creation or a partial rollout, pending
+components remain `Ready=False`, the project phase is `Provisioning`, and the
+aggregate `Ready` condition is false. The project reports `Running` with
+aggregate `Ready=True` only after the database, every core service, and any
+enabled PowerSync workloads are ready; `observedGeneration` advances to the
+current project generation at that point.
+
 ## Development and verification
 
 ```bash
