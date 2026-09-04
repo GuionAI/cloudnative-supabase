@@ -10,7 +10,8 @@
   `9d90d95` (`fix(recovery): validate bootstrap intent before cleanup`),
   `993e28d` (`fix(platform): tighten durable and recovery contracts`),
   `8b29173` (`fix(platform): finalize gateway and recovery contracts`), and
-  `1d029bb` (`fix(platform): clear readiness and remove inert ingress`)
+  `1d029bb` (`fix(platform): clear readiness and remove inert ingress`), and
+  `84f190f` (`fix(cnpg): track retained field ownership`)
 - Worker pane: `w5P:p6`
 - Owner pane: `w5P:p1`
 - Scope: the complete `spec.md` and tickets 01–05, in dependency order
@@ -150,7 +151,7 @@ code-review pass was performed, per scope.
 
 The preceding variance table is the original implementation snapshot and
 predates the review-fix commits. The final post-fix counts below are measured
-with the final implementation commit range `git diff --numstat 9995056..1d029bb -- . ':!.scratch/modern-supabase-platform/implementation-report.md'`;
+with the final implementation commit range `git diff --numstat 9995056..84f190f -- . ':!.scratch/modern-supabase-platform/implementation-report.md'`;
 they include all implementation and review-fix changes, exclude generated
 CRD/deepcopy artifacts and this report, and classify Go files by product code
 versus behavioral tests. This keeps the reported implementation delta stable
@@ -158,10 +159,10 @@ when the report itself is revised.
 
 | Category | Additions | Deletions | Line events |
 | --- | ---: | ---: | ---: |
-| Product code and gateway assets | 2,575 | 1,146 | 3,721 |
-| Behavioural tests and fixtures | 1,495 | 776 | 2,271 |
+| Product code and gateway assets | 2,753 | 1,146 | 3,899 |
+| Behavioural tests and fixtures | 1,749 | 776 | 2,525 |
 | Docs and configuration | 341 | 466 | 807 |
-| **Non-generated implementation total** | **4,411** | **2,388** | **6,799** |
+| **Non-generated implementation total** | **4,843** | **2,388** | **7,231** |
 
 The recovery-order fix in `9d90d95` contributes 18 product-code additions, one
 deletion, and 44 behavioral-test additions. The final contract-tightening batch
@@ -170,3 +171,12 @@ behavioral-test additions, five test deletions, and 10 documentation additions.
 The final readiness/Ingress/naming batch in `1d029bb` is included in the totals
 above; generated artifacts remain synchronized separately and are intentionally
 excluded from these LOC totals.
+
+The retained-Cluster ownership ledger in `84f190f` records only sorted custom
+parameter keys and additional-role names in one versioned JSON annotation. It
+seeds explicit empty arrays, removes only previously tracked declarations,
+preserves foreign/defaulted CNPG fields, adopts current declarations when a
+pre-ledger Cluster has no annotation, and fails closed with DatabaseReady=False
+for malformed or unsupported annotations before any Cluster update. Focused
+tests cover creation, parameter and role removal, missing-ledger adoption,
+same-name project recreation, malformed JSON, and unsupported versions.
