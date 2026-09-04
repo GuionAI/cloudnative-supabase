@@ -601,6 +601,20 @@ func recoveryBootstrapIntentChanged(existing, desired *cnpgv1.Cluster) bool {
 	if existingHasRecovery != desiredHasRecovery {
 		return true
 	}
+	// InitDB is the other mutually exclusive creation-time bootstrap mode. Keep
+	// comparing its owned fields as the previous immutable guard did; otherwise
+	// an existing initdb cluster could silently accept a changed database owner,
+	// password Secret, or post-init SQL reference.
+	if existing.Spec.Bootstrap != nil && desired.Spec.Bootstrap != nil && existing.Spec.Bootstrap.InitDB != nil && desired.Spec.Bootstrap.InitDB != nil {
+		existingInitDB := existing.Spec.Bootstrap.InitDB
+		desiredInitDB := desired.Spec.Bootstrap.InitDB
+		if existingInitDB.Database != desiredInitDB.Database ||
+			existingInitDB.Owner != desiredInitDB.Owner ||
+			!apiequality.Semantic.DeepEqual(existingInitDB.Secret, desiredInitDB.Secret) ||
+			!apiequality.Semantic.DeepEqual(existingInitDB.PostInitApplicationSQLRefs, desiredInitDB.PostInitApplicationSQLRefs) {
+			return true
+		}
+	}
 	if existingHasRecovery && !apiequality.Semantic.DeepEqual(existingRecovery, desiredRecovery) {
 		return true
 	}
