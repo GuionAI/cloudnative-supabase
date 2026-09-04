@@ -1,164 +1,105 @@
-# CLAUDE.md
+# CloudNative Supabase maintainer guidance
 
-This file provides guidance to Claude Code when working with code in this repository.
+CloudNative Supabase is a Kubernetes operator that deploys a fixed Supabase
+profile on CloudNativePG: PostgreSQL, GoTrue Auth, PostgREST, Studio,
+postgres-meta, Envoy, and optional PowerSync. All core services are always
+deployed. There is no Kong, HS256, legacy JWT secret, or hybrid mode.
 
-## Project Overview
-
-CloudNative Supabase is a Kubernetes operator that deploys Supabase using CloudNativePG (CNPG) as the PostgreSQL backend. It creates a single `SupabaseProject` CRD that manages:
-
-- CNPG PostgreSQL cluster with managed roles
-- Backup to S3-compatible storage (via barman-cloud plugin)
-- Point-in-time recovery (PITR) from existing backups
-- GoTrue (Auth service) - always enabled
-- PostgREST (REST API) - always enabled
-- Studio (Dashboard) - always enabled
-- postgres-meta (Database introspection) - always enabled
-- Kong (API Gateway) - always enabled
-
-**Note**: All services are always deployed. There are no `enabled` flags - the operator deploys the full Supabase stack.
-
-## Project Structure
+## Repository layout
 
 ```
-cloudnative-supabase/
-├── api/v1alpha1/                    # CRD types
-│   └── supabaseproject_types.go     # SupabaseProject spec/status
-├── cmd/main.go                      # Operator entrypoint
-├── internal/
-│   ├── controller/                  # Reconciliation controller
-│   │   └── supabaseproject_controller.go
-│   └── resources/                   # Kubernetes resource builders
-│       ├── cnpg/
-│       │   ├── cluster.go           # CNPG Cluster builder
-│       │   ├── objectstore.go       # ObjectStore builder (backup/recovery)
-│       │   └── scheduled_backup.go  # ScheduledBackup builder
-│       ├── configmaps/              # ConfigMap builders (init SQL, Kong config)
-│       ├── deployments/             # Deployment builders (auth, rest, studio, meta, kong)
-│       ├── secrets/secrets.go       # Secret generation
-│       └── services/services.go     # Service builders
-├── pkg/crypto/                      # JWT and password generation
-│   ├── jwt.go                       # HS256 JWT tokens
-│   └── password.go                  # Secure random passwords
-└── config/
-    ├── crd/bases/                   # Generated CRD YAML
-    ├── manager/                     # Operator deployment
-    ├── rbac/                        # RBAC rules
-    └── samples/                     # Example SupabaseProject CR
+api/v1alpha1/                    # SupabaseProject CRD types
+cmd/main.go                      # operator entrypoint
+internal/controller/             # phased reconciliation
+internal/resources/cnpg/         # Cluster, ObjectStore, ScheduledBackup
+internal/resources/configmaps/   # init SQL, Envoy, JWKS, PowerSync
+internal/resources/deployments/ # Auth, REST, Studio, Meta, Envoy, PowerSync
+internal/resources/secrets/      # generated implementation Secrets
+internal/resources/services/     # Service builders
+pkg/crypto/                      # ES256 validation and random values
+config/crd/bases/                # generated CRD
+charts/cloudnative-supabase/crds # chart copy of generated CRD
 ```
+
+## Reconciliation flow
+
+1. Repair owner metadata on deterministically named, correctly labelled
+   durable resources before validating external input.
+2. Validate the externally managed `projectCredentialsSecret` bundle.
+3. Create-once implementation Secrets (database role passwords, GoTrue
+   fallback, optional email hook and PowerSync credentials).
+4. Validate immutable recovery intent, then create init SQL and public JWKS
+   ConfigMaps.
+5. Reconcile independent recovery and steady-state backup resources.
+6. Create or reconcile the CNPG Cluster, assigning the complete generated
+   PostgreSQL projection (parameters, platform HBA rules, preload libraries,
+   and managed roles) from the current SupabaseProject while preserving
+   fields outside that projection, rejecting bootstrap mutation and storage
+   shrink.
+7. Wait for ready database instances.
+8. Reconcile Auth, REST, Studio, Meta, Envoy, then optional PowerSync.
+
+When backup and recovery are both enabled, their deterministic ObjectStore
+names and configured destination paths must differ. A credentials Secret may be
+shared; prefer least-privilege IAM with recovery read access and backup write
+access instead of requiring separate Secret objects. Recovery destination,
+endpoint, server identity, bootstrap source, and target are immutable after
+creation, while its operational credential reference may rotate.
+
+Invalid project credentials stop before dependent workloads are changed.
+Valid credential rotation updates a deterministic non-secret pod-template hash
+on Auth, REST, Studio, and Envoy so Kubernetes performs only the required
+rollouts. Meta and PowerSync consume no bundle value directly and do not roll.
+Hashes are not credentials.
+
+`SupabaseProject` is the single source of truth for the generated CNPG
+PostgreSQL projection. Callers change `database.parameters` and
+`database.additionalRoles` on the project; direct edits to those managed
+Cluster fields, platform HBA rules, or preload libraries are unsupported and
+are overwritten on the next reconcile. No historical ownership ledger is
+consulted or persisted.
+
+## Credential and service boundaries
+
+The external Secret has exactly `signingKeys`, `publishableKey`, `secretKey`,
+`anonRoleJwt`, and `serviceRoleJwt`. `signingKeys` is one private P-256 ES256
+JWK; the operator derives a public-only JWKS for PostgREST and verification
+consumers. GoTrue receives the private array plus its independent fallback
+secret and normalized Auth issuer. Envoy receives opaque keys and internal role
+tokens. Studio receives opaque keys and the internal role-token variables it
+supports. PostgREST receives only public JWKS. PowerSync uses the Auth JWKS URL,
+audience `authenticated`, and disabled Supabase HMAC mode; it has no JWT
+secret environment variable.
+
+`auth.accessTokenExpirationSeconds` defaults to 3600. Security-owned GoTrue
+JWT environment names are rejected in `goTrueEnv`; provider-specific settings
+remain supported.
+
+## Durable ownership
+
+Never set a SupabaseProject controller owner on the CNPG Cluster, backup or
+recovery ObjectStores, or ScheduledBackup. On adoption remove only a matching
+SupabaseProject owner reference and preserve foreign metadata. Runtime
+Deployments, Services, ConfigMaps, Jobs, CronJobs, and publications remain
+owned and are garbage-collectable. Durable events are mapped by namespace,
+instance label, and deterministic resource names rather than owner watches.
+Same-name resources without the exact project instance label are never adopted
+or deleted by cleanup. Envoy's admin listener is loopback-only because its
+config dump contains rendered credentials; probes use its public internal
+health route instead.
 
 ## Commands
 
 ```bash
-# Build
 go build ./...
-
-# Run tests
-go test ./pkg/... -v           # Unit tests
-go test ./internal/... -v      # Controller tests (requires envtest)
-
-# Generate CRD and code
+go test ./...
 make generate manifests
-
-# Run locally (requires kubeconfig)
-make run
-
-# Build and push Docker image
-make docker-build docker-push IMG=ghcr.io/guionai/cloudnative-supabase:latest
-
-# Install CRDs
-make install
-
-# Deploy operator
-make deploy IMG=ghcr.io/guionai/cloudnative-supabase:latest
+make test test-tanka test-delivery
+make lint
 ```
 
-## Architecture
+Regenerate deepcopy and CRD output from API types; do not hand-edit generated
+files. Copy the generated CRD to the chart after `make manifests`.
 
-### Reconciliation Flow
-
-The controller uses a phased approach:
-
-1. **Secrets Phase** - Generate JWT secret + DB role passwords (or sync from existing)
-2. **InitSQL Phase** - Create ConfigMap with database initialization SQL
-3. **Backup Infrastructure Phase** - Create ObjectStore and ScheduledBackup (if backup enabled)
-4. **CNPG Cluster Phase** - Create CNPG Cluster with managed roles (with recovery bootstrap if enabled)
-5. **Wait Database Phase** - Wait for CNPG to report ready instances
-6. **Services Phase** - Deploy Auth, REST, Studio, Meta, Kong
-
-### Secret Management
-
-The operator generates these secrets if not provided:
-
-| Secret | Keys | Purpose |
-|--------|------|---------|
-| `{name}-jwt` | secret, anonKey, serviceKey | JWT signing + pre-generated tokens |
-| `{name}-supabase-admin-password` | username, password | DB owner role |
-| `{name}-authenticator-password` | username, password | PostgREST role |
-| `{name}-auth-admin-password` | username, password | GoTrue role |
-
-**Important**: The controller checks if secrets exist in the cluster (not just status) to prevent regenerating secrets on operator restart.
-
-### CNPG Managed Roles
-
-| Role | Purpose |
-|------|---------|
-| `supabase_admin` | DB owner, createdb, createrole, bypassrls |
-| `authenticator` | PostgREST role switcher |
-| `supabase_auth_admin` | Auth service admin |
-| `anon` | Anonymous API access (non-login) |
-| `authenticated` | Authenticated user role (non-login) |
-| `service_role` | Service role with bypassrls (non-login) |
-
-## Key Patterns
-
-### Owner References
-All created resources have owner references to the SupabaseProject, enabling garbage collection on delete.
-
-### Condition Updates
-Use `r.setCondition()` to update status conditions. Always update status after setting conditions on error paths.
-
-### Resource Builders
-Builder functions in `internal/resources/` take the project and return Kubernetes resources. They should be pure functions with no side effects.
-
-## Known Issues
-
-See [GitHub Issue #1](https://github.com/GuionAI/cloudnative-supabase/issues/1) for the comprehensive code review findings and action items.
-
-## Releasing
-
-To release a new version:
-
-```bash
-# 1. Ensure changes are pushed to main
-git push
-
-# 2. Create and push a version tag
-git tag v0.1.X && git push origin v0.1.X
-```
-
-The GitHub Actions release workflow (`.github/workflows/release.yaml`) will automatically:
-- Run tests
-- Build and push Docker image to `ghcr.io/guionai/cloudnative-supabase:<version>`
-- Create a GitHub Release with auto-generated release notes
-- Update Helm chart version in `charts/cloudnative-supabase/`
-
-## Dependencies
-
-- CloudNativePG (CNPG) operator must be installed in the cluster
-- [CNPG Barman Cloud Plugin](https://github.com/cloudnative-pg/plugin-barman-cloud) for backup/recovery features
-- Requires Kubernetes 1.11.3+
-
-## Status Conditions
-
-| Condition | Description |
-|-----------|-------------|
-| `Ready` | Overall readiness |
-| `SecretsReady` | JWT and database secrets generated |
-| `DatabaseReady` | CNPG cluster is ready |
-| `BackupReady` | Backup infrastructure configured (ObjectStore + ScheduledBackup) |
-| `RecoveryReady` | Recovery infrastructure configured |
-| `AuthReady` | GoTrue is running |
-| `RestReady` | PostgREST is running |
-| `StudioReady` | Studio is running |
-| `MetaReady` | postgres-meta is running |
-| `KongReady` | Kong gateway is running |
+Code review and deployment are separate workflow steps. Do not mutate a live
+cluster while implementing or testing this repository.

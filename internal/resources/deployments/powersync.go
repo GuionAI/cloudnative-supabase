@@ -379,18 +379,6 @@ func buildPowersyncEnv(project *supabasev1alpha1.SupabaseProject, secretNames *s
 			Name:  "PS_POWERSYNC_REPLICATION_URI",
 			Value: fmt.Sprintf("postgresql://powersync_replication:$(PS_REPLICATION_PASSWORD)@%s:5432/supabase?sslmode=disable", dbHost),
 		},
-		// JWT secret for client authentication
-		{
-			Name: "PS_JWT_SECRET",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: secretNames.JWT,
-					},
-					Key: "secret",
-				},
-			},
-		},
 	}
 }
 

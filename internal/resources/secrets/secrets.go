@@ -17,6 +17,7 @@ limitations under the License.
 package secrets
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"strings"
@@ -29,223 +30,298 @@ import (
 	"github.com/GuionAI/cloudnative-supabase/pkg/crypto"
 )
 
-// RequiredJWTKeys are the required keys in a JWT secret
-var RequiredJWTKeys = []string{"secret", "anonKey", "serviceKey"}
-
-// RequiredRoleKeys are the required keys in a database role secret
-var RequiredRoleKeys = []string{"username", "password"}
-
-// EmailHookSecretKey is the fixed key containing the Standard Webhooks secret.
-const EmailHookSecretKey = "secret"
+const (
+	// EmailHookSecretKey is the fixed key containing the Standard Webhooks secret.
+	EmailHookSecretKey = "secret"
+	// ProjectCredentialsSigningKeysKey is the external bundle key consumed by GoTrue.
+	ProjectCredentialsSigningKeysKey = "signingKeys"
+	// ProjectCredentialsPublishableKey is the public opaque client key.
+	ProjectCredentialsPublishableKey = "publishableKey"
+	// ProjectCredentialsSecretKey is the private opaque backend key.
+	ProjectCredentialsSecretKey = "secretKey"
+	// ProjectCredentialsAnonRoleJWTKey is the internal anon role token.
+	ProjectCredentialsAnonRoleJWTKey = "anonRoleJwt"
+	// ProjectCredentialsServiceRoleJWTKey is the internal service role token.
+	ProjectCredentialsServiceRoleJWTKey = "serviceRoleJwt"
+	// GoTrueFallbackSecretKey is the key used by the GoTrue-only fallback Secret.
+	GoTrueFallbackSecretKey = "secret"
+	// GoTrueFallbackSecretNameSuffix is appended to a project name for the
+	// create-once fallback Secret.
+	GoTrueFallbackSecretNameSuffix = "-gotrue-jwt-secret"
+)
 
 const emailHookSecretBytes = 32
 
-// GenerateSecrets generates all required secrets for a SupabaseProject
-func GenerateSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secret, supabasev1alpha1.SecretNamesStatus, error) {
-	var secrets []*corev1.Secret
-	var secretNames supabasev1alpha1.SecretNamesStatus
-
-	// Generate JWT secret
-	jwtSecret, jwtSecretName, err := generateJWTSecret(project)
-	if err != nil {
-		return nil, secretNames, fmt.Errorf("failed to generate JWT secret: %w", err)
-	}
-	if jwtSecret != nil {
-		secrets = append(secrets, jwtSecret)
-	}
-	secretNames.JWT = jwtSecretName
-
-	// Generate database role secrets
-	supabaseAdminSecret, supabaseAdminName, err := generateRoleSecret(project, "supabase-admin", "supabase_admin")
-	if err != nil {
-		return nil, secretNames, fmt.Errorf("failed to generate supabase-admin secret: %w", err)
-	}
-	secrets = append(secrets, supabaseAdminSecret)
-	secretNames.SupabaseAdmin = supabaseAdminName
-
-	authenticatorSecret, authenticatorName, err := generateRoleSecret(project, "authenticator", "authenticator")
-	if err != nil {
-		return nil, secretNames, fmt.Errorf("failed to generate authenticator secret: %w", err)
-	}
-	secrets = append(secrets, authenticatorSecret)
-	secretNames.Authenticator = authenticatorName
-
-	authAdminSecret, authAdminName, err := generateRoleSecret(project, "auth-admin", "supabase_auth_admin")
-	if err != nil {
-		return nil, secretNames, fmt.Errorf("failed to generate auth-admin secret: %w", err)
-	}
-	secrets = append(secrets, authAdminSecret)
-	secretNames.AuthAdmin = authAdminName
-
-	return secrets, secretNames, nil
+// ProjectCredentials is the validated, transient projection of the external
+// credential bundle. Secret values are never written to project status.
+type ProjectCredentials struct {
+	SigningKeys     string
+	PublishableKey  string
+	SecretKey       string
+	AnonRoleJWT     string
+	ServiceRoleJWT  string
+	PublicJWKS      string
+	SigningKeyID    string
+	PodTemplateHash string
 }
 
-// generateJWTSecret creates the JWT secret with secret key and pre-generated tokens
-func generateJWTSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secret, string, error) {
-	secretName := project.Name + "-jwt"
+// RequiredProjectCredentialKeys is the complete external Secret contract.
+var RequiredProjectCredentialKeys = []string{
+	ProjectCredentialsSigningKeysKey,
+	ProjectCredentialsPublishableKey,
+	ProjectCredentialsSecretKey,
+	ProjectCredentialsAnonRoleJWTKey,
+	ProjectCredentialsServiceRoleJWTKey,
+}
 
-	// Use provided secret if specified
-	if project.Spec.JWT != nil && project.Spec.JWT.SecretRef != "" {
-		return nil, project.Spec.JWT.SecretRef, nil
+// GoTrueFallbackSecretName returns the create-once implementation Secret name.
+func GoTrueFallbackSecretName(project *supabasev1alpha1.SupabaseProject) string {
+	return project.Name + GoTrueFallbackSecretNameSuffix
+}
+
+// ValidateProjectCredentials validates the complete externally managed
+// credential bundle and returns its public projection. Errors identify only a
+// field and safe validation reason; credential contents are never included.
+func ValidateProjectCredentials(secret *corev1.Secret) (*ProjectCredentials, error) {
+	if secret == nil {
+		return nil, fieldError("secret", "object is nil")
+	}
+	allowed := make(map[string]struct{}, len(RequiredProjectCredentialKeys))
+	for _, key := range RequiredProjectCredentialKeys {
+		allowed[key] = struct{}{}
+	}
+	for key := range secret.Data {
+		if _, ok := allowed[key]; !ok {
+			return nil, fieldError(key, "unexpected field")
+		}
+	}
+	for key := range secret.StringData {
+		if _, ok := allowed[key]; !ok {
+			return nil, fieldError(key, "unexpected field")
+		}
+		if _, ok := secret.Data[key]; ok {
+			return nil, fieldError(key, "value is provided more than once")
+		}
+	}
+	values := make(map[string]string, len(RequiredProjectCredentialKeys))
+	for _, key := range RequiredProjectCredentialKeys {
+		value, ok := secretValue(secret, key)
+		if !ok || value == "" {
+			return nil, fieldError(key, "value is required")
+		}
+		values[key] = value
 	}
 
-	// Generate new JWT secret
-	jwtSecret, err := crypto.GenerateHex(32)
+	signingKey, err := crypto.ParseSigningJWK(values[ProjectCredentialsSigningKeysKey])
 	if err != nil {
-		return nil, "", fmt.Errorf("generating secret key: %w", err)
+		return nil, fieldError(ProjectCredentialsSigningKeysKey, err.Error())
 	}
-
-	// Generate API keys (anon/service_role) with 5-year expiration.
-	// Note: JWT.ExpirationSeconds controls access token expiration in GoTrue,
-	// NOT the API keys. API keys are embedded in client apps and must be long-lived.
-	anonKey, err := crypto.CreateAnonKey(jwtSecret, crypto.DefaultTokenExpiration)
+	publicJWKS, err := crypto.PublicJWKS(values[ProjectCredentialsSigningKeysKey])
 	if err != nil {
-		return nil, "", fmt.Errorf("generating anon key: %w", err)
+		return nil, fieldError(ProjectCredentialsSigningKeysKey, "public projection failed")
 	}
 
-	serviceKey, err := crypto.CreateServiceKey(jwtSecret, crypto.DefaultTokenExpiration)
+	if err := validateOpaqueKey(values[ProjectCredentialsPublishableKey], "sb_publishable_"); err != nil {
+		return nil, fieldError(ProjectCredentialsPublishableKey, err.Error())
+	}
+	if err := validateOpaqueKey(values[ProjectCredentialsSecretKey], "sb_secret_"); err != nil {
+		return nil, fieldError(ProjectCredentialsSecretKey, err.Error())
+	}
+	if values[ProjectCredentialsPublishableKey] == values[ProjectCredentialsSecretKey] {
+		return nil, fieldError(ProjectCredentialsSecretKey, "must be distinct from publishableKey")
+	}
+	if err := crypto.VerifyES256JWT(values[ProjectCredentialsAnonRoleJWTKey], signingKey, "anon", crypto.RequiredRoleAudience); err != nil {
+		return nil, fieldError(ProjectCredentialsAnonRoleJWTKey, err.Error())
+	}
+	if err := crypto.VerifyES256JWT(values[ProjectCredentialsServiceRoleJWTKey], signingKey, "service_role", crypto.RequiredRoleAudience); err != nil {
+		return nil, fieldError(ProjectCredentialsServiceRoleJWTKey, err.Error())
+	}
+
+	hash := sha256.New()
+	for _, key := range RequiredProjectCredentialKeys {
+		// Length-prefix each value so concatenation cannot create collisions.
+		_, _ = fmt.Fprintf(hash, "%s:%d:", key, len(values[key]))
+		_, _ = hash.Write([]byte(values[key]))
+	}
+	return &ProjectCredentials{
+		SigningKeys:     values[ProjectCredentialsSigningKeysKey],
+		PublishableKey:  values[ProjectCredentialsPublishableKey],
+		SecretKey:       values[ProjectCredentialsSecretKey],
+		AnonRoleJWT:     values[ProjectCredentialsAnonRoleJWTKey],
+		ServiceRoleJWT:  values[ProjectCredentialsServiceRoleJWTKey],
+		PublicJWKS:      publicJWKS,
+		SigningKeyID:    signingKey.Kid,
+		PodTemplateHash: fmt.Sprintf("%x", hash.Sum(nil)),
+	}, nil
+}
+
+func secretValue(secret *corev1.Secret, key string) (string, bool) {
+	if value, ok := secret.Data[key]; ok {
+		return string(value), true
+	}
+	if value, ok := secret.StringData[key]; ok {
+		return value, true
+	}
+	return "", false
+}
+
+func fieldError(field, reason string) error {
+	return fmt.Errorf("project credential field %q: %s", field, reason)
+}
+
+func validateOpaqueKey(value, prefix string) error {
+	if !strings.HasPrefix(value, prefix) || len(value) == len(prefix) {
+		return fmt.Errorf("must start with %s and include a non-empty suffix", prefix)
+	}
+	for _, r := range value[len(prefix):] {
+		isLetter := (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
+		isDigit := r >= '0' && r <= '9'
+		if !isLetter && !isDigit && !strings.ContainsRune("._-", r) {
+			return fmt.Errorf("contains an invalid character")
+		}
+	}
+	return nil
+}
+
+// GenerateGoTrueFallbackSecret creates the independent random fallback value.
+// It is intentionally not included in the project credential bundle.
+func GenerateGoTrueFallbackSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secret, string, error) {
+	name := GoTrueFallbackSecretName(project)
+	value, err := crypto.GenerateHex(32)
 	if err != nil {
-		return nil, "", fmt.Errorf("generating service key: %w", err)
+		return nil, "", fmt.Errorf("generating GoTrue fallback secret: %w", err)
 	}
-
-	secret := &corev1.Secret{
+	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
+			Name:      name,
 			Namespace: project.Namespace,
-			Labels:    common.ComponentLabels(project, "jwt"),
+			Labels:    common.ComponentLabels(project, "gotrue-secret"),
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
-			"secret":     jwtSecret,
-			"anonKey":    anonKey,
-			"serviceKey": serviceKey,
+			GoTrueFallbackSecretKey: value,
 		},
-	}
-
-	return secret, secretName, nil
+	}, name, nil
 }
 
-// generateRoleSecret creates a secret for a database role with username/password
-func generateRoleSecret(project *supabasev1alpha1.SupabaseProject, nameSuffix, username string) (*corev1.Secret, string, error) {
-	secretName := project.Name + "-" + nameSuffix + "-password"
+// GenerateSecrets generates database implementation role secrets. Public
+// project identity is always supplied by ProjectCredentialsSecret instead.
+func GenerateSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secret, supabasev1alpha1.SecretNamesStatus, error) {
+	generated := make([]*corev1.Secret, 0, 4)
+	var names supabasev1alpha1.SecretNamesStatus
 
+	fallback, fallbackName, err := GenerateGoTrueFallbackSecret(project)
+	if err != nil {
+		return nil, names, err
+	}
+	generated = append(generated, fallback)
+	names.GoTrueFallback = fallbackName
+
+	for _, role := range []struct {
+		suffix   string
+		username string
+		set      *string
+	}{
+		{suffix: "supabase-admin", username: "supabase_admin", set: &names.SupabaseAdmin},
+		{suffix: "authenticator", username: "authenticator", set: &names.Authenticator},
+		{suffix: "auth-admin", username: "supabase_auth_admin", set: &names.AuthAdmin},
+	} {
+		secret, name, err := generateRoleSecret(project, role.suffix, role.username)
+		if err != nil {
+			return nil, names, err
+		}
+		generated = append(generated, secret)
+		*role.set = name
+	}
+	return generated, names, nil
+}
+
+func generateRoleSecret(project *supabasev1alpha1.SupabaseProject, suffix, username string) (*corev1.Secret, string, error) {
+	name := project.Name + "-" + suffix + "-password"
 	password, err := crypto.GeneratePassword()
 	if err != nil {
-		return nil, "", fmt.Errorf("generating password: %w", err)
+		return nil, "", fmt.Errorf("generating %s password: %w", username, err)
 	}
-
-	secret := &corev1.Secret{
+	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
+			Name:      name,
 			Namespace: project.Namespace,
-			Labels:    common.ComponentLabels(project, nameSuffix),
+			Labels:    common.ComponentLabels(project, suffix),
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
 			"username": username,
 			"password": password,
 		},
-	}
-
-	return secret, secretName, nil
+	}, name, nil
 }
 
 // GenerateEmailHookSecret creates the per-project Standard Webhooks signing secret.
 func GenerateEmailHookSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secret, string, error) {
-	secretName := EmailHookSecretName(project)
+	name := EmailHookSecretName(project)
 	value, err := crypto.GenerateWebhookSecret()
 	if err != nil {
 		return nil, "", fmt.Errorf("generating webhook secret: %w", err)
 	}
-
-	secret := &corev1.Secret{
+	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
+			Name:      name,
 			Namespace: project.Namespace,
 			Labels:    common.ComponentLabels(project, "email-hook"),
 		},
 		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			EmailHookSecretKey: []byte(value),
-		},
-	}
-
-	return secret, secretName, nil
+		Data: map[string][]byte{EmailHookSecretKey: []byte(value)},
+	}, name, nil
 }
 
-// EmailHookSecretName returns the fixed per-project email-hook secret name.
+// EmailHookSecretName returns the fixed per-project email-hook Secret name.
 func EmailHookSecretName(project *supabasev1alpha1.SupabaseProject) string {
 	return project.Name + "-email-hook"
 }
 
-// ValidateEmailHookSecret validates the fixed email-hook secret contract.
+// ValidateEmailHookSecret validates the fixed email-hook Secret contract.
 func ValidateEmailHookSecret(secret *corev1.Secret) error {
-	value := string(secret.Data[EmailHookSecretKey])
-	if !strings.HasPrefix(value, "v1,whsec_") {
-		return fmt.Errorf("email hook secret %s/%s missing valid key: %s", secret.Namespace, secret.Name, EmailHookSecretKey)
+	if secret == nil {
+		return fmt.Errorf("email hook Secret is nil")
+	}
+	value, ok := secretValue(secret, EmailHookSecretKey)
+	if !ok || !strings.HasPrefix(value, "v1,whsec_") {
+		return fmt.Errorf("email hook Secret must contain a Standard Webhooks value")
 	}
 	payload, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(value, "v1,whsec_"))
 	if err != nil || len(payload) != emailHookSecretBytes {
-		return fmt.Errorf("email hook secret %s/%s has invalid Standard Webhooks value", secret.Namespace, secret.Name)
+		return fmt.Errorf("email hook Secret contains an invalid Standard Webhooks value")
 	}
 	return nil
 }
 
-// ValidateJWTSecret validates that a secret contains all required JWT keys
-func ValidateJWTSecret(secret *corev1.Secret) error {
-	for _, key := range RequiredJWTKeys {
-		if _, ok := secret.Data[key]; !ok {
-			return fmt.Errorf("JWT secret %s/%s missing required key: %s", secret.Namespace, secret.Name, key)
-		}
-	}
-	return nil
-}
-
-// ValidateRoleSecret validates that a secret contains all required role keys
+// ValidateRoleSecret validates a generated role Secret contract.
 func ValidateRoleSecret(secret *corev1.Secret, secretName string) error {
-	for _, key := range RequiredRoleKeys {
-		if _, ok := secret.Data[key]; !ok {
-			return fmt.Errorf("role secret %s/%s missing required key: %s", secret.Namespace, secretName, key)
+	if secret == nil {
+		return fmt.Errorf("role Secret %s is nil", secretName)
+	}
+	for _, key := range []string{"username", "password"} {
+		if _, ok := secretValue(secret, key); !ok {
+			return fmt.Errorf("role Secret %s is missing required key %q", secretName, key)
 		}
 	}
 	return nil
 }
 
-// GetSecretNamesFromSpec extracts secret names from user-specified secrets configuration
-func GetSecretNamesFromSpec(spec *supabasev1alpha1.SecretsSpec) supabasev1alpha1.SecretNamesStatus {
-	return supabasev1alpha1.SecretNamesStatus{
-		JWT:                          spec.JWT,
-		SupabaseAdmin:                spec.SupabaseAdmin,
-		Authenticator:                spec.Authenticator,
-		AuthAdmin:                    spec.AuthAdmin,
-		PowersyncStoragePassword:     spec.PowersyncStoragePassword,
-		PowersyncReplicationPassword: spec.PowersyncReplicationPassword,
-	}
-}
-
-// GeneratePowersyncSecrets generates Powersync-related secrets
+// GeneratePowersyncSecrets generates PowerSync database role Secrets.
 func GeneratePowersyncSecrets(project *supabasev1alpha1.SupabaseProject) ([]*corev1.Secret, error) {
-	var secrets []*corev1.Secret
-
-	// Powersync storage role password (for internal sync state tables)
-	storagePassword, _, err := generateRoleSecret(project, "powersync-storage", "powersync_storage")
+	storage, _, err := generateRoleSecret(project, "powersync-storage", "powersync_storage")
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate powersync-storage password: %w", err)
+		return nil, err
 	}
-	secrets = append(secrets, storagePassword)
-
-	// Powersync replication role password (for CDC/WAL reading)
-	replicationPassword, _, err := generateRoleSecret(project, "powersync-replication", "powersync_replication")
+	replication, _, err := generateRoleSecret(project, "powersync-replication", "powersync_replication")
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate powersync-replication password: %w", err)
+		return nil, err
 	}
-	secrets = append(secrets, replicationPassword)
-
-	return secrets, nil
+	return []*corev1.Secret{storage, replication}, nil
 }
 
-// PowersyncSecretNames returns the expected secret names for Powersync
-func PowersyncSecretNames(project *supabasev1alpha1.SupabaseProject) (powersyncStoragePassword, powersyncReplicationPassword string) {
-	return project.Name + "-powersync-storage-password",
-		project.Name + "-powersync-replication-password"
+// PowersyncSecretNames returns expected PowerSync implementation Secret names.
+func PowersyncSecretNames(project *supabasev1alpha1.SupabaseProject) (string, string) {
+	return project.Name + "-powersync-storage-password", project.Name + "-powersync-replication-password"
 }

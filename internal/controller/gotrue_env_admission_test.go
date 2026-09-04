@@ -15,7 +15,8 @@ var _ = Describe("GoTrue environment admission", func() {
 		return &supabasev1alpha1.SupabaseProject{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
 			Spec: supabasev1alpha1.SupabaseProjectSpec{
-				Database: supabasev1alpha1.DatabaseSpec{Instances: 1, Storage: cnpgv1.StorageConfiguration{Size: "1Gi"}},
+				ProjectCredentialsSecret: "project-credentials",
+				Database:                 supabasev1alpha1.DatabaseSpec{Instances: 1, Storage: cnpgv1.StorageConfiguration{Size: "1Gi"}},
 				Auth: supabasev1alpha1.AuthSpec{
 					SiteURL:     "https://app.example.com",
 					ExternalURL: "https://auth.example.com",
@@ -50,6 +51,10 @@ var _ = Describe("GoTrue environment admission", func() {
 		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, valid)).To(Succeed()) })
 
 		invalid := []*supabasev1alpha1.SupabaseProject{
+			project("gotrue-env-operator-owned-jwt", []supabasev1alpha1.GoTrueEnvVar{{
+				Name:  "GOTRUE_JWT_SECRET",
+				Value: ptr.To("attempted-override"),
+			}}),
 			project("gotrue-env-no-source", []supabasev1alpha1.GoTrueEnvVar{{
 				Name: "GOTRUE_EXTERNAL_PHONE_ENABLED",
 			}}),
@@ -90,5 +95,34 @@ var _ = Describe("GoTrue environment admission", func() {
 		for _, candidate := range invalid {
 			Expect(k8sClient.Create(ctx, candidate)).NotTo(Succeed(), candidate.Name)
 		}
+	})
+
+	It("requires distinct backup and recovery destination paths", func() {
+		projectWithPaths := func(name, backupPath, recoveryPath string) *supabasev1alpha1.SupabaseProject {
+			candidate := project(name, nil)
+			candidate.Spec.Database.Backup = &supabasev1alpha1.BackupSpec{
+				Enabled: true,
+				S3Config: supabasev1alpha1.S3Config{
+					DestinationPath:     backupPath,
+					S3CredentialsSecret: "shared-s3",
+				},
+			}
+			candidate.Spec.Database.Recovery = &supabasev1alpha1.RecoverySpec{
+				Enabled:    true,
+				ServerName: "source-cluster",
+				S3Config: supabasev1alpha1.S3Config{
+					DestinationPath:     recoveryPath,
+					S3CredentialsSecret: "shared-s3",
+				},
+			}
+			return candidate
+		}
+
+		equal := projectWithPaths("backup-recovery-equal-path", "s3://bucket/shared", "s3://bucket/shared")
+		Expect(k8sClient.Create(ctx, equal)).NotTo(Succeed())
+
+		distinct := projectWithPaths("backup-recovery-distinct-path", "s3://bucket/backups", "s3://bucket/recovery")
+		Expect(k8sClient.Create(ctx, distinct)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, distinct)).To(Succeed()) })
 	})
 })

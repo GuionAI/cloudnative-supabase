@@ -127,6 +127,10 @@ func BuildAuthDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 // buildAuthEnv builds the environment variables for GoTrue
 func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, dbHost string) []corev1.EnvVar {
 	spec := project.Spec.Auth
+	fallbackSecretName := secretNames.GoTrueFallback
+	if fallbackSecretName == "" {
+		fallbackSecretName = secretresources.GoTrueFallbackSecretName(project)
+	}
 
 	env := BuildDatabaseEnv(dbHost)
 	env = append(env,
@@ -142,6 +146,15 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 		corev1.EnvVar{Name: "GOTRUE_JWT_ADMIN_ROLES", Value: "service_role"},
 		corev1.EnvVar{Name: "GOTRUE_JWT_AUD", Value: "authenticated"},
 		corev1.EnvVar{Name: "GOTRUE_JWT_EXP", Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project))},
+		corev1.EnvVar{Name: "GOTRUE_JWT_ISSUER", Value: common.NormalizeExternalURL(spec.ExternalURL)},
+		corev1.EnvVar{Name: "GOTRUE_JWT_VALID_METHODS", Value: "ES256"},
+		corev1.EnvVar{
+			Name: "GOTRUE_JWT_KEYS",
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: project.Spec.ProjectCredentialsSecret},
+				Key:                  secretresources.ProjectCredentialsSigningKeysKey,
+			}},
+		},
 
 		// Signup configuration
 		corev1.EnvVar{Name: "GOTRUE_DISABLE_SIGNUP", Value: fmt.Sprintf("%t", spec.DisableSignup)},
@@ -187,15 +200,16 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 			},
 		},
 
-		// JWT secret
+		// GoTrue still requires an independent fallback secret. It is never
+		// shared with verifiers or any other workload.
 		corev1.EnvVar{
 			Name: "GOTRUE_JWT_SECRET",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: secretNames.JWT,
+						Name: fallbackSecretName,
 					},
-					Key: "secret",
+					Key: secretresources.GoTrueFallbackSecretKey,
 				},
 			},
 		},
@@ -249,6 +263,11 @@ func applyGoTrueEnv(env []corev1.EnvVar, configured []supabasev1alpha1.GoTrueEnv
 		indexes[variable.Name] = index
 	}
 	for _, configuredVariable := range configured {
+		if IsOperatorOwnedGoTrueEnv(configuredVariable.Name) {
+			// Security-critical JWT settings are owned by the operator even when
+			// a builder is used directly outside the controller admission path.
+			continue
+		}
 		variable := corev1.EnvVar{Name: configuredVariable.Name}
 		if configuredVariable.Value != nil {
 			variable.Value = *configuredVariable.Value
@@ -266,6 +285,32 @@ func applyGoTrueEnv(env []corev1.EnvVar, configured []supabasev1alpha1.GoTrueEnv
 		env = append(env, variable)
 	}
 	return env
+}
+
+// operatorOwnedGoTrueEnvNames is the set of settings that define the ES256
+// authentication contract. Provider-specific GOTRUE_ settings remain
+// user-configurable.
+var operatorOwnedGoTrueEnvNames = map[string]struct{}{
+	"GOTRUE_JWT_KEYS":               {},
+	"GOTRUE_JWT_SECRET":             {},
+	"GOTRUE_JWT_ALG":                {},
+	"GOTRUE_JWT_KEY_ID":             {},
+	"GOTRUE_JWT_ISSUER":             {},
+	"GOTRUE_JWT_AUD":                {},
+	"GOTRUE_JWT_EXP":                {},
+	"GOTRUE_JWT_VALID_METHODS":      {},
+	"GOTRUE_JWT_ALLOWED_ALGS":       {},
+	"GOTRUE_JWT_ADMIN_ROLES":        {},
+	"GOTRUE_JWT_ADMIN_GROUP_NAME":   {},
+	"GOTRUE_JWT_DEFAULT_GROUP_NAME": {},
+	"GOTRUE_JWT_ROLE_CLAIM":         {},
+}
+
+// IsOperatorOwnedGoTrueEnv reports whether a custom environment variable
+// would weaken or replace an operator-owned authentication setting.
+func IsOperatorOwnedGoTrueEnv(name string) bool {
+	_, ok := operatorOwnedGoTrueEnvNames[name]
+	return ok
 }
 
 func goTrueEnvSecretKeyRef(ref *supabasev1alpha1.GoTrueEnvKeySelector) *corev1.SecretKeySelector {

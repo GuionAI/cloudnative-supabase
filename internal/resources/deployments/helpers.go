@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
@@ -139,27 +138,4 @@ func BuildDatabaseEnv(dbHost string) []corev1.EnvVar {
 		{Name: "DB_SSL", Value: "disable"},
 		{Name: "DB_NAME", Value: common.DatabaseName},
 	}
-}
-
-// DefaultKongResources returns default resource requirements for Kong.
-// Kong handles all API traffic and needs more resources than other services.
-func DefaultKongResources() corev1.ResourceRequirements {
-	return corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("512Mi"),
-			corev1.ResourceCPU:    resource.MustParse("50m"),
-		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("1Gi"),
-			corev1.ResourceCPU:    resource.MustParse("500m"),
-		},
-	}
-}
-
-// NormalizeKongResources returns the provided resources if set, otherwise returns defaults
-func NormalizeKongResources(resources corev1.ResourceRequirements) corev1.ResourceRequirements {
-	if len(resources.Requests) == 0 && len(resources.Limits) == 0 {
-		return DefaultKongResources()
-	}
-	return resources
 }

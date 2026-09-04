@@ -20,7 +20,17 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 )
 
-// KongConfigMapName returns the kong config map name
-func KongConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
-	return project.Name + "-kong-config"
+// EnvoyConfigMapName returns the gateway configuration map name.
+func EnvoyConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
+	return project.Name + "-envoy-config"
+}
+
+// JWKSConfigMapName returns the public Auth JWKS configuration map name.
+func JWKSConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
+	return project.Name + "-auth-jwks"
+}
+
+// GatewayName returns the shared gateway Deployment and Service identity.
+func GatewayName(project *supabasev1alpha1.SupabaseProject) string {
+	return project.Name + "-api-gw"
 }

@@ -160,3 +160,24 @@ func TestAuthDeploymentRendersGoTrueEnv(t *testing.T) {
 		t.Fatalf("GOTRUE_EXTERNAL_EMAIL_ENABLED count = %d, want 1", count)
 	}
 }
+
+func TestAuthDeploymentProtectsJWTEnvironment(t *testing.T) {
+	project := newTestProject(testNamespace)
+	project.Spec.ProjectCredentialsSecret = "project-credentials"
+	project.Spec.Auth.GoTrueEnv = []supabasev1alpha1.GoTrueEnvVar{
+		{Name: "GOTRUE_JWT_SECRET", Value: ptr.To("attacker")},
+		{Name: "GOTRUE_JWT_VALID_METHODS", Value: ptr.To("HS256")},
+		{Name: "GOTRUE_EXTERNAL_PHONE_ENABLED", Value: ptr.To("true")},
+	}
+	deployment := BuildAuthDeployment(project, newTestSecretNames())
+	values := make(map[string]string)
+	for _, env := range deployment.Spec.Template.Spec.Containers[0].Env {
+		values[env.Name] = env.Value
+	}
+	if values["GOTRUE_JWT_SECRET"] == "attacker" || values["GOTRUE_JWT_VALID_METHODS"] == "HS256" {
+		t.Fatal("operator-owned JWT settings were overridden")
+	}
+	if values["GOTRUE_EXTERNAL_PHONE_ENABLED"] != "true" {
+		t.Fatal("provider-specific GoTrue setting was not preserved")
+	}
+}

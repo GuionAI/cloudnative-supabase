@@ -124,11 +124,14 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 	}
 
 	// Client auth
-	if !config.ClientAuth.Supabase {
-		t.Error("expected supabase auth = true")
+	if config.ClientAuth.Supabase {
+		t.Error("legacy Supabase HMAC mode must be disabled")
 	}
-	if config.ClientAuth.SupabaseJWTSecret != "{{ env.PS_JWT_SECRET }}" {
-		t.Errorf("JWT secret = %q, want env template", config.ClientAuth.SupabaseJWTSecret)
+	if config.ClientAuth.JWKSURI == "" {
+		t.Error("JWKS URI must be configured")
+	}
+	if len(config.ClientAuth.Audience) != 1 || config.ClientAuth.Audience[0] != "authenticated" {
+		t.Errorf("audience = %v, want authenticated", config.ClientAuth.Audience)
 	}
 
 	// Sync rules path

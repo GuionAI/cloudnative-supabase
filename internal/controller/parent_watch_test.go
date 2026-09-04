@@ -37,10 +37,10 @@ var _ = Describe("SupabaseProject parent watch", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "defaults", Namespace: "default", UID: "defaults-project-uid"},
 			Spec: supabasev1alpha1.SupabaseProjectSpec{Auth: supabasev1alpha1.AuthSpec{
 				EmailHook: &supabasev1alpha1.EmailHookSpec{Enabled: true, URI: "https://hook.example.com"},
-			}},
+			}, ProjectCredentialsSecret: "credentials"},
 		}
 		secretNames := &supabasev1alpha1.SecretNamesStatus{
-			JWT: "defaults-jwt", AuthAdmin: "defaults-auth-admin",
+			GoTrueFallback: "defaults-gotrue-jwt-secret", AuthAdmin: "defaults-auth-admin", Authenticator: "defaults-authenticator",
 		}
 		desired := deploymentresources.BuildAuthDeployment(project, secretNames)
 		Expect(setTestControllerReference(project, desired, k8sClient.Scheme())).To(Succeed())
@@ -70,7 +70,7 @@ var _ = Describe("SupabaseProject parent watch", func() {
 			}},
 		}
 		secretNames := &supabasev1alpha1.SecretNamesStatus{
-			JWT: "cron-defaults-jwt", PowersyncStoragePassword: "cron-defaults-storage",
+			GoTrueFallback: "cron-defaults-gotrue-jwt-secret", PowersyncStoragePassword: "cron-defaults-storage",
 			PowersyncReplicationPassword: "cron-defaults-replication",
 		}
 		desired := deploymentresources.BuildPowersyncCompactCronJob(project, secretNames)
@@ -118,6 +118,7 @@ var _ = Describe("SupabaseProject parent watch", func() {
 					SiteURL:     "https://app.example.com",
 					ExternalURL: "https://auth.example.com",
 				},
+				ProjectCredentialsSecret: "parent-watch-credentials",
 			},
 		}
 		Expect(k8sClient.Create(ctx, project)).To(Succeed())

@@ -1,348 +1,215 @@
 # CloudNative Supabase
 
-A Kubernetes operator that deploys [Supabase](https://supabase.com) using [CloudNativePG](https://cloudnative-pg.io) as the PostgreSQL backend.
+CloudNative Supabase is a Kubernetes operator that manages a focused,
+rebuildable Supabase platform on CloudNativePG (CNPG). A `SupabaseProject`
+creates PostgreSQL, GoTrue Auth, PostgREST, Studio, postgres-meta, and an
+Envoy API gateway. PowerSync is optional.
 
-## Overview
+This branch is an intentional breaking release. It has one authentication
+architecture: opaque `sb_publishable_*` and `sb_secret_*` API credentials,
+ES256 user sessions, and public-key verification. Kong, HS256 project JWTs,
+and the legacy `jwt`/`secrets` CRD fields are removed.
 
-CloudNative Supabase provides a single `SupabaseProject` Custom Resource that manages the complete Supabase stack:
+## Architecture
 
-- **Database**: CloudNativePG PostgreSQL cluster with managed roles and replication
-- **Auth**: GoTrue authentication service
-- **REST**: PostgREST API service
-- **Studio**: Supabase Studio dashboard
-- **Meta**: postgres-meta database introspection service
-- **Kong**: API gateway with declarative routing
-- **PowerSync**: optional offline-first sync with edition 3 Sync Streams
+Envoy listens on the `<project>-api-gw` Service at port 8000. It accepts only
+the two configured opaque API keys and translates them to pre-signed `anon`
+and `service_role` ES256 role tokens before routing to Auth, REST, Meta, or
+Studio. GoTrue owns user-session signing; PostgREST and PowerSync verify with
+public JWKS. No verifier receives a symmetric signing secret.
 
-## Features
+The Envoy admin API (including credential-bearing `config_dump`) is bound to
+the pod loopback interface. Liveness and readiness use the harmless public
+`/_internal/health` route instead, so other pods can reach a useful probe but
+cannot inspect rendered gateway configuration.
 
-- Single CRD deploys entire Supabase stack
-- All services always enabled (Auth, REST, Studio, Meta, Kong)
-- **Backup to S3-compatible storage** (AWS S3, Cloudflare R2, MinIO, etc.)
-- **Point-in-time recovery (PITR)** from existing backups
-- Auto-generates JWT secrets and database passwords
-- Integrates with CNPG for production-grade PostgreSQL
-- Owner references for automatic cleanup
-- Status conditions for observability
+The managed profile deliberately excludes Storage, Realtime, Functions,
+Analytics, and other upstream services that this operator does not deploy.
 
-## Prerequisites
+The Envoy assets are adapted from the official self-hosted Supabase assets at
+upstream commit
+[`95ca3024398080ff18c9abcd1c6c8beae73fd9e1`](https://github.com/supabase/supabase/commit/95ca3024398080ff18c9abcd1c6c8beae73fd9e1).
+Pinned images are Envoy `envoyproxy/envoy:v1.39.0`, GoTrue
+`supabase/gotrue:v2.189.0`, and PostgREST `postgrest/postgrest:v14.12`.
 
-- A Kubernetes version supported by your CloudNativePG release
-- [CloudNativePG operator](https://cloudnative-pg.io/documentation/current/installation_upgrade/) installed
-- [CNPG Barman Cloud Plugin](https://github.com/cloudnative-pg/plugin-barman-cloud) (for backup/recovery features)
-- Helm 3.8+
-- [Tanka](https://tanka.dev/install/) (for the repository-owned Guion deployment)
-- (Optional) [Reloader](https://github.com/stakater/Reloader) - for automatic pod restarts on secret/configmap changes
+## Project credentials
 
-## Installation
+Every project must reference one externally managed Secret in its namespace:
 
-### Install with Helm
-
-```bash
-# Replace PUBLISHED_VERSION with a version listed in GitHub Releases.
-VERSION="PUBLISHED_VERSION"
-helm install cloudnative-supabase \
-  oci://ghcr.io/guionai/charts/cloudnative-supabase \
-  --namespace cloudnative-supabase-system \
-  --create-namespace \
-  --version "${VERSION}"
+```yaml
+spec:
+  projectCredentialsSecret: my-project-credentials
 ```
 
-The public controller image is available at
-`ghcr.io/guionai/cloudnative-supabase` and does not require registry credentials.
-The OCI chart becomes installable after a tagged release is published and its
-GHCR package has been made public.
+The Secret contains exactly these string fields:
 
-### Deploy the Guion operator with Tanka
+| Key | Meaning |
+| --- | --- |
+| `signingKeys` | JSON array containing exactly one signing-capable P-256 ES256 private JWK with a non-empty `kid` |
+| `publishableKey` | Opaque `sb_publishable_*` client credential |
+| `secretKey` | Opaque `sb_secret_*` backend credential, distinct from the publishable key |
+| `anonRoleJwt` | ES256 JWT for role `anon`, audience `authenticated` |
+| `serviceRoleJwt` | ES256 JWT for role `service_role`, audience `authenticated` |
 
-The self-contained environment in [`tanka/`](tanka/) renders this repository's
-chart and CRD without Jsonnet dependencies:
+The operator validates all five fields and their signatures before touching a
+dependent workload. It derives a public-only JWKS ConfigMap for PostgREST and
+generates an independent, create-once GoTrue fallback secret. Validation
+errors set `SecretsReady=False` without putting credential contents in status.
+The fallback value is used only by GoTrue; it is not part of the signing-key
+array or public JWKS.
 
-```bash
-TANKA_IMAGE=sha-COMMIT make tanka-show
-TANKA_IMAGE=sha-COMMIT make tanka-diff
-TANKA_IMAGE=sha-COMMIT make tanka-apply
+The operator does not integrate with Infisical. A typical deployment stores
+the five values at one Infisical project/environment path and uses the
+Infisical Kubernetes operator to synchronize them into the orphaned Secret
+above. Keep `signingKeys` as its JSON string; do not wrap the five values in a
+second JSON document or store the derived JWKS in Infisical.
+
+For example, an Infisical `InfisicalStaticSecret` can target the same
+namespace with `creationPolicy: Orphan` (the auth objects and credentials are
+created separately):
+
+```yaml
+apiVersion: secrets.infisical.com/v1beta1
+kind: InfisicalStaticSecret
+metadata:
+  name: example-project-credentials-sync
+  namespace: supabase
+spec:
+  infisicalAuthRef:
+    name: infisical-auth
+    namespace: supabase
+  syncOptions:
+    refreshInterval: 60s
+  sources:
+    - projectId: <infisical-project-id>
+      environmentSlug: dev
+      secretPath: /supabase/example
+  targets:
+    - name: example-project-credentials
+      namespace: supabase
+      kind: Secret
+      creationPolicy: Orphan
 ```
 
-This installs only the shared operator in `cnsupa-system`. Application-specific
-`SupabaseProject` resources remain owned by their application repositories.
+That path contains exactly `signingKeys`, `publishableKey`, `secretKey`,
+`anonRoleJwt`, and `serviceRoleJwt`; the resulting Secret remains independent
+of the `SupabaseProject` owner lifecycle.
 
-### Install from source
-
-```bash
-make deploy IMG=ghcr.io/guionai/cloudnative-supabase:latest
-```
-
-## Usage
-
-### Minimal Example
+## Example
 
 ```yaml
 apiVersion: supabase.guion.dev/v1alpha1
 kind: SupabaseProject
 metadata:
-  name: my-project
-  namespace: my-namespace
+  name: example
+  namespace: supabase
 spec:
+  projectCredentialsSecret: example-project-credentials
   database:
     instances: 1
     storage:
-      size: 10Gi
-
-  auth:
-    siteURL: https://app.example.com
-    externalURL: https://auth.example.com
-```
-
-### Full Example
-
-```yaml
-apiVersion: supabase.guion.dev/v1alpha1
-kind: SupabaseProject
-metadata:
-  name: my-project
-  namespace: my-namespace
-spec:
-  database:
-    instances: 2
-    storage:
-      size: 10Gi
+      size: 20Gi
       storageClass: local-path
-    enableSuperuserAccess: false
-    backup:
-      enabled: true
-      schedule: "0 2 * * *"  # 2 AM daily
-      retentionPolicy: "30d"
-      destinationPath: s3://my-bucket/backups/my-project/
-      endpointURL: https://s3.us-east-1.amazonaws.com
-      s3CredentialsSecret: my-s3-credentials
-      walCompression: gzip
-      dataCompression: gzip
-
   auth:
     siteURL: https://app.example.com
     externalURL: https://auth.example.com
-    autoConfirmEmail: true
-    goTrueEnv:
-      - name: GOTRUE_EXTERNAL_PHONE_ENABLED
-        value: "true"
-      - name: GOTRUE_SMS_TWILIO_AUTH_TOKEN
-        valueFrom:
-          secretKeyRef:
-            name: twilio
-            key: auth-token
-    providers:
-      google:
-        enabled: true
-        skipNonceCheck: true
-      apple:
-        enabled: true
-      secretRef: auth-providers
-
-  rest:
-    schemas:
-      - public
-
-  studio:
-    publicURL: https://studio.example.com
-    organizationName: My Org
-    projectName: My Project
-
-  # meta and kong use defaults
+    accessTokenExpirationSeconds: 3600
+  gateway:
+    replicas: 1
 ```
 
-### Recovery Example
+All core services are always deployed. `rest`, `studio`, `meta`, and
+`gateway` fields customize images, replicas, and resources; omission uses the
+operator defaults. `auth.goTrueEnv` remains available for provider settings,
+but JWT keys, fallback secret, key ID, issuer, audience, lifetime, valid
+methods, and role settings are operator-owned and cannot be overridden.
 
-To restore from a backup to a point in time:
+## CNPG configuration source of truth
+
+`SupabaseProject` is the single supported customization interface for the
+generated CNPG PostgreSQL projection. Its current `database.parameters`,
+additional roles, platform HBA rules, and platform preload libraries are
+assigned exactly on every reconcile, so removing a declaration or correcting a
+direct edit converges on the project declaration. Direct edits to those
+managed CNPG fields are unsupported and are reconciled away; fields outside
+this explicit projection retain their existing CNPG/operator behavior.
+
+## Recovery and steady-state backup
+
+Recovery and backup are independent. A new cluster can recover from one
+object store and immediately archive WAL and schedule backups to another:
 
 ```yaml
-apiVersion: supabase.guion.dev/v1alpha1
-kind: SupabaseProject
-metadata:
-  name: my-project-restored
-  namespace: my-namespace
 spec:
   database:
-    instances: 1
-    storage:
-      size: 10Gi
+    storage: {size: 100Gi}
     recovery:
       enabled: true
-      serverName: my-project  # Original cluster name
-      targetTime: "2026-01-01T12:00:00Z"
-      destinationPath: s3://my-bucket/backups/my-project/
-      endpointURL: https://s3.us-east-1.amazonaws.com
-      s3CredentialsSecret: my-s3-credentials
-
-  auth:
-    siteURL: https://app.example.com
-    externalURL: https://auth.example.com
+      serverName: source-cluster
+      destinationPath: s3://recovery-bucket/source
+      s3CredentialsSecret: recovery-s3
+    backup:
+      enabled: true
+      destinationPath: s3://backup-bucket/example
+      s3CredentialsSecret: backup-s3
+      schedule: "0 0 2 * * *"
+      retentionPolicy: 30d
 ```
 
-### Check Status
+Recovery bootstrap identity is creation-time state and cannot be changed after
+the CNPG Cluster exists. Its destination path, endpoint, server name, exact
+bootstrap source, and recovery target remain immutable; the recovery
+`s3CredentialsSecret` is operational access and can rotate after bootstrap.
+Supported mutable settings (instances, image, resources, superuser access,
+PostgreSQL parameters, managed roles, backup plugin, and storage expansion)
+continue to converge. Storage shrink is rejected.
+
+Backup and recovery always use distinct ObjectStore names and must use distinct
+configured `destinationPath` values. They may point at the same credentials
+Secret; use least-privilege IAM so recovery can read its source while backup can
+write its destination.
+
+## Lifecycle and deletion
+
+The CNPG Cluster, recovery/backup ObjectStores, and ScheduledBackup are
+durable resources and are not owned by `SupabaseProject`. Deleting a project
+therefore garbage-collects runtime services and generated configuration while
+retaining the database and backup infrastructure. Recreating the same project
+name adopts those retained resources without replacing the database. Durable
+resources are mapped back to projects by namespace, deterministic name, and
+an exact instance label; missing or foreign labels are never adopted or
+deleted.
+
+Explicit deletion of retained resources belongs to the migration runbook. For
+preserved-project cutovers, keep the old database for the agreed minimum
+72-hour observation period before deleting it.
+
+## Status and endpoints
+
+The status conditions include `SecretsReady`, `DatabaseReady`,
+`BackupReady`, `RecoveryReady`, `AuthReady`, `RestReady`, `StudioReady`,
+`MetaReady`, `GatewayReady`, and optional PowerSync/CDC conditions. The API
+endpoint is `<project>-api-gw:8000`; the database endpoint is the CNPG
+`<project>-pg-rw:5432` Service.
+
+## Development and verification
 
 ```bash
-kubectl get supabaseproject my-project -o yaml
-```
-
-Status conditions:
-
-- `Ready` - Overall readiness
-- `SecretsReady` - JWT and database secrets generated
-- `DatabaseReady` - CNPG cluster is ready
-- `BackupReady` - Backup infrastructure configured
-- `RecoveryReady` - Recovery infrastructure configured
-- `AuthReady` - GoTrue is running
-- `RestReady` - PostgREST is running
-- `StudioReady` - Studio is running
-- `MetaReady` - postgres-meta is running
-- `KongReady` - Kong gateway is running
-- `PowersyncReady` - optional PowerSync service is running
-
-## Configuration
-
-### Database
-
-| Field | Description | Default |
-|-------|-------------|---------|
-| `instances` | Number of PostgreSQL instances | 1 |
-| `storage.size` | Storage size | Required |
-| `storage.storageClass` | Storage class | Cluster default |
-| `image` | PostgreSQL image | `ghcr.io/guionai/postgres-pgjwt:17.6` |
-| `enableSuperuserAccess` | Enable superuser access | false |
-
-### Backup
-
-| Field | Description | Default |
-|-------|-------------|---------|
-| `backup.enabled` | Enable scheduled backups | false |
-| `backup.schedule` | Cron schedule for backups | `0 0 * * *` |
-| `backup.retentionPolicy` | Backup retention policy | `30d` |
-| `backup.destinationPath` | S3 path (e.g., `s3://bucket/path/`) | Required |
-| `backup.endpointURL` | S3 endpoint URL | - |
-| `backup.s3CredentialsSecret` | Secret with ACCESS_KEY_ID and SECRET_ACCESS_KEY | Required |
-| `backup.walCompression` | WAL compression (gzip, bzip2, snappy, none) | - |
-| `backup.dataCompression` | Data compression (gzip, bzip2, snappy, none) | - |
-
-### Recovery (PITR)
-
-| Field | Description | Default |
-|-------|-------------|---------|
-| `recovery.enabled` | Enable point-in-time recovery | false |
-| `recovery.serverName` | Original cluster name in backup | Required |
-| `recovery.targetTime` | Recovery target time (RFC 3339) | Latest |
-| `recovery.destinationPath` | S3 path to backup source | Required |
-| `recovery.endpointURL` | S3 endpoint URL | - |
-| `recovery.s3CredentialsSecret` | Secret with S3 credentials | Required |
-
-**Note**: Backup and recovery cannot both be enabled simultaneously.
-
-### Auth (GoTrue)
-
-| Field | Description | Default |
-|-------|-------------|---------|
-| `siteURL` | Application URL | Required |
-| `externalURL` | Auth service URL | Required |
-| `autoConfirmEmail` | Skip email confirmation | false |
-| `enableAnonymousUsers` | Allow sign-in without email or another identity | false |
-| `goTrueEnv` | Add or override any `GOTRUE_*` variable with one literal or Secret/ConfigMap key source | - |
-| `providers.secretRef` | Secret with OAuth credentials | - |
-
-Anonymous users still use the `authenticated` PostgreSQL role and receive an
-`is_anonymous` JWT claim. Add abuse controls before enabling anonymous sign-ins
-on a publicly advertised service.
-
-`auth.goTrueEnv` is the escape hatch for `GOTRUE_*` configuration not yet
-modeled by a dedicated field. Each item supplies exactly one literal value,
-Secret key, or ConfigMap key. A same-named entry replaces the value generated
-from the higher-level Auth fields. Use `valueFrom.secretKeyRef` for every
-credential: a literal `value` is persisted in the custom resource and visible
-to anyone who can read it.
-
-### REST (PostgREST)
-
-| Field | Description | Default |
-|-------|-------------|---------|
-| `schemas` | Exposed schemas | `[public]` |
-
-### Studio
-
-| Field | Description | Default |
-|-------|-------------|---------|
-| `publicURL` | Studio public URL | - |
-| `organizationName` | Organization name in UI | Default Organization |
-| `projectName` | Project name in UI | Default Project |
-
-### PowerSync
-
-PowerSync is optional. Exactly one of `syncRules.inline` or
-`syncRules.configMapRef` is required when it is enabled. The content must use
-edition 3 Sync Streams; the operator does not install a broad default stream.
-
-```yaml
-spec:
-  powersync:
-    api:
-      replicas: 1
-    syncRules:
-      inline: |
-        config:
-          edition: 3
-        streams:
-          notes:
-            auto_subscribe: true
-            query: SELECT id, title FROM notes WHERE user_id = auth.user_id()
-```
-
-The operator creates the two database roles, grants CDC access, creates the
-`powersync` publication, and runs separate API and replication deployments.
-
-## Generated Secrets
-
-The operator auto-generates these secrets:
-
-| Secret | Keys |
-|--------|------|
-| `{name}-jwt` | `secret`, `anonKey`, `serviceKey` |
-| `{name}-supabase-admin-password` | `username`, `password` |
-| `{name}-authenticator-password` | `username`, `password` |
-| `{name}-auth-admin-password` | `username`, `password` |
-| `{name}-powersync-storage-password` | `username`, `password` |
-| `{name}-powersync-replication-password` | `username`, `password` |
-
-To use an existing JWT secret, set `spec.jwt.secretRef`.
-
-## Development
-
-```bash
-# Run tests
-go test ./... -v
-
-# Generate manifests
+go test ./...
+go build ./...
 make generate manifests
-
-# Run locally
-make run
-
-# Build image
-make docker-build IMG=my-registry/cloudnative-supabase:dev
+make test test-tanka test-delivery
+make lint                 # when the pinned linter is available
 ```
 
-## Uninstall
+`make test` uses test-owned envtest binaries. No command above deploys an
+operator or mutates a live cluster.
 
-```bash
-# Delete SupabaseProject resources
-kubectl delete supabaseproject --all -A
+## Breaking upgrade note
 
-# Uninstall operator
-make undeploy
-
-# Remove CRDs
-make uninstall
-```
-
-## License
-
-Copyright 2026 GuionAI.
-
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
+There is no compatibility or hybrid mode. Replace manifests using
+`spec.jwt`, `spec.secrets`, or `spec.kong` with `projectCredentialsSecret`
+and `gateway`, provision the five external credential fields, and plan a
+coordinated client cutover to opaque keys and ES256 sessions. Existing
+databases can be retained and readopted; callers must not expect old HS256
+tokens or Kong routes to continue working.
