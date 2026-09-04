@@ -6,16 +6,24 @@ import (
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	barmancloudv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	cnpgresources "github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
+	deploymentresources "github.com/GuionAI/cloudnative-supabase/internal/resources/deployments"
+	secretresources "github.com/GuionAI/cloudnative-supabase/internal/resources/secrets"
 )
 
 func TestReconcileClusterMutableFieldsPreservesForeignConfiguration(t *testing.T) {
@@ -26,6 +34,7 @@ func TestReconcileClusterMutableFieldsPreservesForeignConfiguration(t *testing.T
 			Image:                 "postgres:17-custom",
 			EnableSuperuserAccess: true,
 			Storage:               cnpgv1.StorageConfiguration{Size: "20Gi"},
+			Resources:             corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resourceQuantity("20m")}},
 			Parameters:            map[string]string{"operator.custom": "new"},
 			Backup: &supabasev1alpha1.BackupSpec{
 				Enabled: true,
@@ -68,7 +77,7 @@ func TestReconcileClusterMutableFieldsPreservesForeignConfiguration(t *testing.T
 		existing.Spec.EnableSuperuserAccess == nil || !*existing.Spec.EnableSuperuserAccess {
 		t.Fatalf("core mutable fields did not converge: %#v", existing.Spec)
 	}
-	if existing.Spec.Resources.Requests.Cpu().String() != "10m" {
+	if existing.Spec.Resources.Requests.Cpu().String() != "20m" {
 		t.Fatalf("resources did not converge: %#v", existing.Spec.Resources)
 	}
 	if existing.Spec.PostgresConfiguration.Parameters["foreign.parameter"] != "keep" ||
@@ -88,6 +97,28 @@ func TestReconcileClusterMutableFieldsPreservesForeignConfiguration(t *testing.T
 	}
 	if existing.Spec.StorageConfiguration.Size != "20Gi" {
 		t.Fatalf("storage size = %q, want expansion to 20Gi", existing.Spec.StorageConfiguration.Size)
+	}
+}
+
+func TestReconcileClusterMutableFieldsClearsOperatorOwnedResources(t *testing.T) {
+	existing := &cnpgv1.Cluster{Spec: cnpgv1.ClusterSpec{
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resourceQuantity("100m")},
+			Limits:   corev1.ResourceList{corev1.ResourceMemory: resourceQuantity("256Mi")},
+		},
+	}}
+	desired := existing.DeepCopy()
+	desired.Spec.Resources = corev1.ResourceRequirements{}
+
+	changed, err := reconcileClusterMutableFields(existing, desired)
+	if err != nil {
+		t.Fatalf("reconcileClusterMutableFields() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("expected clearing operator-owned resources to change the cluster")
+	}
+	if !apiequality.Semantic.DeepEqual(existing.Spec.Resources, corev1.ResourceRequirements{}) {
+		t.Fatalf("resources = %#v, want cleared", existing.Spec.Resources)
 	}
 }
 
@@ -144,6 +175,303 @@ func TestReconcileCNPGClusterRemovesOnlyProjectOwnerAndPreservesLabels(t *testin
 	}
 }
 
+func TestDurableAdoptionRequiresMatchingInstanceLabel(t *testing.T) {
+	t.Parallel()
+
+	scheme := newIdempotencyTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "adopt", Namespace: "default", UID: "project-uid"},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{
+			SupabaseAdmin: "adopt-admin", Authenticator: "adopt-authenticator", AuthAdmin: "adopt-auth-admin",
+		}},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Backup: &supabasev1alpha1.BackupSpec{Enabled: true, S3Config: supabasev1alpha1.S3Config{DestinationPath: "s3://backup", S3CredentialsSecret: "backup-s3"}},
+		}},
+	}
+	cluster := cnpgresources.BuildCluster(project, &project.Status.SecretNames)
+	objectStore := cnpgresources.BuildObjectStore(project)
+	scheduledBackup := cnpgresources.BuildScheduledBackup(project)
+	foreignLabels := map[string]string{common.LabelInstance: "another-project"}
+	cluster.Labels = nil
+	objectStore.Labels = foreignLabels
+	scheduledBackup.Labels = nil
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, cluster, objectStore, scheduledBackup).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.reconcileCNPGCluster(context.Background(), project); err == nil {
+		t.Fatal("unlabelled CNPG cluster was adopted")
+	}
+	if err := reconciler.createOrUpdateObjectStore(context.Background(), cnpgresources.BuildObjectStore(project)); err == nil {
+		t.Fatal("foreign-labelled ObjectStore was adopted")
+	}
+	if err := reconciler.createOrUpdateScheduledBackup(context.Background(), cnpgresources.BuildScheduledBackup(project)); err == nil {
+		t.Fatal("unlabelled ScheduledBackup was adopted")
+	}
+	for _, object := range []client.Object{cluster, objectStore, scheduledBackup} {
+		if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(object), object); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestCleanupDoesNotDeleteUnlabelledOrForeignDurableResources(t *testing.T) {
+	t.Parallel()
+
+	scheme := newIdempotencyTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "cleanup", Namespace: "default"},
+		Status:     supabasev1alpha1.SupabaseProjectStatus{Conditions: []metav1.Condition{{Type: supabasev1alpha1.ConditionTypeBackupReady, Status: metav1.ConditionTrue}, {Type: supabasev1alpha1.ConditionTypeRecoveryReady, Status: metav1.ConditionTrue}}},
+	}
+	scheduledBackup := &cnpgv1.ScheduledBackup{ObjectMeta: metav1.ObjectMeta{Name: cnpgresources.ScheduledBackupName(project), Namespace: project.Namespace}}
+	backupStore := &barmancloudv1.ObjectStore{ObjectMeta: metav1.ObjectMeta{Name: cnpgresources.ObjectStoreName(project), Namespace: project.Namespace, Labels: map[string]string{common.LabelInstance: "another-project"}}}
+	recoveryStore := &barmancloudv1.ObjectStore{ObjectMeta: metav1.ObjectMeta{Name: cnpgresources.RecoveryObjectStoreName(project), Namespace: project.Namespace}}
+	reconciler := &SupabaseProjectReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, scheduledBackup, backupStore, recoveryStore).Build(), Scheme: scheme}
+	if err := reconciler.cleanupBackupResources(context.Background(), project); err == nil {
+		t.Fatal("cleanup unexpectedly accepted an unlabelled ScheduledBackup")
+	}
+	if err := reconciler.cleanupRecoveryResources(context.Background(), project); err == nil {
+		t.Fatal("cleanup unexpectedly accepted an unlabelled recovery ObjectStore")
+	}
+	for _, object := range []client.Object{scheduledBackup, backupStore, recoveryStore} {
+		if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(object), object); err != nil {
+			t.Fatalf("durable resource %s was deleted: %v", object.GetName(), err)
+		}
+	}
+}
+
+func TestRecoveryBootstrapIntentIncludesExternalSourceParameters(t *testing.T) {
+	t.Parallel()
+
+	scheme := newPowerSyncTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "recovery", Namespace: "default"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{
+			Database: supabasev1alpha1.DatabaseSpec{
+				Instances: 1,
+				Storage:   cnpgv1.StorageConfiguration{Size: "1Gi"},
+				Recovery:  &supabasev1alpha1.RecoverySpec{Enabled: true, ServerName: "source-v1", S3Config: supabasev1alpha1.S3Config{DestinationPath: "s3://source", S3CredentialsSecret: "source-s3"}},
+			},
+		},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "recovery-admin"}},
+	}
+	desired := cnpgresources.BuildCluster(project, &project.Status.SecretNames)
+	existing := desired.DeepCopy()
+	existing.Spec.ExternalClusters[0].PluginConfiguration.Parameters["serverName"] = "source-v0"
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, existing).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.reconcileCNPGCluster(context.Background(), project); err == nil {
+		t.Fatal("external recovery source parameter change was accepted")
+	}
+	updated := &cnpgv1.Cluster{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(existing), updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Spec.ExternalClusters[0].PluginConfiguration.Parameters["serverName"] != "source-v0" {
+		t.Fatal("immutable source parameter was silently mutated")
+	}
+	condition := meta.FindStatusCondition(project.Status.Conditions, supabasev1alpha1.ConditionTypeDatabaseReady)
+	if condition == nil || condition.Status != metav1.ConditionFalse || condition.Reason != "BootstrapImmutable" {
+		t.Fatalf("database condition = %#v, want BootstrapImmutable false", condition)
+	}
+}
+
+func TestRecoveryObjectStoreIdentityIsNotRewrittenForExistingCluster(t *testing.T) {
+	t.Parallel()
+
+	scheme := newIdempotencyTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "source-store", Namespace: "default"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Instances: 1,
+			Storage:   cnpgv1.StorageConfiguration{Size: "1Gi"},
+			Recovery:  &supabasev1alpha1.RecoverySpec{Enabled: true, ServerName: "source", S3Config: supabasev1alpha1.S3Config{DestinationPath: "s3://new", EndpointURL: "https://s3.new", S3CredentialsSecret: "new-s3"}},
+		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "source-store-admin"}},
+	}
+	cluster := cnpgresources.BuildCluster(project, &project.Status.SecretNames)
+	oldProject := project.DeepCopy()
+	oldProject.Spec.Database.Recovery.DestinationPath = "s3://old"
+	oldProject.Spec.Database.Recovery.EndpointURL = "https://s3.old"
+	oldProject.Spec.Database.Recovery.S3CredentialsSecret = "old-s3"
+	store := cnpgresources.BuildRecoveryObjectStore(oldProject)
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, cluster, store).Build(),
+		Scheme: scheme,
+	}
+	if err := reconciler.validateRecoveryBootstrapIntent(context.Background(), project); err == nil {
+		t.Fatal("recovery ObjectStore identity change was accepted")
+	}
+	updated := &barmancloudv1.ObjectStore{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(store), updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Spec.Configuration.DestinationPath != "s3://old" || updated.Spec.Configuration.EndpointURL != "https://s3.old" {
+		t.Fatalf("recovery ObjectStore was rewritten: %#v", updated.Spec.Configuration)
+	}
+}
+
+func TestDurableMetadataProtectionRunsBeforeInvalidCredentials(t *testing.T) {
+	t.Parallel()
+
+	scheme := newIdempotencyTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		TypeMeta:   metav1.TypeMeta{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject"},
+		ObjectMeta: metav1.ObjectMeta{Name: "protected", Namespace: "default", UID: "project-uid"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{
+			ProjectCredentialsSecret: "invalid-credentials",
+			Database:                 supabasev1alpha1.DatabaseSpec{Instances: 1, Storage: cnpgv1.StorageConfiguration{Size: "1Gi"}},
+		},
+	}
+	controller := true
+	owner := metav1.OwnerReference{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject", Name: project.Name, UID: project.UID, Controller: &controller}
+	cluster := cnpgresources.BuildCluster(project, &supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "protected-admin"})
+	cluster.OwnerReferences = []metav1.OwnerReference{owner, {APIVersion: "example.dev/v1", Kind: "DatabaseOperator", Name: "foreign"}}
+	credentials := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "invalid-credentials", Namespace: project.Namespace}, Data: map[string][]byte{"publishableKey": []byte("not-valid")}}
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, cluster, credentials).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(project)}); err == nil {
+		t.Fatal("invalid credentials unexpectedly reconciled")
+	}
+	updated := &cnpgv1.Cluster{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(cluster), updated); err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.OwnerReferences) != 1 || updated.OwnerReferences[0].Kind != "DatabaseOperator" {
+		t.Fatalf("owner references after invalid validation = %#v, want foreign owner only", updated.OwnerReferences)
+	}
+	status := &supabasev1alpha1.SupabaseProject{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(project), status); err != nil {
+		t.Fatal(err)
+	}
+	condition := meta.FindStatusCondition(status.Status.Conditions, supabasev1alpha1.ConditionTypeSecretsReady)
+	if condition == nil || condition.Status != metav1.ConditionFalse {
+		t.Fatalf("SecretsReady condition = %#v, want false", condition)
+	}
+}
+
+func TestCredentialRotationRollsOnlyCredentialConsumers(t *testing.T) {
+	t.Parallel()
+
+	scheme := newPowerSyncTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "rotation", Namespace: "default", UID: "project-uid"},
+		Spec:       supabasev1alpha1.SupabaseProjectSpec{ProjectCredentialsSecret: "rotation-credentials"},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{
+			SupabaseAdmin: "rotation-admin", Authenticator: "rotation-authenticator", AuthAdmin: "rotation-auth-admin",
+		}},
+	}
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	if err := reconciler.reconcileServices(ctx, project, &secretresources.ProjectCredentials{PodTemplateHash: "old-hash"}); err != nil {
+		t.Fatalf("initial reconcileServices() error = %v", err)
+	}
+	before := make(map[string]map[string]string)
+	for _, name := range []string{
+		deploymentresources.AuthDeploymentName(project), deploymentresources.RestDeploymentName(project), deploymentresources.StudioDeploymentName(project),
+		deploymentresources.MetaDeploymentName(project), deploymentresources.GatewayDeploymentName(project),
+	} {
+		deployment := &appsv1.Deployment{}
+		if err := reconciler.Get(ctx, types.NamespacedName{Name: name, Namespace: project.Namespace}, deployment); err != nil {
+			t.Fatal(err)
+		}
+		before[name] = deployment.Spec.Template.Annotations
+	}
+	if err := reconciler.reconcileServices(ctx, project, &secretresources.ProjectCredentials{PodTemplateHash: "new-hash"}); err != nil {
+		t.Fatalf("rotated reconcileServices() error = %v", err)
+	}
+	for _, name := range []string{
+		deploymentresources.AuthDeploymentName(project), deploymentresources.RestDeploymentName(project), deploymentresources.StudioDeploymentName(project), deploymentresources.GatewayDeploymentName(project),
+	} {
+		deployment := &appsv1.Deployment{}
+		if err := reconciler.Get(ctx, types.NamespacedName{Name: name, Namespace: project.Namespace}, deployment); err != nil {
+			t.Fatal(err)
+		}
+		if got := deployment.Spec.Template.Annotations[projectCredentialsHashAnnotation]; got != "new-hash" {
+			t.Fatalf("%s credential hash = %q, want new-hash", name, got)
+		}
+	}
+	metaDeployment := &appsv1.Deployment{}
+	if err := reconciler.Get(ctx, types.NamespacedName{Name: deploymentresources.MetaDeploymentName(project), Namespace: project.Namespace}, metaDeployment); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := metaDeployment.Spec.Template.Annotations[projectCredentialsHashAnnotation]; exists {
+		t.Fatalf("meta deployment received a credential hash: %#v", metaDeployment.Spec.Template.Annotations)
+	}
+	if _, exists := before[deploymentresources.MetaDeploymentName(project)][projectCredentialsHashAnnotation]; exists {
+		t.Fatal("meta deployment unexpectedly had an old credential hash")
+	}
+}
+
+func TestInvalidCredentialRotationLeavesExistingWorkloadsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	scheme := newIdempotencyTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		TypeMeta:   metav1.TypeMeta{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject"},
+		ObjectMeta: metav1.ObjectMeta{Name: "invalid-rotation", Namespace: "default", UID: "project-uid"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{
+			ProjectCredentialsSecret: "invalid-rotation-credentials",
+			Database:                 supabasev1alpha1.DatabaseSpec{Instances: 1, Storage: cnpgv1.StorageConfiguration{Size: "1Gi"}},
+		},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{
+			SupabaseAdmin: "invalid-rotation-admin", Authenticator: "invalid-rotation-authenticator", AuthAdmin: "invalid-rotation-auth-admin",
+		}},
+	}
+	invalidCredentials := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: project.Spec.ProjectCredentialsSecret, Namespace: project.Namespace}, Data: map[string][]byte{
+		secretresources.ProjectCredentialsSigningKeysKey:    []byte("{"),
+		secretresources.ProjectCredentialsPublishableKey:    []byte("sb_publishable_previous"),
+		secretresources.ProjectCredentialsSecretKey:         []byte("sb_secret_previous"),
+		secretresources.ProjectCredentialsAnonRoleJWTKey:    []byte("previous.anon.jwt"),
+		secretresources.ProjectCredentialsServiceRoleJWTKey: []byte("previous.service.jwt"),
+	}}
+	workloads := []client.Object{
+		deploymentresources.BuildAuthDeployment(project, &project.Status.SecretNames),
+		deploymentresources.BuildRestDeployment(project, &project.Status.SecretNames),
+		deploymentresources.BuildStudioDeployment(project, &project.Status.SecretNames),
+		deploymentresources.BuildMetaDeployment(project, &project.Status.SecretNames),
+		deploymentresources.BuildGatewayDeployment(project),
+	}
+	before := make(map[string]appsv1.DeploymentSpec, len(workloads))
+	for _, object := range workloads {
+		deployment := object.(*appsv1.Deployment)
+		deployment.Spec.Template.Annotations[projectCredentialsHashAnnotation] = "last-valid"
+		before[deployment.Name] = *deployment.Spec.DeepCopy()
+	}
+	objects := append([]client.Object{project, invalidCredentials}, workloads...)
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(objects...).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(project)}); err == nil {
+		t.Fatal("invalid credential rotation unexpectedly reconciled")
+	}
+	for name, want := range before {
+		deployment := &appsv1.Deployment{}
+		if err := reconciler.Get(context.Background(), types.NamespacedName{Name: name, Namespace: project.Namespace}, deployment); err != nil {
+			t.Fatal(err)
+		}
+		if !apiequality.Semantic.DeepEqual(deployment.Spec, want) {
+			t.Fatalf("workload %s changed after invalid credential rotation", name)
+		}
+	}
+	status := &supabasev1alpha1.SupabaseProject{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(project), status); err != nil {
+		t.Fatal(err)
+	}
+	condition := meta.FindStatusCondition(status.Status.Conditions, supabasev1alpha1.ConditionTypeSecretsReady)
+	if condition == nil || condition.Status != metav1.ConditionFalse {
+		t.Fatalf("SecretsReady condition = %#v, want false", condition)
+	}
+}
+
 func TestMapDurableResourceToProjectIsNamespaceAndNameSafe(t *testing.T) {
 	scheme := newPowerSyncTestScheme(t)
 	project := &supabasev1alpha1.SupabaseProject{ObjectMeta: metav1.ObjectMeta{Name: "mapped", Namespace: "default"}}
@@ -165,6 +493,19 @@ func TestMapDurableResourceToProjectIsNamespaceAndNameSafe(t *testing.T) {
 	}
 	if requests := reconciler.mapDurableResourceToProject(context.Background(), foreign); len(requests) != 0 {
 		t.Fatalf("cross-namespace resource was mapped: %#v", requests)
+	}
+	for _, durable := range []client.Object{
+		&cnpgv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: cnpgresources.ClusterName(project), Namespace: project.Namespace}},
+		&cnpgv1.ScheduledBackup{ObjectMeta: metav1.ObjectMeta{Name: cnpgresources.ScheduledBackupName(project), Namespace: project.Namespace}},
+		&barmancloudv1.ObjectStore{ObjectMeta: metav1.ObjectMeta{Name: cnpgresources.ObjectStoreName(project), Namespace: project.Namespace}},
+	} {
+		if requests := reconciler.mapDurableResourceToProject(context.Background(), durable); len(requests) != 0 {
+			t.Fatalf("missing-label %T was mapped: %#v", durable, requests)
+		}
+		durable.SetLabels(map[string]string{common.LabelInstance: "another-project"})
+		if requests := reconciler.mapDurableResourceToProject(context.Background(), durable); len(requests) != 0 {
+			t.Fatalf("foreign-label %T was mapped: %#v", durable, requests)
+		}
 	}
 }
 

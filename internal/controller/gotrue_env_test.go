@@ -96,7 +96,7 @@ func TestReconcileAuthValidatesGoTrueEnvSources(t *testing.T) {
 			kubeClient := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(objects...).Build()
 			reconciler := &SupabaseProjectReconciler{Client: kubeClient, Scheme: scheme}
 
-			err := reconciler.reconcileAuth(context.Background(), project, &supabasev1alpha1.SecretNamesStatus{})
+			err := reconciler.reconcileAuth(context.Background(), project, &supabasev1alpha1.SecretNamesStatus{}, "")
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("reconcileAuth() error = %v, want containing %q", err, tt.wantErr)

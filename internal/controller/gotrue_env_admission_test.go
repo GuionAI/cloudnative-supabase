@@ -51,6 +51,10 @@ var _ = Describe("GoTrue environment admission", func() {
 		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, valid)).To(Succeed()) })
 
 		invalid := []*supabasev1alpha1.SupabaseProject{
+			project("gotrue-env-operator-owned-jwt", []supabasev1alpha1.GoTrueEnvVar{{
+				Name:  "GOTRUE_JWT_SECRET",
+				Value: ptr.To("attempted-override"),
+			}}),
 			project("gotrue-env-no-source", []supabasev1alpha1.GoTrueEnvVar{{
 				Name: "GOTRUE_EXTERNAL_PHONE_ENABLED",
 			}}),

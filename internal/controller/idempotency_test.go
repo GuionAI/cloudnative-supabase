@@ -18,6 +18,7 @@ import (
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	cnpgresources "github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
+	commonresources "github.com/GuionAI/cloudnative-supabase/internal/resources/common"
 	deploymentresources "github.com/GuionAI/cloudnative-supabase/internal/resources/deployments"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 )
@@ -64,8 +65,8 @@ func TestOwnedResourceHelpersSkipNoOpUpdates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	objectStore := &barmancloudv1.ObjectStore{ObjectMeta: metav1.ObjectMeta{Name: "store", Namespace: "default"}, Spec: barmancloudv1.ObjectStoreSpec{RetentionPolicy: "30d"}}
-	scheduledBackup := &cnpgv1.ScheduledBackup{ObjectMeta: metav1.ObjectMeta{Name: "backup", Namespace: "default"}, Spec: cnpgv1.ScheduledBackupSpec{Schedule: "0 0 2 * * *"}}
+	objectStore := &barmancloudv1.ObjectStore{ObjectMeta: metav1.ObjectMeta{Name: "store", Namespace: "default", Labels: commonresources.CommonLabels(project)}, Spec: barmancloudv1.ObjectStoreSpec{RetentionPolicy: "30d"}}
+	scheduledBackup := &cnpgv1.ScheduledBackup{ObjectMeta: metav1.ObjectMeta{Name: "backup", Namespace: "default", Labels: commonresources.CommonLabels(project)}, Spec: cnpgv1.ScheduledBackupSpec{Schedule: "0 0 2 * * *"}}
 
 	objects := []client.Object{
 		configMap.DeepCopy(), deployment.DeepCopy(), service.DeepCopy(), cronJob.DeepCopy(), objectStore.DeepCopy(), scheduledBackup.DeepCopy(),
@@ -137,8 +138,8 @@ func TestOwnedResourceHelpersRepairClearedFields(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	objectStore := &barmancloudv1.ObjectStore{ObjectMeta: metav1.ObjectMeta{Name: "store", Namespace: "default"}}
-	scheduledBackup := &cnpgv1.ScheduledBackup{ObjectMeta: metav1.ObjectMeta{Name: "backup", Namespace: "default"}}
+	objectStore := &barmancloudv1.ObjectStore{ObjectMeta: metav1.ObjectMeta{Name: "store", Namespace: "default", Labels: commonresources.CommonLabels(project)}}
+	scheduledBackup := &cnpgv1.ScheduledBackup{ObjectMeta: metav1.ObjectMeta{Name: "backup", Namespace: "default", Labels: commonresources.CommonLabels(project)}}
 
 	existingService := service.DeepCopy()
 	existingService.Spec.Ports = []corev1.ServicePort{{Name: "stale", Port: 80}}

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -41,13 +42,41 @@ func TestValidateProjectCredentials(t *testing.T) {
 		t.Fatalf("public projection contains private material: %s", projection.PublicJWKS)
 	}
 
-	for field, mutate := range map[string]func(map[string]string){
-		"missing field": func(values map[string]string) { delete(values, ProjectCredentialsSecretKey) },
-		"wrong prefix":  func(values map[string]string) { values[ProjectCredentialsSecretKey] = "sb_publishable_other" },
-		"wrong role": func(values map[string]string) {
-			values[ProjectCredentialsAnonRoleJWTKey] = signRole(t, key, "service_role")
+	mutations := map[string]func(map[string]string){
+		"malformed JSON": func(values map[string]string) { values[ProjectCredentialsSigningKeysKey] = "{" },
+		"missing private material": func(values map[string]string) {
+			values[ProjectCredentialsSigningKeysKey] = `[{"kty":"EC","alg":"ES256","use":"sig","crv":"P-256","kid":"fixture","key_ops":["sign"]}]`
 		},
-	} {
+		"invalid private material": func(values map[string]string) {
+			values[ProjectCredentialsSigningKeysKey] = strings.Replace(values[ProjectCredentialsSigningKeysKey], private["d"].(string), "not-base64", 1)
+		},
+		"mismatched kid": func(values map[string]string) {
+			values[ProjectCredentialsAnonRoleJWTKey] = signRoleWithClaims(t, key, "anon", "authenticated", "other", 4102444800)
+		},
+		"bad signature": func(values map[string]string) {
+			token := values[ProjectCredentialsAnonRoleJWTKey]
+			replacement := byte('A')
+			if token[len(token)-1] == replacement {
+				replacement = 'B'
+			}
+			values[ProjectCredentialsAnonRoleJWTKey] = token[:len(token)-1] + string(replacement)
+		},
+		"wrong role": func(values map[string]string) {
+			values[ProjectCredentialsAnonRoleJWTKey] = signRoleWithClaims(t, key, "service_role", "authenticated", "fixture", 4102444800)
+		},
+		"wrong audience": func(values map[string]string) {
+			values[ProjectCredentialsAnonRoleJWTKey] = signRoleWithClaims(t, key, "anon", "other", "fixture", 4102444800)
+		},
+		"expired": func(values map[string]string) {
+			values[ProjectCredentialsAnonRoleJWTKey] = signRoleWithClaims(t, key, "anon", "authenticated", "fixture", 1)
+		},
+		"wrong secret prefix":      func(values map[string]string) { values[ProjectCredentialsSecretKey] = "sb_publishable_other" },
+		"wrong publishable prefix": func(values map[string]string) { values[ProjectCredentialsPublishableKey] = "jwt_publishable_other" },
+	}
+	for _, field := range RequiredProjectCredentialKeys {
+		mutations["missing "+field] = func(values map[string]string) { delete(values, field) }
+	}
+	for field, mutate := range mutations {
 		t.Run(field, func(t *testing.T) {
 			values := cloneStrings(bundle)
 			mutate(values)
@@ -87,8 +116,13 @@ func coordinate(value *big.Int) string {
 
 func signRole(t *testing.T, key *ecdsa.PrivateKey, role string) string {
 	t.Helper()
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","kid":"fixture"}`))
-	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"role":"` + role + `","aud":"authenticated","exp":4102444800}`))
+	return signRoleWithClaims(t, key, role, "authenticated", "fixture", 4102444800)
+}
+
+func signRoleWithClaims(t *testing.T, key *ecdsa.PrivateKey, role, audience, kid string, expiration int64) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"alg":"ES256","kid":"%s"}`, kid)))
+	claims := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"role":"%s","aud":"%s","exp":%d}`, role, audience, expiration)))
 	message := header + "." + claims
 	digest := sha256.Sum256([]byte(message))
 	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])

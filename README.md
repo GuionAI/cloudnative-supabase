@@ -18,6 +18,11 @@ and `service_role` ES256 role tokens before routing to Auth, REST, Meta, or
 Studio. GoTrue owns user-session signing; PostgREST and PowerSync verify with
 public JWKS. No verifier receives a symmetric signing secret.
 
+The Envoy admin API (including credential-bearing `config_dump`) is bound to
+the pod loopback interface. Liveness and readiness use the harmless public
+`/_internal/health` route instead, so other pods can reach a useful probe but
+cannot inspect rendered gateway configuration.
+
 The managed profile deliberately excludes Storage, Realtime, Functions,
 Analytics, and other upstream services that this operator does not deploy.
 
@@ -152,7 +157,8 @@ therefore garbage-collects runtime services and generated configuration while
 retaining the database and backup infrastructure. Recreating the same project
 name adopts those retained resources without replacing the database. Durable
 resources are mapped back to projects by namespace, deterministic name, and
-instance label.
+an exact instance label; missing or foreign labels are never adopted or
+deleted.
 
 Explicit deletion of retained resources belongs to the migration runbook. For
 preserved-project cutovers, keep the old database for the agreed minimum

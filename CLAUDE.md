@@ -23,20 +23,24 @@ charts/cloudnative-supabase/crds # chart copy of generated CRD
 
 ## Reconciliation flow
 
-1. Validate the externally managed `projectCredentialsSecret` bundle.
-2. Create-once implementation Secrets (database role passwords, GoTrue
+1. Repair owner metadata on deterministically named, correctly labelled
+   durable resources before validating external input.
+2. Validate the externally managed `projectCredentialsSecret` bundle.
+3. Create-once implementation Secrets (database role passwords, GoTrue
    fallback, optional email hook and PowerSync credentials).
-3. Create init SQL and public JWKS ConfigMaps.
-4. Reconcile independent recovery and steady-state backup resources.
-5. Create or reconcile the CNPG Cluster, preserving foreign/defaulted fields,
+4. Validate immutable recovery intent, then create init SQL and public JWKS
+   ConfigMaps.
+5. Reconcile independent recovery and steady-state backup resources.
+6. Create or reconcile the CNPG Cluster, preserving foreign/defaulted fields,
    rejecting bootstrap mutation and storage shrink.
-6. Wait for ready database instances.
-7. Reconcile Auth, REST, Studio, Meta, Envoy, then optional PowerSync.
+7. Wait for ready database instances.
+8. Reconcile Auth, REST, Studio, Meta, Envoy, then optional PowerSync.
 
 Invalid project credentials stop before dependent workloads are changed.
 Valid credential rotation updates a deterministic non-secret pod-template hash
-on every consumer so Kubernetes performs a rollout. Hashes are not
-credentials.
+on Auth, REST, Studio, and Envoy so Kubernetes performs only the required
+rollouts. Meta and PowerSync consume no bundle value directly and do not roll.
+Hashes are not credentials.
 
 ## Credential and service boundaries
 
@@ -62,6 +66,10 @@ SupabaseProject owner reference and preserve foreign metadata. Runtime
 Deployments, Services, ConfigMaps, Jobs, CronJobs, and publications remain
 owned and are garbage-collectable. Durable events are mapped by namespace,
 instance label, and deterministic resource names rather than owner watches.
+Same-name resources without the exact project instance label are never adopted
+or deleted by cleanup. Envoy's admin listener is loopback-only because its
+config dump contains rendered credentials; probes use its public internal
+health route instead.
 
 ## Commands
 

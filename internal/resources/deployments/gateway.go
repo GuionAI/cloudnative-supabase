@@ -37,6 +37,10 @@ const (
 	GatewayPort int32 = 8000
 	// GatewayAdminPort is the Envoy admin/readiness port.
 	GatewayAdminPort int32 = 9901
+	// GatewayHealthPath is a harmless direct-response route on the public
+	// listener. It lets kubelet probe Envoy without exposing the loopback-only
+	// admin interface (which contains rendered credential material).
+	GatewayHealthPath = "/_internal/health"
 )
 
 // GatewayDeploymentName returns the gateway deployment identity.
@@ -69,7 +73,7 @@ func NormalizeGatewayResources(resources corev1.ResourceRequirements) corev1.Res
 
 // BuildGatewayDeployment creates Envoy and wires only opaque project keys and
 // their corresponding internal role JWTs into the container.
-func BuildGatewayDeployment(project *supabasev1alpha1.SupabaseProject, _ *supabasev1alpha1.SecretNamesStatus) *appsv1.Deployment {
+func BuildGatewayDeployment(project *supabasev1alpha1.SupabaseProject) *appsv1.Deployment {
 	spec := project.Spec.Gateway
 	imageTag := defaults.EnvoyTag
 	if spec.ImageTag != "" {
@@ -90,13 +94,12 @@ func BuildGatewayDeployment(project *supabasev1alpha1.SupabaseProject, _ *supaba
 		},
 		Ports: []corev1.ContainerPort{
 			{Name: "http", ContainerPort: GatewayPort, Protocol: corev1.ProtocolTCP},
-			{Name: "admin", ContainerPort: GatewayAdminPort, Protocol: corev1.ProtocolTCP},
 		},
 		LivenessProbe: BuildHTTPProbe(ProbeConfig{
-			Path: "/ready", Port: GatewayAdminPort, InitialDelaySeconds: 10, PeriodSeconds: 10, TimeoutSeconds: 3,
+			Path: GatewayHealthPath, Port: GatewayPort, InitialDelaySeconds: 10, PeriodSeconds: 10, TimeoutSeconds: 3,
 		}),
 		ReadinessProbe: BuildHTTPProbe(ProbeConfig{
-			Path: "/ready", Port: GatewayAdminPort, InitialDelaySeconds: 5, PeriodSeconds: 5, TimeoutSeconds: 3,
+			Path: GatewayHealthPath, Port: GatewayPort, InitialDelaySeconds: 5, PeriodSeconds: 5, TimeoutSeconds: 3,
 		}),
 		Resources: NormalizeGatewayResources(spec.Resources),
 		VolumeMounts: []corev1.VolumeMount{

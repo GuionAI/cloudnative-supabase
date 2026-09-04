@@ -101,6 +101,7 @@ spec:
                         name:
                           description: Name is an arbitrary GOTRUE_ configuration
                             variable.
+                          maxLength: 64
                           pattern: ^GOTRUE_[A-Z0-9_]+$
                           type: string
                         value:
@@ -166,6 +167,8 @@ spec:
                       x-kubernetes-validations:
                       - message: exactly one of value or valueFrom is required
                         rule: has(self.value) != has(self.valueFrom)
+                      - message: JWT and role security environment names are operator-owned
+                        rule: '!(self.name in [''GOTRUE_JWT_KEYS'',''GOTRUE_JWT_SECRET'',''GOTRUE_JWT_ALG'',''GOTRUE_JWT_KEY_ID'',''GOTRUE_JWT_ISSUER'',''GOTRUE_JWT_AUD'',''GOTRUE_JWT_EXP'',''GOTRUE_JWT_VALID_METHODS'',''GOTRUE_JWT_ALLOWED_ALGS'',''GOTRUE_JWT_ADMIN_ROLES'',''GOTRUE_JWT_ADMIN_GROUP_NAME'',''GOTRUE_JWT_DEFAULT_GROUP_NAME'',''GOTRUE_JWT_ROLE_CLAIM''])'
                     type: array
                     x-kubernetes-list-map-keys:
                     - name

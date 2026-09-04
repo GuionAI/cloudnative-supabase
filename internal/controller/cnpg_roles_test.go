@@ -8,27 +8,19 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-func TestSyncManagedRolesAddsPowerSyncRoles(t *testing.T) {
-	existing := &cnpgv1.Cluster{
-		Spec: cnpgv1.ClusterSpec{
-			Managed: &cnpgv1.ManagedConfiguration{
-				Roles: []cnpgv1.RoleConfiguration{{Name: "supabase_admin"}},
-			},
-		},
-	}
-	desired := existing.DeepCopy()
-	desired.Spec.Managed.Roles = append(desired.Spec.Managed.Roles,
+func TestMergeManagedRolesAddsPowerSyncRoles(t *testing.T) {
+	existing := []cnpgv1.RoleConfiguration{{Name: "supabase_admin"}}
+	desired := append([]cnpgv1.RoleConfiguration(nil), existing...)
+	desired = append(desired,
 		cnpgv1.RoleConfiguration{Name: "powersync_storage"},
 		cnpgv1.RoleConfiguration{Name: "powersync_replication"},
 	)
 
-	if !syncManagedRoles(existing, desired) {
-		t.Fatal("expected managed roles to change")
-	}
-	if got := len(existing.Spec.Managed.Roles); got != 3 {
+	merged := mergeManagedRoles(existing, desired)
+	if got := len(merged); got != 3 {
 		t.Fatalf("managed roles = %d, want 3", got)
 	}
-	if syncManagedRoles(existing, desired) {
+	if got := mergeManagedRoles(merged, desired); len(got) != len(merged) {
 		t.Fatal("expected identical managed roles to be a no-op")
 	}
 }

@@ -51,6 +51,7 @@ import (
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/configmaps"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/deployments"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/jobs"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/secrets"
@@ -136,11 +137,28 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		project.Status.Phase = supabasev1alpha1.PhasePending
 	}
 
+	// Phase 0: repair durable ownership metadata before validating any external
+	// input. A bad credential or backup secret must not leave an existing
+	// database vulnerable to garbage collection during an upgrade.
+	if err := r.reconcileDurableMetadataProtection(ctx, project); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Phase 1: Validate the externally managed project credential bundle and
 	// ensure implementation secrets exist. No dependent workload is touched on
 	// a validation failure.
 	credentials, err := r.reconcileSecrets(ctx, project)
 	if err != nil {
+		return ctrl.Result{}, err
+	}
+	// Validate creation-time recovery intent after implementation secrets have
+	// been synchronized, so a recreated project has the deterministic secret
+	// references used by its retained CNPG bootstrap.
+	if err := r.validateRecoveryBootstrapIntent(ctx, project); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "BootstrapImmutable", err.Error())
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -188,7 +206,10 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if result, err := r.reconcileCDCPermissions(ctx, project); err != nil || result.RequeueAfter > 0 {
 			return result, err
 		}
-		if result, err := r.reconcilePowersync(ctx, project, syncRules, credentials.PodTemplateHash); err != nil || result.RequeueAfter > 0 {
+		// PowerSync verifies sessions through the stable public JWKS URL and does
+		// not consume any project credential value directly, so key rotation must
+		// not roll its workloads.
+		if result, err := r.reconcilePowersync(ctx, project, syncRules, ""); err != nil || result.RequeueAfter > 0 {
 			return result, err
 		}
 	} else if err := r.cleanupPowerSync(ctx, project); err != nil {
@@ -516,15 +537,15 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 	// A project recreation or an upgrade from an older operator may leave a
 	// SupabaseProject owner reference behind. Remove only that reference and
 	// preserve any owner references belonging to another controller.
-	if instance := existing.Labels[common.LabelInstance]; instance != "" && instance != project.Name {
-		return ctrl.Result{}, fmt.Errorf("CNPG Cluster %s belongs to project %q", existing.Name, instance)
+	if instance := existing.Labels[common.LabelInstance]; instance != project.Name {
+		return ctrl.Result{}, fmt.Errorf("CNPG Cluster %s has instance label %q, expected %q", existing.Name, instance, project.Name)
 	}
 	changed := removeProjectOwnerReference(existing, project)
 	if mergeLabels(existing, desired.Labels) {
 		changed = true
 	}
 
-	if bootstrapChanged(existing.Spec.Bootstrap, desired.Spec.Bootstrap) {
+	if recoveryBootstrapIntentChanged(existing, desired) {
 		if changed {
 			if err := r.Update(ctx, existing); err != nil {
 				return ctrl.Result{}, fmt.Errorf("updating CNPG cluster metadata: %w", err)
@@ -567,33 +588,70 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 	return ctrl.Result{}, nil
 }
 
-func bootstrapChanged(existing, desired *cnpgv1.BootstrapConfiguration) bool {
-	// CNPG may omit bootstrap after an older cluster has already completed
-	// initialization. In that case there is no safely comparable creation-time
-	// intent; preserve it rather than attempting an immutable update.
-	if existing == nil {
+// recoveryBootstrapIntentChanged reports changes to all creation-time
+// recovery inputs. CNPG treats bootstrap and the external source plugin as
+// immutable once a cluster exists, so silently copying a new desired value
+// would make status lie about how the database was initialized.
+func recoveryBootstrapIntentChanged(existing, desired *cnpgv1.Cluster) bool {
+	if existing == nil || desired == nil {
 		return false
 	}
-	if desired == nil {
-		return false
-	}
-	if (existing.InitDB == nil) != (desired.InitDB == nil) || (existing.Recovery == nil) != (desired.Recovery == nil) {
+	existingRecovery, existingHasRecovery := recoveryBootstrap(existing.Spec.Bootstrap)
+	desiredRecovery, desiredHasRecovery := recoveryBootstrap(desired.Spec.Bootstrap)
+	if existingHasRecovery != desiredHasRecovery {
 		return true
 	}
-	if existing.InitDB != nil {
-		return existing.InitDB.Database != desired.InitDB.Database ||
-			existing.InitDB.Owner != desired.InitDB.Owner ||
-			!apiequality.Semantic.DeepEqual(existing.InitDB.Secret, desired.InitDB.Secret) ||
-			!apiequality.Semantic.DeepEqual(existing.InitDB.PostInitApplicationSQLRefs, desired.InitDB.PostInitApplicationSQLRefs)
+	if existingHasRecovery && !apiequality.Semantic.DeepEqual(existingRecovery, desiredRecovery) {
+		return true
 	}
-	if existing.Recovery != nil {
-		return existing.Recovery.Source != desired.Recovery.Source ||
-			existing.Recovery.Database != desired.Recovery.Database ||
-			existing.Recovery.Owner != desired.Recovery.Owner ||
-			!apiequality.Semantic.DeepEqual(existing.Recovery.Secret, desired.Recovery.Secret) ||
-			!apiequality.Semantic.DeepEqual(existing.Recovery.RecoveryTarget, desired.Recovery.RecoveryTarget)
+
+	// The barman external-cluster plugin carries immutable source identity such
+	// as serverName and barmanObjectName. Compare its complete configuration,
+	// including any future plugin parameters, rather than just bootstrap fields.
+	existingSource := recoveryExternalCluster(existing.Spec.ExternalClusters)
+	desiredSource := recoveryExternalCluster(desired.Spec.ExternalClusters)
+	if (existingSource == nil) != (desiredSource == nil) {
+		return true
+	}
+	if existingSource != nil && !apiequality.Semantic.DeepEqual(normalizeRecoveryExternalCluster(existingSource), normalizeRecoveryExternalCluster(desiredSource)) {
+		return true
 	}
 	return false
+}
+
+func recoveryBootstrap(bootstrap *cnpgv1.BootstrapConfiguration) (*cnpgv1.BootstrapRecovery, bool) {
+	if bootstrap == nil || bootstrap.Recovery == nil {
+		return nil, false
+	}
+	return bootstrap.Recovery, true
+}
+
+func recoveryExternalCluster(clusters []cnpgv1.ExternalCluster) *cnpgv1.ExternalCluster {
+	for i := range clusters {
+		if clusters[i].PluginConfiguration != nil && clusters[i].PluginConfiguration.Name == cnpg.BarmanCloudPluginName && strings.HasSuffix(clusters[i].Name, "-recovery-source") {
+			return clusters[i].DeepCopy()
+		}
+	}
+	return nil
+}
+
+func normalizeRecoveryExternalCluster(source *cnpgv1.ExternalCluster) *cnpgv1.ExternalCluster {
+	if source == nil {
+		return nil
+	}
+	normalized := source.DeepCopy()
+	if plugin := normalized.PluginConfiguration; plugin != nil {
+		// CNPG defaults these booleans on persisted objects. Treat the default
+		// representation and the omitted representation as the same intent while
+		// still detecting explicit non-default changes.
+		if plugin.Enabled != nil && *plugin.Enabled {
+			plugin.Enabled = nil
+		}
+		if plugin.IsWALArchiver != nil && !*plugin.IsWALArchiver {
+			plugin.IsWALArchiver = nil
+		}
+	}
+	return normalized
 }
 
 func reconcileErrReason(err error) string {
@@ -625,8 +683,10 @@ func reconcileClusterMutableFields(existing, desired *cnpgv1.Cluster) (bool, err
 		existing.Spec.ImageName = desired.Spec.ImageName
 		changed = true
 	}
-	if !apiequality.Semantic.DeepEqual(existing.Spec.Resources, desired.Spec.Resources) &&
-		(len(desired.Spec.Resources.Requests) > 0 || len(desired.Spec.Resources.Limits) > 0) {
+	// Resource requirements are operator-owned desired state. A zero value is
+	// meaningful: clearing the SupabaseProject field must remove a stale
+	// requirement rather than treating it as a CNPG default/foreign field.
+	if !apiequality.Semantic.DeepEqual(existing.Spec.Resources, desired.Spec.Resources) {
 		existing.Spec.Resources = desired.Spec.Resources
 		changed = true
 	}
@@ -745,23 +805,6 @@ func mergeStringSlice(desired, existing []string) []string {
 		seen[value] = struct{}{}
 	}
 	return merged
-}
-
-// syncManagedRoles remains a small compatibility helper for unit seams that
-// exercise only managed-role convergence; the full reconciliation path uses
-// reconcileClusterMutableFields so all supported fields converge together.
-func syncManagedRoles(existing, desired *cnpgv1.Cluster) bool {
-	if desired.Spec.Managed == nil {
-		return false
-	}
-	if existing.Spec.Managed == nil {
-		existing.Spec.Managed = &cnpgv1.ManagedConfiguration{}
-	}
-	if apiequality.Semantic.DeepEqual(existing.Spec.Managed.Roles, desired.Spec.Managed.Roles) {
-		return false
-	}
-	existing.Spec.Managed.Roles = desired.Spec.Managed.Roles
-	return true
 }
 
 func reconcileBarmanPlugin(existing, desired []cnpgv1.PluginConfiguration) ([]cnpgv1.PluginConfiguration, bool) {
@@ -883,18 +926,14 @@ func (r *SupabaseProjectReconciler) waitForDatabase(ctx context.Context, project
 	return ctrl.Result{}, nil
 }
 
-// reconcileServices deploys all Supabase services. The variadic credential
-// argument keeps direct builder-level callers useful while the reconcile path
-// always supplies the validated projection.
-func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, project *supabasev1alpha1.SupabaseProject, credentialProjection ...*secrets.ProjectCredentials) error {
+// reconcileServices deploys all Supabase services from the validated project
+// credential projection.
+func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, project *supabasev1alpha1.SupabaseProject, credentials *secrets.ProjectCredentials) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling Supabase services")
 
 	secretNames := &project.Status.SecretNames
-	credentialHash := ""
-	if len(credentialProjection) > 0 && credentialProjection[0] != nil {
-		credentialHash = credentialProjection[0].PodTemplateHash
-	}
+	credentialHash := credentials.PodTemplateHash
 
 	// Deploy Auth (GoTrue)
 	if err := r.reconcileAuth(ctx, project, secretNames, credentialHash); err != nil {
@@ -912,12 +951,14 @@ func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, proje
 	}
 
 	// Deploy Meta (postgres-meta)
-	if err := r.reconcileMeta(ctx, project, secretNames, credentialHash); err != nil {
+	// postgres-meta consumes no project credential material, so credential
+	// rotation must not roll this deployment.
+	if err := r.reconcileMeta(ctx, project, secretNames, ""); err != nil {
 		return err
 	}
 
 	// Deploy Envoy gateway
-	if err := r.reconcileGateway(ctx, project, secretNames, credentialHash); err != nil {
+	if err := r.reconcileGateway(ctx, project, credentialHash); err != nil {
 		return err
 	}
 
@@ -969,7 +1010,7 @@ func applyProjectCredentialsHash(deployment *appsv1.Deployment, hash string) {
 }
 
 // reconcileAuth deploys the Auth service
-func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, credentialHash ...string) error {
+func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, credentialHash string) error {
 	if err := r.validateGoTrueEnvSources(ctx, project); err != nil {
 		return r.failAuthGoTrueEnv(ctx, project, err)
 	}
@@ -990,9 +1031,7 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 		"hasProviders", project.Spec.Auth.Providers != nil,
 		"hasEmailHook", project.Spec.Auth.EmailHook != nil && project.Spec.Auth.EmailHook.Enabled,
 	}
-	if len(credentialHash) > 0 {
-		config.credentialHash = credentialHash[0]
-	}
+	config.credentialHash = credentialHash
 	return r.reconcileServiceComponent(ctx, project, config)
 }
 
@@ -1099,7 +1138,7 @@ func (r *SupabaseProjectReconciler) buildAuthDeployment(ctx context.Context, pro
 }
 
 // reconcileRest deploys the REST service
-func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, credentialHash ...string) error {
+func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, credentialHash string) error {
 	config := newServiceReconcileConfig(
 		"REST",
 		supabasev1alpha1.ConditionTypeRestReady,
@@ -1111,14 +1150,12 @@ func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *
 		"image", fmt.Sprintf("%s:%s", "postgrest/postgrest", project.Spec.Rest.ImageTag),
 		"schemas", project.Spec.Rest.Schemas,
 	}
-	if len(credentialHash) > 0 {
-		config.credentialHash = credentialHash[0]
-	}
+	config.credentialHash = credentialHash
 	return r.reconcileServiceComponent(ctx, project, config)
 }
 
 // reconcileStudio deploys the Studio service
-func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, credentialHash ...string) error {
+func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, credentialHash string) error {
 	config := newServiceReconcileConfig(
 		"Studio",
 		supabasev1alpha1.ConditionTypeStudioReady,
@@ -1130,14 +1167,12 @@ func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project
 		"image", fmt.Sprintf("%s:%s", "supabase/studio", project.Spec.Studio.ImageTag),
 		"publicURL", project.Spec.Studio.PublicURL,
 	}
-	if len(credentialHash) > 0 {
-		config.credentialHash = credentialHash[0]
-	}
+	config.credentialHash = credentialHash
 	return r.reconcileServiceComponent(ctx, project, config)
 }
 
 // reconcileMeta deploys the Meta service
-func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, credentialHash ...string) error {
+func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, credentialHash string) error {
 	config := newServiceReconcileConfig(
 		"Meta",
 		supabasev1alpha1.ConditionTypeMetaReady,
@@ -1148,14 +1183,12 @@ func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *
 	config.logFields = []any{
 		"image", fmt.Sprintf("%s:%s", "supabase/postgres-meta", project.Spec.Meta.ImageTag),
 	}
-	if len(credentialHash) > 0 {
-		config.credentialHash = credentialHash[0]
-	}
+	config.credentialHash = credentialHash
 	return r.reconcileServiceComponent(ctx, project, config)
 }
 
 // reconcileGateway deploys the Envoy API gateway and its managed assets.
-func (r *SupabaseProjectReconciler) reconcileGateway(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, credentialHash ...string) error {
+func (r *SupabaseProjectReconciler) reconcileGateway(ctx context.Context, project *supabasev1alpha1.SupabaseProject, credentialHash string) error {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling Envoy gateway service")
 
@@ -1170,36 +1203,24 @@ func (r *SupabaseProjectReconciler) reconcileGateway(ctx context.Context, projec
 		return err
 	}
 
-	// Create deployment.
-	deployment := deployments.BuildGatewayDeployment(project, secretNames)
-	if len(credentialHash) > 0 {
-		applyProjectCredentialsHash(deployment, credentialHash[0])
+	config := newServiceReconcileConfig(
+		"Gateway",
+		supabasev1alpha1.ConditionTypeGatewayReady,
+		func() *appsv1.Deployment { return deployments.BuildGatewayDeployment(project) },
+		func() *corev1.Service { return services.BuildGatewayService(project) },
+		func(ready bool) { project.Status.Services.Gateway = supabasev1alpha1.ServiceStatus{Ready: ready} },
+	)
+	config.credentialHash = credentialHash
+	config.logFields = []any{
+		"image", fmt.Sprintf("%s:%s", defaults.EnvoyImage, project.Spec.Gateway.ImageTag),
+		"replicas", project.Spec.Gateway.Replicas,
 	}
-	log.V(1).Info("Built Envoy gateway deployment",
-		"image", fmt.Sprintf("%s:%s", "envoyproxy/envoy", project.Spec.Gateway.ImageTag))
-	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeGatewayReady, metav1.ConditionFalse, "DeploymentFailed", err.Error())
-		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
-			return statusErr
-		}
+	if err := r.reconcileServiceComponent(ctx, project, config); err != nil {
 		return err
 	}
 
-	// Create service.
-	service := services.BuildGatewayService(project)
-	if err := r.createOrUpdateService(ctx, project, service); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeGatewayReady, metav1.ConditionFalse, "ServiceFailed", err.Error())
-		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
-			return statusErr
-		}
-		return err
-	}
-
-	// Update API endpoint in status
+	// Update API endpoint in status after the common service reconciliation.
 	project.Status.Endpoints.API = fmt.Sprintf("%s:8000", deployments.GatewayDeploymentName(project))
-
-	project.Status.Services.Gateway = supabasev1alpha1.ServiceStatus{Ready: true}
-	r.setCondition(project, supabasev1alpha1.ConditionTypeGatewayReady, metav1.ConditionTrue, "Ready", "Envoy gateway is running")
 	return nil
 }
 
@@ -1477,6 +1498,90 @@ func (r *SupabaseProjectReconciler) reconcileBackupInfrastructure(ctx context.Co
 	return r.reconcileRecovery(ctx, project)
 }
 
+// reconcileDurableMetadataProtection runs before any externally supplied
+// credential or backup validation. Durable resources must not retain a
+// SupabaseProject owner reference that could garbage-collect the database on
+// an upgrade, but only deterministic, correctly labelled resources are safe to
+// touch. Foreign and unlabeled same-name resources are left untouched for the
+// normal adoption guard to reject later.
+func (r *SupabaseProjectReconciler) reconcileDurableMetadataProtection(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	durables := []struct {
+		name   string
+		object client.Object
+	}{
+		{name: cnpg.ClusterName(project), object: &cnpgv1.Cluster{}},
+		{name: cnpg.ObjectStoreName(project), object: &barmancloudv1.ObjectStore{}},
+		{name: cnpg.RecoveryObjectStoreName(project), object: &barmancloudv1.ObjectStore{}},
+		{name: cnpg.ScheduledBackupName(project), object: &cnpgv1.ScheduledBackup{}},
+	}
+	for _, durable := range durables {
+		key := types.NamespacedName{Name: durable.name, Namespace: project.Namespace}
+		if err := r.Get(ctx, key, durable.object); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return fmt.Errorf("getting durable resource %s: %w", key.String(), err)
+		}
+		if durable.object.GetLabels()[common.LabelInstance] != project.Name {
+			continue
+		}
+		if !removeOwnerReferenceByName(durable.object, project.Name) {
+			continue
+		}
+		if err := r.Update(ctx, durable.object); err != nil {
+			return fmt.Errorf("removing SupabaseProject owner from durable resource %s: %w", key.String(), err)
+		}
+	}
+	return nil
+}
+
+// validateRecoveryBootstrapIntent checks immutable recovery state before
+// backup/recovery reconciliation can update an ObjectStore. This preserves
+// the source identity used by an existing CNPG cluster, including plugin
+// parameters such as serverName and barmanObjectName.
+func (r *SupabaseProjectReconciler) validateRecoveryBootstrapIntent(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	desired := cnpg.BuildCluster(project, &project.Status.SecretNames)
+	existing := &cnpgv1.Cluster{}
+	if err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("getting CNPG cluster for recovery validation: %w", err)
+	}
+	recoveryEnabled := project.Spec.Database.Recovery != nil && project.Spec.Database.Recovery.Enabled
+	if recoveryEnabled && recoveryBootstrapIntentChanged(existing, desired) {
+		return fmt.Errorf("CNPG recovery bootstrap configuration is immutable after cluster creation")
+	}
+
+	// A recovered cluster's source ObjectStore is also creation-time input. Do
+	// not let a changed destination, endpoint, or credential reference be
+	// silently rewritten before the immutable cluster check runs.
+	if recoveryEnabled {
+		desiredStore := cnpg.BuildRecoveryObjectStore(project)
+		currentStore := &barmancloudv1.ObjectStore{}
+		err := r.Get(ctx, types.NamespacedName{Name: desiredStore.Name, Namespace: desiredStore.Namespace}, currentStore)
+		if err == nil {
+			if recoveryObjectStoreIdentityChanged(currentStore, desiredStore) {
+				return fmt.Errorf("CNPG recovery source ObjectStore configuration is immutable after cluster creation")
+			}
+		} else if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("getting recovery source ObjectStore for validation: %w", err)
+		}
+	}
+	return nil
+}
+
+func recoveryObjectStoreIdentityChanged(existing, desired *barmancloudv1.ObjectStore) bool {
+	if existing == nil || desired == nil {
+		return false
+	}
+	existingConfig := existing.Spec.Configuration
+	desiredConfig := desired.Spec.Configuration
+	return !apiequality.Semantic.DeepEqual(existingConfig.BarmanCredentials, desiredConfig.BarmanCredentials) ||
+		existingConfig.EndpointURL != desiredConfig.EndpointURL ||
+		existingConfig.DestinationPath != desiredConfig.DestinationPath
+}
+
 // reconcileBackup handles backup ObjectStore and ScheduledBackup creation
 func (r *SupabaseProjectReconciler) reconcileBackup(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
 	log := logf.FromContext(ctx)
@@ -1526,6 +1631,9 @@ func (r *SupabaseProjectReconciler) cleanupBackupResources(ctx context.Context, 
 	scheduledBackupName := cnpg.ScheduledBackupName(project)
 	err := r.Get(ctx, types.NamespacedName{Name: scheduledBackupName, Namespace: project.Namespace}, scheduledBackup)
 	if err == nil {
+		if scheduledBackup.Labels[common.LabelInstance] != project.Name {
+			return fmt.Errorf("refusing to delete ScheduledBackup %s with instance label %q", scheduledBackupName, scheduledBackup.Labels[common.LabelInstance])
+		}
 		log.Info("Deleting ScheduledBackup (backup disabled)", "name", scheduledBackupName)
 		if err := r.Delete(ctx, scheduledBackup); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete ScheduledBackup: %w", err)
@@ -1539,6 +1647,9 @@ func (r *SupabaseProjectReconciler) cleanupBackupResources(ctx context.Context, 
 	objectStoreName := cnpg.ObjectStoreName(project)
 	err = r.Get(ctx, types.NamespacedName{Name: objectStoreName, Namespace: project.Namespace}, objectStore)
 	if err == nil {
+		if objectStore.Labels[common.LabelInstance] != project.Name {
+			return fmt.Errorf("refusing to delete ObjectStore %s with instance label %q", objectStoreName, objectStore.Labels[common.LabelInstance])
+		}
 		log.Info("Deleting ObjectStore (backup disabled)", "name", objectStoreName)
 		if err := r.Delete(ctx, objectStore); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete ObjectStore: %w", err)
@@ -1555,6 +1666,11 @@ func (r *SupabaseProjectReconciler) cleanupBackupResources(ctx context.Context, 
 // reconcileRecovery handles recovery ObjectStore creation
 func (r *SupabaseProjectReconciler) reconcileRecovery(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
 	log := logf.FromContext(ctx)
+
+	if err := r.validateRecoveryBootstrapIntent(ctx, project); err != nil {
+		r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "BootstrapImmutable", err.Error())
+		return r.failRecovery(ctx, project, "BootstrapImmutable", err)
+	}
 
 	// If recovery is disabled, clean up any existing recovery resources
 	if project.Spec.Database.Recovery == nil || !project.Spec.Database.Recovery.Enabled {
@@ -1595,6 +1711,9 @@ func (r *SupabaseProjectReconciler) cleanupRecoveryResources(ctx context.Context
 	objectStoreName := cnpg.RecoveryObjectStoreName(project)
 	err := r.Get(ctx, types.NamespacedName{Name: objectStoreName, Namespace: project.Namespace}, objectStore)
 	if err == nil {
+		if objectStore.Labels[common.LabelInstance] != project.Name {
+			return fmt.Errorf("refusing to delete recovery ObjectStore %s with instance label %q", objectStoreName, objectStore.Labels[common.LabelInstance])
+		}
 		log.Info("Deleting recovery ObjectStore (recovery disabled)", "name", objectStoreName)
 		if err := r.Delete(ctx, objectStore); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete recovery ObjectStore: %w", err)
@@ -1668,8 +1787,11 @@ func (r *SupabaseProjectReconciler) createOrUpdateObjectStore(ctx context.Contex
 	}
 
 	projectName := objectStore.Labels[common.LabelInstance]
-	if instance := existing.Labels[common.LabelInstance]; instance != "" && instance != projectName {
-		return fmt.Errorf("ObjectStore %s belongs to project %q", existing.Name, instance)
+	if projectName == "" {
+		return fmt.Errorf("ObjectStore %s has no project instance label", existing.Name)
+	}
+	if instance := existing.Labels[common.LabelInstance]; instance != projectName {
+		return fmt.Errorf("ObjectStore %s has instance label %q, expected %q", existing.Name, instance, projectName)
 	}
 	changed := removeOwnerReferenceByName(existing, projectName)
 	if mergeLabels(existing, objectStore.Labels) {
@@ -1680,8 +1802,8 @@ func (r *SupabaseProjectReconciler) createOrUpdateObjectStore(ctx context.Contex
 	configurationChanged := !apiequality.Semantic.DeepEqual(currentConfiguration.BarmanCredentials, desiredConfiguration.BarmanCredentials) ||
 		currentConfiguration.EndpointURL != desiredConfiguration.EndpointURL ||
 		currentConfiguration.DestinationPath != desiredConfiguration.DestinationPath ||
-		!apiequality.Semantic.DeepEqual(currentConfiguration.Wal, desiredConfiguration.Wal) ||
-		!apiequality.Semantic.DeepEqual(currentConfiguration.Data, desiredConfiguration.Data)
+		(desiredConfiguration.Wal != nil && !apiequality.Semantic.DeepEqual(currentConfiguration.Wal, desiredConfiguration.Wal)) ||
+		(desiredConfiguration.Data != nil && !apiequality.Semantic.DeepEqual(currentConfiguration.Data, desiredConfiguration.Data))
 	if configurationChanged || existing.Spec.RetentionPolicy != objectStore.Spec.RetentionPolicy {
 		changed = true
 	}
@@ -1691,8 +1813,12 @@ func (r *SupabaseProjectReconciler) createOrUpdateObjectStore(ctx context.Contex
 	currentConfiguration.BarmanCredentials = desiredConfiguration.BarmanCredentials
 	currentConfiguration.EndpointURL = desiredConfiguration.EndpointURL
 	currentConfiguration.DestinationPath = desiredConfiguration.DestinationPath
-	currentConfiguration.Wal = desiredConfiguration.Wal
-	currentConfiguration.Data = desiredConfiguration.Data
+	if desiredConfiguration.Wal != nil {
+		currentConfiguration.Wal = desiredConfiguration.Wal
+	}
+	if desiredConfiguration.Data != nil {
+		currentConfiguration.Data = desiredConfiguration.Data
+	}
 	existing.Spec.Configuration = currentConfiguration
 	existing.Spec.RetentionPolicy = objectStore.Spec.RetentionPolicy
 	if !changed {
@@ -1725,8 +1851,11 @@ func (r *SupabaseProjectReconciler) createOrUpdateScheduledBackup(ctx context.Co
 	}
 
 	projectName := scheduledBackup.Labels[common.LabelInstance]
-	if instance := existing.Labels[common.LabelInstance]; instance != "" && instance != projectName {
-		return fmt.Errorf("ScheduledBackup %s belongs to project %q", existing.Name, instance)
+	if projectName == "" {
+		return fmt.Errorf("ScheduledBackup %s has no project instance label", existing.Name)
+	}
+	if instance := existing.Labels[common.LabelInstance]; instance != projectName {
+		return fmt.Errorf("ScheduledBackup %s has instance label %q, expected %q", existing.Name, instance, projectName)
 	}
 	changed := removeOwnerReferenceByName(existing, projectName)
 	if mergeLabels(existing, scheduledBackup.Labels) {
@@ -1879,7 +2008,7 @@ func publicationIsApplied(publication *cnpgv1.Publication) bool {
 }
 
 // reconcilePowersync deploys the Powersync service (API + Replication + ConfigMaps + CronJob)
-func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, project *supabasev1alpha1.SupabaseProject, syncRulesContent []byte, credentialHash ...string) (ctrl.Result, error) {
+func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, project *supabasev1alpha1.SupabaseProject, syncRulesContent []byte, credentialHash string) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling Powersync service")
 
@@ -1910,9 +2039,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	// Deploy Powersync API
 	apiDeployment := deployments.BuildPowersyncAPIDeployment(project, secretNames)
 	applyPowerSyncConfigHash(apiDeployment, psConfig.Data["config.json"], syncRulesContent)
-	if len(credentialHash) > 0 {
-		applyProjectCredentialsHash(apiDeployment, credentialHash[0])
-	}
+	applyProjectCredentialsHash(apiDeployment, credentialHash)
 	if err := r.createOrUpdateDeployment(ctx, project, apiDeployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "APIDeploymentFailed", err.Error())
 		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
@@ -1934,9 +2061,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	// Deploy Powersync Replication
 	replDeployment := deployments.BuildPowersyncReplicationDeployment(project, secretNames)
 	applyPowerSyncConfigHash(replDeployment, psConfig.Data["config.json"], syncRulesContent)
-	if len(credentialHash) > 0 {
-		applyProjectCredentialsHash(replDeployment, credentialHash[0])
-	}
+	applyProjectCredentialsHash(replDeployment, credentialHash)
 	if err := r.createOrUpdateDeployment(ctx, project, replDeployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "ReplicationDeploymentFailed", err.Error())
 		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {

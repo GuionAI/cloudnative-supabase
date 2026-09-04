@@ -325,9 +325,11 @@ type AuthSpec struct {
 
 // GoTrueEnvVar configures one GOTRUE_ process environment variable.
 // +kubebuilder:validation:XValidation:rule="has(self.value) != has(self.valueFrom)",message="exactly one of value or valueFrom is required"
+// +kubebuilder:validation:XValidation:rule="!(self.name in ['GOTRUE_JWT_KEYS','GOTRUE_JWT_SECRET','GOTRUE_JWT_ALG','GOTRUE_JWT_KEY_ID','GOTRUE_JWT_ISSUER','GOTRUE_JWT_AUD','GOTRUE_JWT_EXP','GOTRUE_JWT_VALID_METHODS','GOTRUE_JWT_ALLOWED_ALGS','GOTRUE_JWT_ADMIN_ROLES','GOTRUE_JWT_ADMIN_GROUP_NAME','GOTRUE_JWT_DEFAULT_GROUP_NAME','GOTRUE_JWT_ROLE_CLAIM'])",message="JWT and role security environment names are operator-owned"
 type GoTrueEnvVar struct {
 	// Name is an arbitrary GOTRUE_ configuration variable.
 	// +kubebuilder:validation:Pattern=`^GOTRUE_[A-Z0-9_]+$`
+	// +kubebuilder:validation:MaxLength=64
 	Name string `json:"name"`
 
 	// Value is the literal configuration value. Do not use it for credentials:
