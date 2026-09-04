@@ -189,6 +189,7 @@ func TestReconcileCNPGClusterRemovesStaleProjectionAfterProjectRecreation(t *tes
 		t.Fatal(err)
 	}
 	desired := cnpgresources.BuildCluster(project, &project.Status.SecretNames)
+	desired.Default()
 	if !apiequality.Semantic.DeepEqual(updated.Spec.PostgresConfiguration.Parameters, desired.Spec.PostgresConfiguration.Parameters) ||
 		!apiequality.Semantic.DeepEqual(updated.Spec.PostgresConfiguration.PgHBA, desired.Spec.PostgresConfiguration.PgHBA) ||
 		!apiequality.Semantic.DeepEqual(updated.Spec.PostgresConfiguration.AdditionalLibraries, desired.Spec.PostgresConfiguration.AdditionalLibraries) ||
@@ -231,6 +232,32 @@ func TestReconcileCNPGClusterRemovesOnlyProjectOwnerAndPreservesLabels(t *testin
 	}
 	if updated.Labels["foreign.example/keep"] != preservedMetadataValue || updated.Labels[common.LabelInstance] != project.Name {
 		t.Fatalf("labels were not preserved/repaired: %#v", updated.Labels)
+	}
+}
+
+func TestReconcileCNPGClusterConvergesWithAdmissionDefaultedRetainedCluster(t *testing.T) {
+	t.Parallel()
+
+	scheme := newPowerSyncTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "retained", Namespace: "default"},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{
+			SupabaseAdmin: "retained-admin", Authenticator: "retained-authenticator", AuthAdmin: "retained-auth-admin",
+		}},
+	}
+	existing := cnpgresources.BuildCluster(project, &project.Status.SecretNames)
+	existing.Default() // Simulate CNPG admission defaults on a retained Cluster.
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, existing).Build(),
+		Scheme: scheme,
+	}
+
+	result, err := reconciler.reconcileCNPGCluster(context.Background(), project)
+	if err != nil {
+		t.Fatalf("reconcileCNPGCluster() error = %v", err)
+	}
+	if !result.IsZero() {
+		t.Fatalf("reconcileCNPGCluster() result = %#v, want no requeue for converged retained Cluster", result)
 	}
 }
 
