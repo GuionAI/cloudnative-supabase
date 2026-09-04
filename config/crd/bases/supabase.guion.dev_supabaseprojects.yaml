@@ -834,6 +834,11 @@ spec:
                 - instances
                 - storage
                 type: object
+                x-kubernetes-validations:
+                - message: backup and recovery must use distinct destinationPath values
+                    when both are enabled
+                  rule: '!has(self.backup) || !self.backup.enabled || !has(self.recovery)
+                    || !self.recovery.enabled || self.backup.destinationPath != self.recovery.destinationPath'
               gateway:
                 description: Envoy API gateway configuration
                 properties:

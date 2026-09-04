@@ -36,6 +36,11 @@ charts/cloudnative-supabase/crds # chart copy of generated CRD
 7. Wait for ready database instances.
 8. Reconcile Auth, REST, Studio, Meta, Envoy, then optional PowerSync.
 
+When backup and recovery are both enabled, their deterministic ObjectStore
+names and normalized destination paths must differ. A credentials Secret may be
+shared; prefer least-privilege IAM with recovery read access and backup write
+access instead of requiring separate Secret objects.
+
 Invalid project credentials stop before dependent workloads are changed.
 Valid credential rotation updates a deterministic non-secret pod-template hash
 on Auth, REST, Studio, and Envoy so Kubernetes performs only the required

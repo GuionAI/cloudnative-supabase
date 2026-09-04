@@ -209,7 +209,7 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// PowerSync verifies sessions through the stable public JWKS URL and does
 		// not consume any project credential value directly, so key rotation must
 		// not roll its workloads.
-		if result, err := r.reconcilePowersync(ctx, project, syncRules, ""); err != nil || result.RequeueAfter > 0 {
+		if result, err := r.reconcilePowersync(ctx, project, syncRules); err != nil || result.RequeueAfter > 0 {
 			return result, err
 		}
 	} else if err := r.cleanupPowerSync(ctx, project); err != nil {
@@ -540,7 +540,7 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 	if instance := existing.Labels[common.LabelInstance]; instance != project.Name {
 		return ctrl.Result{}, fmt.Errorf("CNPG Cluster %s has instance label %q, expected %q", existing.Name, instance, project.Name)
 	}
-	changed := removeProjectOwnerReference(existing, project)
+	changed := removeSupabaseProjectOwnerReference(existing, project.Name)
 	if mergeLabels(existing, desired.Labels) {
 		changed = true
 	}
@@ -622,8 +622,8 @@ func recoveryBootstrapIntentChanged(existing, desired *cnpgv1.Cluster) bool {
 	// The barman external-cluster plugin carries immutable source identity such
 	// as serverName and barmanObjectName. Compare its complete configuration,
 	// including any future plugin parameters, rather than just bootstrap fields.
-	existingSource := recoveryExternalCluster(existing.Spec.ExternalClusters)
-	desiredSource := recoveryExternalCluster(desired.Spec.ExternalClusters)
+	existingSource := recoveryExternalCluster(existing.Spec.ExternalClusters, recoverySourceName(existingRecovery))
+	desiredSource := recoveryExternalCluster(desired.Spec.ExternalClusters, recoverySourceName(desiredRecovery))
 	if (existingSource == nil) != (desiredSource == nil) {
 		return true
 	}
@@ -640,9 +640,19 @@ func recoveryBootstrap(bootstrap *cnpgv1.BootstrapConfiguration) (*cnpgv1.Bootst
 	return bootstrap.Recovery, true
 }
 
-func recoveryExternalCluster(clusters []cnpgv1.ExternalCluster) *cnpgv1.ExternalCluster {
+func recoverySourceName(recovery *cnpgv1.BootstrapRecovery) string {
+	if recovery == nil {
+		return ""
+	}
+	return recovery.Source
+}
+
+func recoveryExternalCluster(clusters []cnpgv1.ExternalCluster, sourceName string) *cnpgv1.ExternalCluster {
+	if sourceName == "" {
+		return nil
+	}
 	for i := range clusters {
-		if clusters[i].PluginConfiguration != nil && clusters[i].PluginConfiguration.Name == cnpg.BarmanCloudPluginName && strings.HasSuffix(clusters[i].Name, "-recovery-source") {
+		if clusters[i].Name == sourceName && clusters[i].PluginConfiguration != nil && clusters[i].PluginConfiguration.Name == cnpg.BarmanCloudPluginName {
 			return clusters[i].DeepCopy()
 		}
 	}
@@ -967,7 +977,7 @@ func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, proje
 	// Deploy Meta (postgres-meta)
 	// postgres-meta consumes no project credential material, so credential
 	// rotation must not roll this deployment.
-	if err := r.reconcileMeta(ctx, project, secretNames, ""); err != nil {
+	if err := r.reconcileMeta(ctx, project, secretNames); err != nil {
 		return err
 	}
 
@@ -1186,7 +1196,7 @@ func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project
 }
 
 // reconcileMeta deploys the Meta service
-func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus, credentialHash string) error {
+func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) error {
 	config := newServiceReconcileConfig(
 		"Meta",
 		supabasev1alpha1.ConditionTypeMetaReady,
@@ -1197,7 +1207,6 @@ func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *
 	config.logFields = []any{
 		"image", fmt.Sprintf("%s:%s", "supabase/postgres-meta", project.Spec.Meta.ImageTag),
 	}
-	config.credentialHash = credentialHash
 	return r.reconcileServiceComponent(ctx, project, config)
 }
 
@@ -1240,11 +1249,14 @@ func (r *SupabaseProjectReconciler) reconcileGateway(ctx context.Context, projec
 
 // Helper methods
 
-func removeProjectOwnerReference(object metav1.Object, project *supabasev1alpha1.SupabaseProject) bool {
-	return removeOwnerReferenceByName(object, project.Name)
-}
-
-func removeOwnerReferenceByName(object metav1.Object, projectName string) bool {
+// removeSupabaseProjectOwnerReference removes only the owner reference for
+// this operator's SupabaseProject API type and name. The UID is intentionally
+// ignored so a recreated same-name project can repair a stale reference, while
+// same-name owners from another API group remain untouched.
+func removeSupabaseProjectOwnerReference(object metav1.Object, projectName string) bool {
+	if projectName == "" {
+		return false
+	}
 	owners := object.GetOwnerReferences()
 	if len(owners) == 0 {
 		return false
@@ -1252,7 +1264,7 @@ func removeOwnerReferenceByName(object metav1.Object, projectName string) bool {
 	filtered := owners[:0]
 	changed := false
 	for _, owner := range owners {
-		if owner.Kind == "SupabaseProject" && (projectName == "" || owner.Name == projectName) {
+		if owner.APIVersion == supabasev1alpha1.GroupVersion.String() && owner.Kind == "SupabaseProject" && owner.Name == projectName {
 			changed = true
 			continue
 		}
@@ -1539,7 +1551,7 @@ func (r *SupabaseProjectReconciler) reconcileDurableMetadataProtection(ctx conte
 		if durable.object.GetLabels()[common.LabelInstance] != project.Name {
 			continue
 		}
-		if !removeOwnerReferenceByName(durable.object, project.Name) {
+		if !removeSupabaseProjectOwnerReference(durable.object, project.Name) {
 			continue
 		}
 		if err := r.Update(ctx, durable.object); err != nil {
@@ -1810,7 +1822,7 @@ func (r *SupabaseProjectReconciler) createOrUpdateObjectStore(ctx context.Contex
 	if instance := existing.Labels[common.LabelInstance]; instance != projectName {
 		return fmt.Errorf("ObjectStore %s has instance label %q, expected %q", existing.Name, instance, projectName)
 	}
-	changed := removeOwnerReferenceByName(existing, projectName)
+	changed := removeSupabaseProjectOwnerReference(existing, projectName)
 	if mergeLabels(existing, objectStore.Labels) {
 		changed = true
 	}
@@ -1874,7 +1886,7 @@ func (r *SupabaseProjectReconciler) createOrUpdateScheduledBackup(ctx context.Co
 	if instance := existing.Labels[common.LabelInstance]; instance != projectName {
 		return fmt.Errorf("ScheduledBackup %s has instance label %q, expected %q", existing.Name, instance, projectName)
 	}
-	changed := removeOwnerReferenceByName(existing, projectName)
+	changed := removeSupabaseProjectOwnerReference(existing, projectName)
 	if mergeLabels(existing, scheduledBackup.Labels) {
 		changed = true
 	}
@@ -2025,7 +2037,7 @@ func publicationIsApplied(publication *cnpgv1.Publication) bool {
 }
 
 // reconcilePowersync deploys the Powersync service (API + Replication + ConfigMaps + CronJob)
-func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, project *supabasev1alpha1.SupabaseProject, syncRulesContent []byte, credentialHash string) (ctrl.Result, error) {
+func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, project *supabasev1alpha1.SupabaseProject, syncRulesContent []byte) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.Info("Reconciling Powersync service")
 
@@ -2056,7 +2068,6 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	// Deploy Powersync API
 	apiDeployment := deployments.BuildPowersyncAPIDeployment(project, secretNames)
 	applyPowerSyncConfigHash(apiDeployment, psConfig.Data["config.json"], syncRulesContent)
-	applyProjectCredentialsHash(apiDeployment, credentialHash)
 	if err := r.createOrUpdateDeployment(ctx, project, apiDeployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "APIDeploymentFailed", err.Error())
 		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
@@ -2078,7 +2089,6 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 	// Deploy Powersync Replication
 	replDeployment := deployments.BuildPowersyncReplicationDeployment(project, secretNames)
 	applyPowerSyncConfigHash(replDeployment, psConfig.Data["config.json"], syncRulesContent)
-	applyProjectCredentialsHash(replDeployment, credentialHash)
 	if err := r.createOrUpdateDeployment(ctx, project, replDeployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "ReplicationDeploymentFailed", err.Error())
 		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {

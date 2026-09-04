@@ -139,6 +139,7 @@ type SupabaseProjectSpec struct {
 }
 
 // DatabaseSpec defines PostgreSQL configuration via CNPG
+// +kubebuilder:validation:XValidation:rule="!has(self.backup) || !self.backup.enabled || !has(self.recovery) || !self.recovery.enabled || self.backup.destinationPath != self.recovery.destinationPath",message="backup and recovery must use distinct destinationPath values when both are enabled"
 type DatabaseSpec struct {
 	// Instances is the number of PostgreSQL instances
 	// +kubebuilder:default=1

@@ -152,8 +152,8 @@ func TestReconcileCNPGClusterRemovesOnlyProjectOwnerAndPreservesLabels(t *testin
 	controller := true
 	existing := desired.DeepCopy()
 	existing.OwnerReferences = []metav1.OwnerReference{
-		{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject", Name: project.Name, UID: project.UID, Controller: &controller},
-		{APIVersion: "example.dev/v1", Kind: "DatabaseOperator", Name: "database-owner", UID: "foreign-uid"},
+		{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject", Name: project.Name, UID: "stale-project-uid", Controller: &controller},
+		{APIVersion: "example.dev/v1", Kind: "SupabaseProject", Name: project.Name, UID: "foreign-uid"},
 	}
 	existing.Labels["foreign.example/keep"] = "yes"
 	reconciler := &SupabaseProjectReconciler{
@@ -167,7 +167,7 @@ func TestReconcileCNPGClusterRemovesOnlyProjectOwnerAndPreservesLabels(t *testin
 	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(existing), updated); err != nil {
 		t.Fatal(err)
 	}
-	if len(updated.OwnerReferences) != 1 || updated.OwnerReferences[0].Kind != "DatabaseOperator" {
+	if len(updated.OwnerReferences) != 1 || updated.OwnerReferences[0].APIVersion != "example.dev/v1" || updated.OwnerReferences[0].Kind != "SupabaseProject" || updated.OwnerReferences[0].Name != project.Name {
 		t.Fatalf("owner references = %#v, want only foreign owner", updated.OwnerReferences)
 	}
 	if updated.Labels["foreign.example/keep"] != "yes" || updated.Labels[common.LabelInstance] != project.Name {
@@ -278,6 +278,43 @@ func TestRecoveryBootstrapIntentIncludesExternalSourceParameters(t *testing.T) {
 	}
 }
 
+func TestRecoveryBootstrapIgnoresUnrelatedExternalClustersInInitDBMode(t *testing.T) {
+	t.Parallel()
+
+	scheme := newPowerSyncTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "initdb-foreign-source", Namespace: "default"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Instances: 1,
+			Storage:   cnpgv1.StorageConfiguration{Size: "1Gi"},
+		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "initdb-foreign-source-admin"}},
+	}
+	desired := cnpgresources.BuildCluster(project, &project.Status.SecretNames)
+	existing := desired.DeepCopy()
+	existing.Spec.ExternalClusters = []cnpgv1.ExternalCluster{{
+		Name: "unrelated-recovery-source",
+		PluginConfiguration: &cnpgv1.PluginConfiguration{
+			Name:       cnpgresources.BarmanCloudPluginName,
+			Parameters: map[string]string{"serverName": "foreign-source"},
+		},
+	}}
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, existing).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.reconcileCNPGCluster(context.Background(), project); err != nil {
+		t.Fatalf("unrelated external cluster blocked initdb reconciliation: %v", err)
+	}
+	updated := &cnpgv1.Cluster{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(existing), updated); err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Spec.ExternalClusters) != 1 || updated.Spec.ExternalClusters[0].Name != "unrelated-recovery-source" || updated.Spec.ExternalClusters[0].PluginConfiguration.Parameters["serverName"] != "foreign-source" {
+		t.Fatalf("unrelated external cluster was not preserved: %#v", updated.Spec.ExternalClusters)
+	}
+}
+
 func TestRecoveryObjectStoreIdentityIsNotRewrittenForExistingCluster(t *testing.T) {
 	t.Parallel()
 
@@ -372,7 +409,8 @@ func TestDurableMetadataProtectionRunsBeforeInvalidCredentials(t *testing.T) {
 	controller := true
 	owner := metav1.OwnerReference{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject", Name: project.Name, UID: project.UID, Controller: &controller}
 	cluster := cnpgresources.BuildCluster(project, &supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "protected-admin"})
-	cluster.OwnerReferences = []metav1.OwnerReference{owner, {APIVersion: "example.dev/v1", Kind: "DatabaseOperator", Name: "foreign"}}
+	owner.UID = "old-project-uid"
+	cluster.OwnerReferences = []metav1.OwnerReference{owner, {APIVersion: "example.dev/v1", Kind: "SupabaseProject", Name: project.Name, UID: "foreign"}}
 	credentials := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "invalid-credentials", Namespace: project.Namespace}, Data: map[string][]byte{"publishableKey": []byte("not-valid")}}
 	reconciler := &SupabaseProjectReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, cluster, credentials).Build(),
@@ -385,7 +423,7 @@ func TestDurableMetadataProtectionRunsBeforeInvalidCredentials(t *testing.T) {
 	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(cluster), updated); err != nil {
 		t.Fatal(err)
 	}
-	if len(updated.OwnerReferences) != 1 || updated.OwnerReferences[0].Kind != "DatabaseOperator" {
+	if len(updated.OwnerReferences) != 1 || updated.OwnerReferences[0].APIVersion != "example.dev/v1" || updated.OwnerReferences[0].Kind != "SupabaseProject" || updated.OwnerReferences[0].Name != project.Name {
 		t.Fatalf("owner references after invalid validation = %#v, want foreign owner only", updated.OwnerReferences)
 	}
 	status := &supabasev1alpha1.SupabaseProject{}

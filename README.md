@@ -149,6 +149,11 @@ CNPG Cluster exists. Supported mutable settings (instances, image, resources,
 superuser access, PostgreSQL parameters, managed roles, backup plugin, and
 storage expansion) continue to converge. Storage shrink is rejected.
 
+Backup and recovery always use distinct ObjectStore names and must use distinct
+normalized `destinationPath` values. They may point at the same credentials
+Secret; use least-privilege IAM so recovery can read its source while backup can
+write its destination.
+
 ## Lifecycle and deletion
 
 The CNPG Cluster, recovery/backup ObjectStores, and ScheduledBackup are
