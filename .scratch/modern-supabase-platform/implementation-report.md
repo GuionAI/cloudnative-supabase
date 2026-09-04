@@ -5,8 +5,9 @@
 - Feature branch: `modern-supabase-platform`
 - Starting `HEAD`: `9995056` (`feat(auth): allow custom GoTrue environment (#18)`)
 - Implementation commit: `f3fd3b4` (`feat(platform): implement modern Supabase platform`)
-- Review-fix commits: `5492aa6` (`fix(platform): harden modern Supabase reconciliation`) and
-  `d9901f6` (`fix(platform): retain initdb bootstrap guard`)
+- Review-fix commits: `5492aa6` (`fix(platform): harden modern Supabase reconciliation`),
+  `d9901f6` (`fix(platform): retain initdb bootstrap guard`), and
+  `9d90d95` (`fix(recovery): validate bootstrap intent before cleanup`)
 - Worker pane: `w5P:p6`
 - Owner pane: `w5P:p1`
 - Scope: the complete `spec.md` and tickets 01–05, in dependency order
@@ -51,7 +52,7 @@ reconciliation and failure cases, retained-resource ownership, and same-name
 readoption. No live cluster, image deployment, migration, or code-review pass
 was performed; those activities are outside this implementation request.
 
-## Changed-LOC variance
+## Initial implementation Changed-LOC variance
 
 Counts are staged diff additions/deletions against the starting `HEAD`, with
 generated deepcopy/CRD files and lockfiles excluded as required:
@@ -122,3 +123,25 @@ cmp -s config/crd/bases/supabase.guion.dev_supabaseprojects.yaml \
 
 All commands passed; the two CRD copies compare byte-for-byte. No deployment or
 code-review pass was performed, per scope.
+
+## Final post-fix Changed-LOC counts
+
+The preceding variance table is the original implementation snapshot and
+predates the review-fix commits. The final post-fix counts below are measured
+with `git diff --numstat 9995056..9d90d95 -- . ':!.scratch/modern-supabase-platform/implementation-report.md'`;
+they include all implementation and review-fix changes, exclude generated
+CRD/deepcopy artifacts and this report, and classify Go files by product code
+versus behavioral tests. This keeps the reported implementation delta stable
+when the report itself is revised.
+
+| Category | Additions | Deletions | Line events |
+| --- | ---: | ---: | ---: |
+| Product code and gateway assets | 2,588 | 1,119 | 3,707 |
+| Behavioural tests and fixtures | 1,311 | 776 | 2,087 |
+| Docs and configuration | 327 | 467 | 794 |
+| **Non-generated implementation total** | **4,226** | **2,362** | **6,588** |
+
+The follow-up recovery-order fix after `5492aa6` contributes 18 product-code
+additions, one deletion, and 44 behavioral-test additions. Generated artifacts
+remain synchronized separately and are intentionally excluded from these LOC
+totals.
