@@ -2,6 +2,13 @@ package controller
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"math/big"
 	"reflect"
 	"strings"
 	"testing"
@@ -615,8 +622,10 @@ func TestRecoveryObjectStoreIdentityIsNotRewrittenForExistingCluster(t *testing.
 	oldProject.Spec.Database.Recovery.EndpointURL = "https://s3.old"
 	oldProject.Spec.Database.Recovery.S3CredentialsSecret = "old-s3"
 	store := cnpgresources.BuildRecoveryObjectStore(oldProject)
+	credentials := validProjectCredentialsSecret(t, project, "source-store-credentials")
+	project.Spec.ProjectCredentialsSecret = credentials.Name
 	reconciler := &SupabaseProjectReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, cluster, store).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, cluster, store, credentials).Build(),
 		Scheme: scheme,
 	}
 	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(project)}); err == nil {
@@ -702,8 +711,10 @@ func TestRecoveryDisableRejectsBootstrapChangeBeforeSourceCleanup(t *testing.T) 
 	}
 	cluster := cnpgresources.BuildCluster(recoveredProject, &project.Status.SecretNames)
 	sourceStore := cnpgresources.BuildRecoveryObjectStore(recoveredProject)
+	credentials := validProjectCredentialsSecret(t, project, "disable-recovery-credentials")
+	project.Spec.ProjectCredentialsSecret = credentials.Name
 	reconciler := &SupabaseProjectReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, cluster, sourceStore).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, cluster, sourceStore, credentials).Build(),
 		Scheme: scheme,
 	}
 
@@ -1008,4 +1019,55 @@ func containsRole(roles []cnpgv1.RoleConfiguration, wanted string) bool {
 		}
 	}
 	return false
+}
+
+func validProjectCredentialsSecret(t *testing.T, project *supabasev1alpha1.SupabaseProject, name string) *corev1.Secret {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate := func(value *big.Int) string {
+		encoded := make([]byte, 32)
+		bytes := value.Bytes()
+		copy(encoded[len(encoded)-len(bytes):], bytes)
+		return base64.RawURLEncoding.EncodeToString(encoded)
+	}
+	private := map[string]any{
+		"kty": "EC", "alg": "ES256", "use": "sig", "crv": "P-256", "kid": "fixture", "key_ops": []string{"sign"},
+		"x": coordinate(key.X), "y": coordinate(key.Y), "d": coordinate(key.D),
+	}
+	marshal := func(value any) []byte {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return encoded
+	}
+	encode := func(value []byte) string { return base64.RawURLEncoding.EncodeToString(value) }
+	sign := func(role string) string {
+		header := encode(marshal(map[string]string{"alg": "ES256", "kid": "fixture", "typ": "JWT"}))
+		claims := encode(marshal(map[string]any{"aud": "authenticated", "exp": int64(4102444800), "iat": int64(1700000000), "kid": "fixture", "role": role}))
+		input := header + "." + claims
+		hash := sha256.Sum256([]byte(input))
+		r, s, err := ecdsa.Sign(rand.Reader, key, hash[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		signature := make([]byte, 64)
+		copy(signature[32-len(r.Bytes()):32], r.Bytes())
+		copy(signature[64-len(s.Bytes()):], s.Bytes())
+		return input + "." + encode(signature)
+	}
+	keys := string(marshal([]any{private}))
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: project.Namespace},
+		Data: map[string][]byte{
+			secretresources.ProjectCredentialsSigningKeysKey:    []byte(keys),
+			secretresources.ProjectCredentialsPublishableKey:    []byte("sb_publishable_fixture"),
+			secretresources.ProjectCredentialsSecretKey:         []byte("sb_secret_fixture"),
+			secretresources.ProjectCredentialsAnonRoleJWTKey:    []byte(sign("anon")),
+			secretresources.ProjectCredentialsServiceRoleJWTKey: []byte(sign("service_role")),
+		},
+	}
 }
