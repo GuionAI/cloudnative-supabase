@@ -505,6 +505,10 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 	log.Info("Reconciling CNPG Cluster")
 
 	desired := cnpg.BuildCluster(project, &project.Status.SecretNames)
+	// CNPG admission defaults persisted Clusters before they reach this
+	// reconciler. Apply the same defaults to desired state so retained Clusters
+	// converge instead of being rewritten on every reconciliation.
+	desired.Default()
 
 	// Check if cluster exists
 	existing := &cnpgv1.Cluster{}
