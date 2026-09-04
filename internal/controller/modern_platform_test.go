@@ -27,6 +27,8 @@ import (
 	secretresources "github.com/GuionAI/cloudnative-supabase/internal/resources/secrets"
 )
 
+const preservedParameterValue = "keep"
+
 func TestReconcileClusterMutableFieldsPreservesForeignConfiguration(t *testing.T) {
 	project := &supabasev1alpha1.SupabaseProject{
 		ObjectMeta: metav1.ObjectMeta{Name: "mutable", Namespace: "default"},
@@ -54,7 +56,7 @@ func TestReconcileClusterMutableFieldsPreservesForeignConfiguration(t *testing.T
 	existing.Spec.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resourceQuantity("10m")}}
 	existing.Spec.EnableSuperuserAccess = ptr.To(false)
 	existing.Spec.PostgresConfiguration.Parameters = map[string]string{
-		"foreign.parameter": "keep",
+		"foreign.parameter": preservedParameterValue,
 		"operator.custom":   "old",
 	}
 	existing.Spec.PostgresConfiguration.PgHBA = append(existing.Spec.PostgresConfiguration.PgHBA, "host all foreign 10.1.0.0/16 trust")
@@ -81,7 +83,7 @@ func TestReconcileClusterMutableFieldsPreservesForeignConfiguration(t *testing.T
 	if existing.Spec.Resources.Requests.Cpu().String() != "20m" {
 		t.Fatalf("resources did not converge: %#v", existing.Spec.Resources)
 	}
-	if existing.Spec.PostgresConfiguration.Parameters["foreign.parameter"] != "keep" ||
+	if existing.Spec.PostgresConfiguration.Parameters["foreign.parameter"] != preservedParameterValue ||
 		existing.Spec.PostgresConfiguration.Parameters["operator.custom"] != "new" {
 		t.Fatalf("parameters were not merged safely: %#v", existing.Spec.PostgresConfiguration.Parameters)
 	}
@@ -139,6 +141,249 @@ func TestReconcileClusterMutableFieldsRejectsStorageShrinkWithoutMutation(t *tes
 	}
 	if !reflect.DeepEqual(existing, before) {
 		t.Fatalf("invalid shrink mutated cluster: before=%#v after=%#v", before.Spec, existing.Spec)
+	}
+}
+
+func TestCNPGOwnershipLedgerRemovesTrackedParametersAndPreservesForeign(t *testing.T) {
+	t.Parallel()
+
+	oldProject := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "ledger-parameters", Namespace: "default"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Instances:  1,
+			Storage:    cnpgv1.StorageConfiguration{Size: "1Gi"},
+			Parameters: map[string]string{"tracked.old": "old", "tracked.keep": "old"},
+		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "ledger-parameters-admin"}},
+	}
+	project := oldProject.DeepCopy()
+	project.Spec.Database.Parameters = map[string]string{"tracked.keep": "new"}
+	existing := cnpgresources.BuildCluster(oldProject, &oldProject.Status.SecretNames)
+	existing.Spec.PostgresConfiguration.Parameters["foreign.defaulted"] = "preserve"
+	if _, err := setCNPGOwnershipLedger(existing, cnpgOwnershipLedgerForProject(oldProject)); err != nil {
+		t.Fatal(err)
+	}
+	scheme := newPowerSyncTestScheme(t)
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, existing).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.reconcileCNPGCluster(context.Background(), project); err != nil {
+		t.Fatalf("reconcileCNPGCluster() error = %v", err)
+	}
+	updated := &cnpgv1.Cluster{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(existing), updated); err != nil {
+		t.Fatal(err)
+	}
+	parameters := updated.Spec.PostgresConfiguration.Parameters
+	if _, exists := parameters["tracked.old"]; exists {
+		t.Fatalf("removed project parameter was retained: %#v", parameters)
+	}
+	if parameters["tracked.keep"] != "new" || parameters["foreign.defaulted"] != "preserve" || parameters["wal_level"] == "" {
+		t.Fatalf("parameter ownership merge = %#v", parameters)
+	}
+	ledger, present, err := readCNPGOwnershipLedger(updated)
+	if err != nil || !present || !reflect.DeepEqual(ledger.Parameters, []string{"tracked.keep"}) {
+		t.Fatalf("ledger = %#v (present=%v, err=%v), want current parameter keys", ledger, present, err)
+	}
+}
+
+func TestCNPGOwnershipLedgerSeedsExplicitEmptyArraysOnCreate(t *testing.T) {
+	t.Parallel()
+
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "ledger-create", Namespace: "default"},
+		Spec:       supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{Instances: 1, Storage: cnpgv1.StorageConfiguration{Size: "1Gi"}}},
+		Status:     supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "ledger-create-admin"}},
+	}
+	scheme := newPowerSyncTestScheme(t)
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.reconcileCNPGCluster(context.Background(), project); err != nil {
+		t.Fatalf("create reconcile = %v", err)
+	}
+	cluster := &cnpgv1.Cluster{}
+	if err := reconciler.Get(context.Background(), types.NamespacedName{Name: cnpgresources.ClusterName(project), Namespace: project.Namespace}, cluster); err != nil {
+		t.Fatal(err)
+	}
+	if got := cluster.Annotations[cnpgOwnershipLedgerAnnotation]; got != `{"version":1,"parameters":[],"additionalRoles":[]}` {
+		t.Fatalf("created ledger = %q", got)
+	}
+}
+
+func TestCNPGOwnershipLedgerRemovesTrackedRolesAndPreservesForeignAndFixed(t *testing.T) {
+	t.Parallel()
+
+	oldProject := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "ledger-roles", Namespace: "default"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Instances: 1,
+			Storage:   cnpgv1.StorageConfiguration{Size: "1Gi"},
+			AdditionalRoles: []cnpgv1.RoleConfiguration{{
+				Name:   "tracked-role",
+				Ensure: cnpgv1.EnsurePresent,
+			}},
+		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "ledger-roles-admin"}},
+	}
+	project := oldProject.DeepCopy()
+	project.Spec.Database.AdditionalRoles = nil
+	existing := cnpgresources.BuildCluster(oldProject, &oldProject.Status.SecretNames)
+	existing.Spec.Managed.Roles = append(existing.Spec.Managed.Roles, cnpgv1.RoleConfiguration{Name: "foreign-role", Ensure: cnpgv1.EnsurePresent})
+	if _, err := setCNPGOwnershipLedger(existing, cnpgOwnershipLedgerForProject(oldProject)); err != nil {
+		t.Fatal(err)
+	}
+	scheme := newPowerSyncTestScheme(t)
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, existing).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.reconcileCNPGCluster(context.Background(), project); err != nil {
+		t.Fatalf("reconcileCNPGCluster() error = %v", err)
+	}
+	updated := &cnpgv1.Cluster{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(existing), updated); err != nil {
+		t.Fatal(err)
+	}
+	if !containsRole(updated.Spec.Managed.Roles, "foreign-role") || containsRole(updated.Spec.Managed.Roles, "tracked-role") {
+		t.Fatalf("managed roles = %#v, want foreign role only among custom roles", updated.Spec.Managed.Roles)
+	}
+	for _, fixed := range []string{"supabase_admin", "anon", "authenticated", "service_role"} {
+		if !containsRole(updated.Spec.Managed.Roles, fixed) {
+			t.Fatalf("fixed role %q was removed: %#v", fixed, updated.Spec.Managed.Roles)
+		}
+	}
+}
+
+func TestCNPGOwnershipLedgerMissingPreservesUntrackedValuesAndClaimsCurrent(t *testing.T) {
+	t.Parallel()
+
+	oldProject := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "ledger-missing", Namespace: "default"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Instances:  1,
+			Storage:    cnpgv1.StorageConfiguration{Size: "1Gi"},
+			Parameters: map[string]string{"old.declaration": preservedParameterValue},
+			AdditionalRoles: []cnpgv1.RoleConfiguration{{
+				Name: "old-role",
+			}},
+		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "ledger-missing-admin"}},
+	}
+	project := oldProject.DeepCopy()
+	project.Spec.Database.Parameters = map[string]string{"current.declaration": "apply"}
+	project.Spec.Database.AdditionalRoles = []cnpgv1.RoleConfiguration{{Name: "current-role"}}
+	existing := cnpgresources.BuildCluster(oldProject, &oldProject.Status.SecretNames)
+	existing.Spec.PostgresConfiguration.Parameters["foreign.defaulted"] = preservedParameterValue
+	existing.Annotations = nil // pre-ledger retained Cluster
+	scheme := newPowerSyncTestScheme(t)
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, existing).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.reconcileCNPGCluster(context.Background(), project); err != nil {
+		t.Fatalf("reconcileCNPGCluster() error = %v", err)
+	}
+	updated := &cnpgv1.Cluster{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(existing), updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Spec.PostgresConfiguration.Parameters["old.declaration"] != preservedParameterValue || updated.Spec.PostgresConfiguration.Parameters["current.declaration"] != "apply" || updated.Spec.PostgresConfiguration.Parameters["foreign.defaulted"] != preservedParameterValue {
+		t.Fatalf("missing-ledger parameters = %#v", updated.Spec.PostgresConfiguration.Parameters)
+	}
+	if !containsRole(updated.Spec.Managed.Roles, "old-role") || !containsRole(updated.Spec.Managed.Roles, "current-role") {
+		t.Fatalf("missing-ledger roles = %#v", updated.Spec.Managed.Roles)
+	}
+	ledger, present, err := readCNPGOwnershipLedger(updated)
+	if err != nil || !present || !reflect.DeepEqual(ledger.Parameters, []string{"current.declaration"}) || !reflect.DeepEqual(ledger.AdditionalRoles, []string{"current-role"}) {
+		t.Fatalf("missing-ledger adoption ledger = %#v (present=%v, err=%v)", ledger, present, err)
+	}
+}
+
+func TestCNPGOwnershipLedgerMalformedFailsBeforeClusterMutation(t *testing.T) {
+	t.Parallel()
+
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "ledger-malformed", Namespace: "default"},
+		Spec:       supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{Instances: 1, Storage: cnpgv1.StorageConfiguration{Size: "1Gi"}}},
+		Status:     supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "ledger-malformed-admin"}},
+	}
+	existing := cnpgresources.BuildCluster(project, &project.Status.SecretNames)
+	existing.Annotations = map[string]string{cnpgOwnershipLedgerAnnotation: `{"version":99,"parameters":[],"additionalRoles":[]}`}
+	controller := true
+	existing.OwnerReferences = []metav1.OwnerReference{{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject", Name: project.Name, UID: "stale", Controller: &controller}}
+	before := existing.DeepCopy()
+	scheme := newPowerSyncTestScheme(t)
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, existing).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(project)}); err == nil {
+		t.Fatal("malformed ownership ledger unexpectedly reconciled")
+	}
+	updated := &cnpgv1.Cluster{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(existing), updated); err != nil {
+		t.Fatal(err)
+	}
+	if !apiequality.Semantic.DeepEqual(updated.Spec, before.Spec) || !reflect.DeepEqual(updated.Annotations, before.Annotations) || !reflect.DeepEqual(updated.OwnerReferences, before.OwnerReferences) {
+		t.Fatalf("malformed ledger mutated Cluster: before=%#v after=%#v", before, updated)
+	}
+	status := &supabasev1alpha1.SupabaseProject{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(project), status); err != nil {
+		t.Fatal(err)
+	}
+	condition := meta.FindStatusCondition(status.Status.Conditions, supabasev1alpha1.ConditionTypeDatabaseReady)
+	if condition == nil || condition.Status != metav1.ConditionFalse || condition.Reason != "OwnershipLedgerInvalid" {
+		t.Fatalf("database condition = %#v, want OwnershipLedgerInvalid false", condition)
+	}
+}
+
+func TestCNPGOwnershipLedgerMalformedJSONIsRejected(t *testing.T) {
+	cluster := &cnpgv1.Cluster{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{cnpgOwnershipLedgerAnnotation: `{"version":1,`}}}
+	if _, _, err := readCNPGOwnershipLedger(cluster); err == nil {
+		t.Fatal("malformed ownership ledger unexpectedly parsed")
+	}
+}
+
+func TestCNPGOwnershipLedgerRemovesStaleFieldsAfterProjectRecreation(t *testing.T) {
+	t.Parallel()
+
+	oldProject := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "ledger-recreated", Namespace: "default"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Instances:       1,
+			Storage:         cnpgv1.StorageConfiguration{Size: "1Gi"},
+			Parameters:      map[string]string{"stale.parameter": "remove"},
+			AdditionalRoles: []cnpgv1.RoleConfiguration{{Name: "stale-role"}},
+		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "ledger-recreated-admin"}},
+	}
+	project := oldProject.DeepCopy()
+	project.Spec.Database.Parameters = nil
+	project.Spec.Database.AdditionalRoles = nil
+	existing := cnpgresources.BuildCluster(oldProject, &oldProject.Status.SecretNames)
+	if _, err := setCNPGOwnershipLedger(existing, cnpgOwnershipLedgerForProject(oldProject)); err != nil {
+		t.Fatal(err)
+	}
+	scheme := newPowerSyncTestScheme(t)
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, existing).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.reconcileCNPGCluster(context.Background(), project); err != nil {
+		t.Fatalf("same-name recreation reconcile = %v", err)
+	}
+	updated := &cnpgv1.Cluster{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(existing), updated); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := updated.Spec.PostgresConfiguration.Parameters["stale.parameter"]; exists || containsRole(updated.Spec.Managed.Roles, "stale-role") {
+		t.Fatalf("stale project-owned fields survived recreation: parameters=%#v roles=%#v", updated.Spec.PostgresConfiguration.Parameters, updated.Spec.Managed.Roles)
+	}
+	if got := updated.Annotations[cnpgOwnershipLedgerAnnotation]; got != `{"version":1,"parameters":[],"additionalRoles":[]}` {
+		t.Fatalf("empty recreation ledger = %q", got)
 	}
 }
 
@@ -746,6 +991,15 @@ func resourceQuantity(value string) resource.Quantity {
 func containsString(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func containsRole(roles []cnpgv1.RoleConfiguration, wanted string) bool {
+	for _, role := range roles {
+		if role.Name == wanted {
 			return true
 		}
 	}

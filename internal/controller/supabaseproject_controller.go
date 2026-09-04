@@ -20,7 +20,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,7 +68,19 @@ const (
 
 	emailHookSecretHashAnnotation    = "supabase.guion.dev/email-hook-secret-hash"
 	projectCredentialsHashAnnotation = "supabase.guion.dev/project-credentials-hash"
+	cnpgOwnershipLedgerAnnotation    = "supabase.guion.dev/cnpg-owned-fields"
+	cnpgOwnershipLedgerVersion       = 1
 )
+
+// cnpgOwnershipLedger records only the names of project-declared CNPG fields
+// that were applied on the previous reconcile. Values and role configuration
+// are intentionally absent: the retained Cluster remains the source of truth
+// for everything not explicitly owned by the current project declaration.
+type cnpgOwnershipLedger struct {
+	Version         int      `json:"version"`
+	Parameters      []string `json:"parameters"`
+	AdditionalRoles []string `json:"additionalRoles"`
+}
 
 // serviceReconcileConfig holds configuration for reconciling a service component.
 type serviceReconcileConfig struct {
@@ -505,6 +520,10 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 	log.Info("Reconciling CNPG Cluster")
 
 	desired := cnpg.BuildCluster(project, &project.Status.SecretNames)
+	currentLedger := cnpgOwnershipLedgerForProject(project)
+	if _, err := setCNPGOwnershipLedger(desired, currentLedger); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	// Check if cluster exists
 	existing := &cnpgv1.Cluster{}
@@ -538,6 +557,13 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 	if instance := existing.Labels[common.LabelInstance]; instance != project.Name {
 		return ctrl.Result{}, fmt.Errorf("CNPG Cluster %s has instance label %q, expected %q", existing.Name, instance, project.Name)
 	}
+	// Validate the retained ownership ledger before changing any Cluster
+	// metadata or spec. An unreadable ledger is ambiguous: do not guess which
+	// fields are ours and do not risk deleting a foreign/defaulted value.
+	previousLedger, ledgerPresent, err := readCNPGOwnershipLedger(existing)
+	if err != nil {
+		return ctrl.Result{}, r.failCNPGOwnershipLedger(ctx, project, err)
+	}
 	changed := removeSupabaseProjectOwnerReference(existing, project.Name)
 	if mergeLabels(existing, desired.Labels) {
 		changed = true
@@ -558,7 +584,7 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 	}
 
 	originalSpec := existing.Spec.DeepCopy()
-	mutableChanged, reconcileErr := reconcileClusterMutableFields(existing, desired)
+	mutableChanged, reconcileErr := reconcileClusterMutableFieldsWithLedger(existing, desired, previousLedger, ledgerPresent)
 	if reconcileErr != nil {
 		// Mutable reconciliation may have changed fields before discovering an
 		// invalid storage shrink. Restore the original spec and persist only the
@@ -576,6 +602,13 @@ func (r *SupabaseProjectReconciler) reconcileCNPGCluster(ctx context.Context, pr
 		return ctrl.Result{}, reconcileErr
 	}
 	changed = changed || mutableChanged
+	ledgerChanged, err := setCNPGOwnershipLedger(existing, currentLedger)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if ledgerChanged {
+		changed = true
+	}
 	if changed {
 		if err := r.Update(ctx, existing); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating CNPG cluster: %w", err)
@@ -686,10 +719,126 @@ func reconcileErrReason(err error) string {
 	return "InvalidDatabaseConfiguration"
 }
 
+func cnpgOwnershipLedgerForProject(project *supabasev1alpha1.SupabaseProject) cnpgOwnershipLedger {
+	parameters := make([]string, 0, len(project.Spec.Database.Parameters))
+	for key := range project.Spec.Database.Parameters {
+		parameters = append(parameters, key)
+	}
+	sort.Strings(parameters)
+
+	additionalRoles := make([]string, 0, len(project.Spec.Database.AdditionalRoles))
+	seenRoles := make(map[string]struct{}, len(project.Spec.Database.AdditionalRoles))
+	for _, role := range project.Spec.Database.AdditionalRoles {
+		if _, seen := seenRoles[role.Name]; seen {
+			continue
+		}
+		seenRoles[role.Name] = struct{}{}
+		additionalRoles = append(additionalRoles, role.Name)
+	}
+	sort.Strings(additionalRoles)
+
+	return cnpgOwnershipLedger{
+		Version:         cnpgOwnershipLedgerVersion,
+		Parameters:      parameters,
+		AdditionalRoles: additionalRoles,
+	}
+}
+
+func setCNPGOwnershipLedger(object metav1.Object, ledger cnpgOwnershipLedger) (bool, error) {
+	encoded, err := json.Marshal(ledger)
+	if err != nil {
+		return false, fmt.Errorf("encoding CNPG ownership ledger: %w", err)
+	}
+	annotations := object.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	value := string(encoded)
+	if annotations[cnpgOwnershipLedgerAnnotation] == value {
+		return false, nil
+	}
+	annotations[cnpgOwnershipLedgerAnnotation] = value
+	object.SetAnnotations(annotations)
+	return true, nil
+}
+
+func readCNPGOwnershipLedger(cluster *cnpgv1.Cluster) (cnpgOwnershipLedger, bool, error) {
+	if cluster == nil || cluster.Annotations == nil {
+		return cnpgOwnershipLedger{}, false, nil
+	}
+	raw, present := cluster.Annotations[cnpgOwnershipLedgerAnnotation]
+	if !present {
+		return cnpgOwnershipLedger{}, false, nil
+	}
+	if strings.TrimSpace(raw) == "" {
+		return cnpgOwnershipLedger{}, true, fmt.Errorf("CNPG ownership ledger annotation %q is empty", cnpgOwnershipLedgerAnnotation)
+	}
+
+	var ledger cnpgOwnershipLedger
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ledger); err != nil {
+		return cnpgOwnershipLedger{}, true, fmt.Errorf("CNPG ownership ledger annotation %q is malformed: %w", cnpgOwnershipLedgerAnnotation, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return cnpgOwnershipLedger{}, true, fmt.Errorf("CNPG ownership ledger annotation %q contains trailing data", cnpgOwnershipLedgerAnnotation)
+		}
+		return cnpgOwnershipLedger{}, true, fmt.Errorf("CNPG ownership ledger annotation %q is malformed: %w", cnpgOwnershipLedgerAnnotation, err)
+	}
+	if ledger.Version != cnpgOwnershipLedgerVersion {
+		return cnpgOwnershipLedger{}, true, fmt.Errorf("CNPG ownership ledger annotation %q has unsupported version %d", cnpgOwnershipLedgerAnnotation, ledger.Version)
+	}
+	if ledger.Parameters == nil || ledger.AdditionalRoles == nil {
+		return cnpgOwnershipLedger{}, true, fmt.Errorf("CNPG ownership ledger annotation %q must contain explicit parameters and additionalRoles arrays", cnpgOwnershipLedgerAnnotation)
+	}
+	if err := validateCNPGOwnershipLedgerNames(ledger.Parameters, "parameters"); err != nil {
+		return cnpgOwnershipLedger{}, true, err
+	}
+	if err := validateCNPGOwnershipLedgerNames(ledger.AdditionalRoles, "additionalRoles"); err != nil {
+		return cnpgOwnershipLedger{}, true, err
+	}
+	sort.Strings(ledger.Parameters)
+	sort.Strings(ledger.AdditionalRoles)
+	return ledger, true, nil
+}
+
+func validateCNPGOwnershipLedgerNames(names []string, field string) error {
+	seen := make(map[string]struct{}, len(names))
+	for i, name := range names {
+		if name == "" {
+			return fmt.Errorf("CNPG ownership ledger %s entry %d is empty", field, i)
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return fmt.Errorf("CNPG ownership ledger %s contains duplicate entry %q", field, name)
+		}
+		seen[name] = struct{}{}
+	}
+	return nil
+}
+
+func (r *SupabaseProjectReconciler) failCNPGOwnershipLedger(ctx context.Context, project *supabasev1alpha1.SupabaseProject, ledgerErr error) error {
+	r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "OwnershipLedgerInvalid", ledgerErr.Error())
+	r.setCondition(project, supabasev1alpha1.ConditionTypeReady, metav1.ConditionFalse, "DatabaseNotReady", "CNPG ownership ledger is invalid")
+	if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
+		return statusErr
+	}
+	return ledgerErr
+}
+
 // reconcileClusterMutableFields updates only fields this operator owns. CNPG
 // defaults and fields belonging to other controllers are intentionally left in
 // place.
 func reconcileClusterMutableFields(existing, desired *cnpgv1.Cluster) (bool, error) {
+	previousLedger, present, err := readCNPGOwnershipLedger(existing)
+	if err != nil {
+		return false, err
+	}
+	return reconcileClusterMutableFieldsWithLedger(existing, desired, previousLedger, present)
+}
+
+func reconcileClusterMutableFieldsWithLedger(existing, desired *cnpgv1.Cluster, previousLedger cnpgOwnershipLedger, previousLedgerPresent bool) (bool, error) {
 	changed := false
 	// Validate and apply storage first. This is the only mutable operation that
 	// can fail; doing it before the remaining assignments keeps this helper
@@ -724,7 +873,11 @@ func reconcileClusterMutableFields(existing, desired *cnpgv1.Cluster) (bool, err
 	// owned; preserve unrelated CNPG Postgres settings.
 	postgres := &existing.Spec.PostgresConfiguration
 	desiredPostgres := desired.Spec.PostgresConfiguration
-	mergedParameters := mergeStringMap(postgres.Parameters, desiredPostgres.Parameters)
+	var previouslyOwnedParameters []string
+	if previousLedgerPresent {
+		previouslyOwnedParameters = previousLedger.Parameters
+	}
+	mergedParameters := mergeStringMapWithLedger(postgres.Parameters, desiredPostgres.Parameters, previouslyOwnedParameters)
 	if !apiequality.Semantic.DeepEqual(postgres.Parameters, mergedParameters) {
 		postgres.Parameters = mergedParameters
 		changed = true
@@ -751,7 +904,11 @@ func reconcileClusterMutableFields(existing, desired *cnpgv1.Cluster) (bool, err
 		if existing.Spec.Managed == nil {
 			existing.Spec.Managed = &cnpgv1.ManagedConfiguration{}
 		}
-		mergedRoles := mergeManagedRoles(existing.Spec.Managed.Roles, desired.Spec.Managed.Roles)
+		var previouslyOwnedRoles []string
+		if previousLedgerPresent {
+			previouslyOwnedRoles = previousLedger.AdditionalRoles
+		}
+		mergedRoles := mergeManagedRolesWithLedger(existing.Spec.Managed.Roles, desired.Spec.Managed.Roles, previouslyOwnedRoles)
 		if !apiequality.Semantic.DeepEqual(existing.Spec.Managed.Roles, mergedRoles) {
 			existing.Spec.Managed.Roles = mergedRoles
 			changed = true
@@ -771,6 +928,10 @@ func reconcileClusterMutableFields(existing, desired *cnpgv1.Cluster) (bool, err
 // roles injected by another controller. The base Supabase and PowerSync role
 // names are operator-owned; any other existing role is foreign metadata.
 func mergeManagedRoles(existing, desired []cnpgv1.RoleConfiguration) []cnpgv1.RoleConfiguration {
+	return mergeManagedRolesWithLedger(existing, desired, nil)
+}
+
+func mergeManagedRolesWithLedger(existing, desired []cnpgv1.RoleConfiguration, previouslyOwned []string) []cnpgv1.RoleConfiguration {
 	operatorNames := map[string]struct{}{
 		"api_access_role":       {},
 		"anon":                  {},
@@ -782,6 +943,10 @@ func mergeManagedRoles(existing, desired []cnpgv1.RoleConfiguration) []cnpgv1.Ro
 		"powersync_storage":     {},
 		"powersync_replication": {},
 	}
+	staleOwnedNames := make(map[string]struct{}, len(previouslyOwned))
+	for _, name := range previouslyOwned {
+		staleOwnedNames[name] = struct{}{}
+	}
 	result := append([]cnpgv1.RoleConfiguration(nil), desired...)
 	desiredNames := make(map[string]struct{}, len(desired))
 	for _, role := range desired {
@@ -789,6 +954,9 @@ func mergeManagedRoles(existing, desired []cnpgv1.RoleConfiguration) []cnpgv1.Ro
 	}
 	for _, role := range existing {
 		if _, owned := operatorNames[role.Name]; owned {
+			continue
+		}
+		if _, stale := staleOwnedNames[role.Name]; stale {
 			continue
 		}
 		if _, alreadyDesired := desiredNames[role.Name]; alreadyDesired {
@@ -799,13 +967,18 @@ func mergeManagedRoles(existing, desired []cnpgv1.RoleConfiguration) []cnpgv1.Ro
 	return result
 }
 
-func mergeStringMap(existing, desired map[string]string) map[string]string {
-	if len(desired) == 0 {
+func mergeStringMapWithLedger(existing, desired map[string]string, previouslyOwned []string) map[string]string {
+	if len(desired) == 0 && len(previouslyOwned) == 0 {
 		return existing
 	}
 	merged := make(map[string]string, len(existing)+len(desired))
 	for key, value := range existing {
 		merged[key] = value
+	}
+	for _, key := range previouslyOwned {
+		if _, stillDesired := desired[key]; !stillDesired {
+			delete(merged, key)
+		}
 	}
 	for key, value := range desired {
 		merged[key] = value
@@ -1554,6 +1727,11 @@ func (r *SupabaseProjectReconciler) reconcileDurableMetadataProtection(ctx conte
 		}
 		if durable.object.GetLabels()[common.LabelInstance] != project.Name {
 			continue
+		}
+		if cluster, ok := durable.object.(*cnpgv1.Cluster); ok {
+			if _, _, err := readCNPGOwnershipLedger(cluster); err != nil {
+				return r.failCNPGOwnershipLedger(ctx, project, err)
+			}
 		}
 		if !removeSupabaseProjectOwnerReference(durable.object, project.Name) {
 			continue
