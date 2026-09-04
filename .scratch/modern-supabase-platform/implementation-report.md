@@ -8,8 +8,9 @@
 - Review-fix commits: `5492aa6` (`fix(platform): harden modern Supabase reconciliation`),
   `d9901f6` (`fix(platform): retain initdb bootstrap guard`),
   `9d90d95` (`fix(recovery): validate bootstrap intent before cleanup`),
-  `993e28d` (`fix(platform): tighten durable and recovery contracts`), and
-  `8b29173` (`fix(platform): finalize gateway and recovery contracts`)
+  `993e28d` (`fix(platform): tighten durable and recovery contracts`),
+  `8b29173` (`fix(platform): finalize gateway and recovery contracts`), and
+  `1d029bb` (`fix(platform): clear readiness and remove inert ingress`)
 - Worker pane: `w5P:p6`
 - Owner pane: `w5P:p1`
 - Scope: the complete `spec.md` and tickets 01–05, in dependency order
@@ -17,7 +18,7 @@
 ## Delivered acceptance criteria
 
 - **01 — ES256 project credentials:** replaced the legacy JWT/secret API with the required five-field external project credential Secret; validation covers the private P-256 ES256 signing JWK, opaque key prefixes, role JWT claims/signatures, missing and malformed fields, and safe status errors. A public-only JWKS is derived for verifiers. GoTrue receives a create-once independent fallback secret, ES256-only methods, normalized issuer, audience, and configurable access-token lifetime. PostgREST, Studio, and PowerSync receive only their permitted material. External Secret watches preserve the last valid workloads on invalid rotation and hash valid rotations into affected pod templates.
-- **02 — Envoy opaque gateway:** removed Kong and legacy/hybrid paths, added the gateway-neutral CRD/status/service/deployment contract, pinned Envoy `1.39.0`, GoTrue `2.189.0`, and PostgREST `14.12`, and added attributed Envoy assets from upstream commit `95ca3024398080ff18c9abcd1c6c8beae73fd9e1`. The gateway accepts only configured `sb_publishable_*`/`sb_secret_*` values and translates them to the corresponding internal role JWTs; private signing material and the GoTrue fallback remain excluded.
+- **02 — Envoy opaque gateway:** removed Kong, legacy/hybrid paths, and the inert GatewaySpec ingress surface; added the gateway-neutral CRD/status/service/deployment contract, pinned Envoy `1.39.0`, GoTrue `2.189.0`, and PostgREST `14.12`, and added attributed Envoy assets from upstream commit `95ca3024398080ff18c9abcd1c6c8beae73fd9e`. The gateway accepts only configured `sb_publishable_*`/`sb_secret_*` values and translates them to the corresponding internal role JWTs; private signing material and the GoTrue fallback remain excluded.
 - **03 — Recovery plus steady state:** backup and recovery can be specified together with distinct object stores. CNPG reconciliation converges supported mutable fields while preserving foreign/defaulted fields, expands storage, rejects shrink, and reports immutable recovery bootstrap changes as not-ready desired state.
 - **04 — Retained/readopted databases:** CNPG, backup/recovery ObjectStores, and ScheduledBackups are durable and not project-owned; existing project owner references are removed without disturbing unrelated metadata. Runtime resources remain garbage-collectable. Explicit namespace-safe label/name watches and same-name adoption preserve reconciliation after deletion and recreation.
 - **05 — Published contract:** README, CLAUDE guidance, samples, glossary/ADRs, generated deepcopy, and both CRD copies describe the same modern ES256/Envoy and retained-database platform. Obsolete Kong/HS256 source and tests were removed.
@@ -33,7 +34,7 @@
 
 ## Verification evidence
 
-All commands completed successfully after the final Envoy and controller changes:
+All commands completed successfully after the final review-fix changes:
 
 ```text
 make generate manifests
@@ -49,10 +50,11 @@ cmp -s config/crd/bases/supabase.guion.dev_supabaseprojects.yaml \
 
 The tests include controller/envtest coverage, complete credential fixtures,
 ES256 acceptance and HS256 rejection, public-JWKS projection, least-privilege
-pod wiring, Envoy asset parsing/rendering, rotation/watch mapping, CNPG mutable
-reconciliation and failure cases, retained-resource ownership, and same-name
-readoption. No live cluster, image deployment, migration, or code-review pass
-was performed; those activities are outside this implementation request.
+pod wiring, Envoy asset parsing/rendering, rotation/watch mapping and Ready
+status invalidation, CNPG mutable reconciliation and failure cases,
+retained-resource ownership, and same-name readoption. No live cluster, image
+deployment, migration, or code-review pass was performed; those activities are
+outside this implementation request.
 
 ## Initial implementation Changed-LOC variance
 
@@ -112,6 +114,13 @@ PowerSync no longer carry unused credential-hash parameters or annotations,
 and recovery-source comparison uses the exact bootstrap source name so
 unrelated external clusters are preserved.
 
+Credential and implementation-secret failures now clear the aggregate Ready
+condition before returning, with safe branch-specific SecretsReady reasons;
+invalid rotation tests verify all existing workload specs remain unchanged.
+Gateway Deployment, Service, Studio URL wiring, and status endpoints share the
+single common `<project>-api-gw` naming helper, and GatewaySpec no longer
+contains an unimplemented ingress field or type.
+
 Compatibility-only `syncManagedRoles`, variadic credential/hash seams, and the
 unused gateway secret-status argument were removed; gateway reconciliation now
 uses the shared service-component path while retaining endpoint/status updates.
@@ -141,7 +150,7 @@ code-review pass was performed, per scope.
 
 The preceding variance table is the original implementation snapshot and
 predates the review-fix commits. The final post-fix counts below are measured
-with the final implementation commit range `git diff --numstat 9995056..8b29173 -- . ':!.scratch/modern-supabase-platform/implementation-report.md'`;
+with the final implementation commit range `git diff --numstat 9995056..1d029bb -- . ':!.scratch/modern-supabase-platform/implementation-report.md'`;
 they include all implementation and review-fix changes, exclude generated
 CRD/deepcopy artifacts and this report, and classify Go files by product code
 versus behavioral tests. This keeps the reported implementation delta stable
@@ -149,14 +158,15 @@ when the report itself is revised.
 
 | Category | Additions | Deletions | Line events |
 | --- | ---: | ---: | ---: |
-| Product code and gateway assets | 2,578 | 1,115 | 3,693 |
-| Behavioural tests and fixtures | 1,441 | 776 | 2,217 |
+| Product code and gateway assets | 2,575 | 1,146 | 3,721 |
+| Behavioural tests and fixtures | 1,495 | 776 | 2,271 |
 | Docs and configuration | 341 | 466 | 807 |
-| **Non-generated implementation total** | **4,360** | **2,357** | **6,717** |
+| **Non-generated implementation total** | **4,411** | **2,388** | **6,799** |
 
 The recovery-order fix in `9d90d95` contributes 18 product-code additions, one
 deletion, and 44 behavioral-test additions. The final contract-tightening batch
 in `993e28d` contributes 32 product-code additions, 21 deletions, 72
 behavioral-test additions, five test deletions, and 10 documentation additions.
-Generated artifacts remain synchronized separately and are intentionally
+The final readiness/Ingress/naming batch in `1d029bb` is included in the totals
+above; generated artifacts remain synchronized separately and are intentionally
 excluded from these LOC totals.
