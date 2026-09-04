@@ -12,19 +12,19 @@ const (
 
 	// Auth (GoTrue) image defaults
 	AuthImage = "supabase/gotrue"
-	AuthTag   = "v2.184.0"
+	AuthTag   = "v2.189.0"
 
 	// Rest (PostgREST) image defaults
 	RestImage = "postgrest/postgrest"
-	RestTag   = "v14.1"
+	RestTag   = "v14.12"
 
 	// Meta (postgres-meta) image defaults
 	MetaImage = "supabase/postgres-meta"
 	MetaTag   = "v0.95.1"
 
-	// Kong image defaults
-	KongImage = "kong"
-	KongTag   = "2.8.1"
+	// Envoy image defaults (pinned to the upstream self-hosted configuration)
+	EnvoyImage = "envoyproxy/envoy"
+	EnvoyTag   = "v1.39.0"
 
 	// Powersync image defaults
 	PowersyncImage = "journeyapps/powersync-service"

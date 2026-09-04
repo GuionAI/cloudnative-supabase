@@ -125,7 +125,7 @@ func TestOwnedResourceHelpersRepairClearedFields(t *testing.T) {
 		}},
 	}
 	secretNames := supabasev1alpha1.SecretNamesStatus{
-		JWT: "app-jwt", AuthAdmin: "app-auth-admin-password",
+		GoTrueFallback: "app-gotrue-jwt-secret", AuthAdmin: "app-auth-admin-password",
 	}
 	existingDeployment := deploymentresources.BuildAuthDeployment(project, &secretNames)
 	project.Spec.Auth.EmailHook.Enabled = false
@@ -196,39 +196,6 @@ func TestOwnedResourceHelpersRepairClearedFields(t *testing.T) {
 	}
 	if updatedObjectStore.Spec.InstanceSidecarConfiguration.LogLevel != "info" {
 		t.Fatalf("API-managed sidecar settings were overwritten: %#v", updatedObjectStore.Spec.InstanceSidecarConfiguration)
-	}
-}
-
-func TestReconcileSecretsSkipsUnchangedStatusUpdate(t *testing.T) {
-	t.Parallel()
-
-	scheme := newIdempotencyTestScheme(t)
-	project := &supabasev1alpha1.SupabaseProject{
-		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default", UID: "project-uid"},
-		Status: supabasev1alpha1.SupabaseProjectStatus{
-			Phase: supabasev1alpha1.PhaseRunning,
-		},
-	}
-	objects := make([]client.Object, 0, 5)
-	objects = append(objects, project)
-	for _, name := range []string{"app-jwt", "app-supabase-admin-password", "app-authenticator-password", "app-auth-admin-password"} {
-		objects = append(objects, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}})
-	}
-	countingClient := &updateCountingClient{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(objects...).Build(),
-	}
-	reconciler := &SupabaseProjectReconciler{Client: countingClient, Scheme: scheme}
-
-	ctx := context.Background()
-	if err := reconciler.reconcileSecrets(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	countingClient.statusUpdates.Store(0)
-	if err := reconciler.reconcileSecrets(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	if got := countingClient.statusUpdates.Load(); got != 0 {
-		t.Fatalf("unchanged status updates = %d, want 0", got)
 	}
 }
 

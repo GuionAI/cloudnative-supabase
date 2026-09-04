@@ -48,6 +48,10 @@ func ClusterRWServiceName(project *supabasev1alpha1.SupabaseProject) string {
 func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supabasev1alpha1.SecretNamesStatus) *cnpgv1.Cluster {
 	name := ClusterName(project)
 	spec := project.Spec.Database
+	instances := spec.Instances
+	if instances <= 0 {
+		instances = 1
+	}
 
 	// Determine image
 	image := fmt.Sprintf("%s:%s", defaults.PostgresImage, defaults.PostgresTag)
@@ -62,7 +66,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 			Labels:    common.ComponentLabels(project, "postgresql"),
 		},
 		Spec: cnpgv1.ClusterSpec{
-			Instances:             int(spec.Instances),
+			Instances:             int(instances),
 			ImageName:             image,
 			EnableSuperuserAccess: ptr.To(spec.EnableSuperuserAccess),
 
@@ -104,7 +108,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 
 	// Enable pod anti-affinity for HA when multiple instances
 	// Uses soft anti-affinity (preferred) so pods still schedule on single-node clusters
-	if spec.Instances > 1 {
+	if instances > 1 {
 		cluster.Spec.Affinity = cnpgv1.AffinityConfiguration{
 			EnablePodAntiAffinity: ptr.To(true),
 		}

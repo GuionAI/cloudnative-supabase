@@ -27,6 +27,7 @@ import (
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
+	secretresources "github.com/GuionAI/cloudnative-supabase/internal/resources/secrets"
 )
 
 const (
@@ -67,7 +68,7 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 	replicas := NormalizeReplicas(spec.Replicas)
 
 	// Build internal service URLs
-	kongService := project.Name + "-kong"
+	gatewayService := project.Name + "-api-gw"
 	metaService := project.Name + "-meta"
 
 	env := []corev1.EnvVar{
@@ -85,7 +86,7 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 		{Name: "STUDIO_DEFAULT_PROJECT", Value: projName},
 
 		// Internal service URLs
-		{Name: "SUPABASE_URL", Value: fmt.Sprintf("http://%s:8000", kongService)},
+		{Name: "SUPABASE_URL", Value: fmt.Sprintf("http://%s:8000", gatewayService)},
 		{Name: "STUDIO_PG_META_URL", Value: fmt.Sprintf("http://%s:8080", metaService)},
 
 		// Public URL for auth redirects
@@ -115,15 +116,17 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 			},
 		},
 
-		// JWT keys
+		// Studio's supported historical variable names carry the opaque project
+		// keys and the pre-signed internal role tokens. It never receives the
+		// private signing JWK or GoTrue fallback value.
 		{
 			Name: "SUPABASE_ANON_KEY",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: secretNames.JWT,
+						Name: project.Spec.ProjectCredentialsSecret,
 					},
-					Key: "anonKey",
+					Key: secretresources.ProjectCredentialsPublishableKey,
 				},
 			},
 		},
@@ -132,20 +135,31 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: secretNames.JWT,
+						Name: project.Spec.ProjectCredentialsSecret,
 					},
-					Key: "serviceKey",
+					Key: secretresources.ProjectCredentialsSecretKey,
 				},
 			},
 		},
 		{
-			Name: "AUTH_JWT_SECRET",
+			Name: "SUPABASE_ANON_KEY_ASYMMETRIC",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: secretNames.JWT,
+						Name: project.Spec.ProjectCredentialsSecret,
 					},
-					Key: "secret",
+					Key: secretresources.ProjectCredentialsAnonRoleJWTKey,
+				},
+			},
+		},
+		{
+			Name: "SUPABASE_SERVICE_KEY_ASYMMETRIC",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: project.Spec.ProjectCredentialsSecret,
+					},
+					Key: secretresources.ProjectCredentialsServiceRoleJWTKey,
 				},
 			},
 		},

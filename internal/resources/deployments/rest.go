@@ -27,6 +27,7 @@ import (
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/configmaps"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
 )
 
@@ -95,17 +96,19 @@ func BuildRestDeployment(project *supabasev1alpha1.SupabaseProject, secretNames 
 			},
 		},
 
-		// JWT secret
+		// PostgREST receives only the public verifier projection. The ConfigMap is
+		// generated from the externally managed signing key and never contains
+		// private material or a shared HMAC secret.
 		corev1.EnvVar{
 			Name: "PGRST_JWT_SECRET",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: secretNames.JWT,
-					},
-					Key: "secret",
-				},
-			},
+			ValueFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: common.JWKSConfigMapName(project)},
+				Key:                  configmaps.JWKSDataKey,
+			}},
+		},
+		corev1.EnvVar{
+			Name:  "PGRST_JWT_ALG",
+			Value: "ES256",
 		},
 
 		// Database URI (constructed from env vars)

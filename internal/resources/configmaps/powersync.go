@@ -69,9 +69,11 @@ type powersyncConnection struct {
 }
 
 type powersyncClientAuth struct {
-	Supabase          bool     `json:"supabase"`
-	SupabaseJWTSecret string   `json:"supabase_jwt_secret"`
-	Audience          []string `json:"audience"`
+	// Supabase is kept false so PowerSync does not enable its legacy HMAC
+	// integration. JWTs are verified through the public JWKS URI instead.
+	Supabase bool     `json:"supabase"`
+	JWKSURI  string   `json:"jwks_uri"`
+	Audience []string `json:"audience"`
 }
 
 type powersyncDev struct {
@@ -111,9 +113,9 @@ func BuildPowersyncConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.
 		},
 		Dev: powersyncDev{DemoAuth: false},
 		ClientAuth: powersyncClientAuth{
-			Supabase:          true,
-			SupabaseJWTSecret: "{{ env.PS_JWT_SECRET }}",
-			Audience:          []string{"authenticated"},
+			Supabase: false,
+			JWKSURI:  common.AuthJWKSURL(project.Spec.Auth.ExternalURL),
+			Audience: []string{"authenticated"},
 		},
 		Migrations: powersyncMigrations{DisableAutoMigration: false},
 		Port:       8080,

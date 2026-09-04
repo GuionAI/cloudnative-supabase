@@ -23,15 +23,14 @@ import (
 const (
 	// DefaultAccessTokenExpiration is the default expiration for user access tokens (1 hour).
 	// This is passed to GoTrue via GOTRUE_JWT_EXP.
-	// Note: API keys (anon/service_role) use a separate 5-year expiration.
 	DefaultAccessTokenExpiration = 3600
 )
 
 // GetAccessTokenExpiration returns the access token expiration in seconds.
 // Used for GOTRUE_JWT_EXP - controls how long user sessions last.
 func GetAccessTokenExpiration(project *supabasev1alpha1.SupabaseProject) int {
-	if project.Spec.JWT != nil && project.Spec.JWT.ExpirationSeconds > 0 {
-		return project.Spec.JWT.ExpirationSeconds
+	if project.Spec.Auth.AccessTokenExpirationSeconds > 0 {
+		return project.Spec.Auth.AccessTokenExpirationSeconds
 	}
 	return DefaultAccessTokenExpiration
 }

@@ -7,6 +7,8 @@ metadata:
   name: example
   namespace: example
 spec:
+  # Orphaned Secret synchronized by the external credential manager.
+  projectCredentialsSecret: example-project-credentials
   database:
     instances: 1
     storage:
@@ -36,7 +38,7 @@ spec:
     organizationName: Example Org
     projectName: Example Project
 
-  # meta and kong use defaults (always enabled)
+  # Meta and Envoy use defaults (all core services are always enabled).
 
   # Optional PowerSync offline-first sync. Sync Streams are required and should
   # select explicit columns guarded by auth.user_id().

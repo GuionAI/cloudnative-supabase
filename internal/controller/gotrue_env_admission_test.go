@@ -15,7 +15,8 @@ var _ = Describe("GoTrue environment admission", func() {
 		return &supabasev1alpha1.SupabaseProject{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
 			Spec: supabasev1alpha1.SupabaseProjectSpec{
-				Database: supabasev1alpha1.DatabaseSpec{Instances: 1, Storage: cnpgv1.StorageConfiguration{Size: "1Gi"}},
+				ProjectCredentialsSecret: "project-credentials",
+				Database:                 supabasev1alpha1.DatabaseSpec{Instances: 1, Storage: cnpgv1.StorageConfiguration{Size: "1Gi"}},
 				Auth: supabasev1alpha1.AuthSpec{
 					SiteURL:     "https://app.example.com",
 					ExternalURL: "https://auth.example.com",

@@ -289,7 +289,7 @@ func TestBuildPowersyncEnvVars(t *testing.T) {
 		envMap[e.Name] = struct{}{}
 	}
 
-	required := []string{"POWERSYNC_CONFIG_PATH", "NODE_OPTIONS", "LOG_FORMAT", "METRICS_PORT", "MICRO_PROBE_TYPE", "PS_STORAGE_PASSWORD", "PS_REPLICATION_PASSWORD", "PS_POWERSYNC_STORAGE_URI", "PS_POWERSYNC_REPLICATION_URI", "PS_JWT_SECRET"}
+	required := []string{"POWERSYNC_CONFIG_PATH", "NODE_OPTIONS", "LOG_FORMAT", "METRICS_PORT", "MICRO_PROBE_TYPE", "PS_STORAGE_PASSWORD", "PS_REPLICATION_PASSWORD", "PS_POWERSYNC_STORAGE_URI", "PS_POWERSYNC_REPLICATION_URI"}
 	for _, name := range required {
 		if _, ok := envMap[name]; !ok {
 			t.Errorf("missing required env var: %s", name)

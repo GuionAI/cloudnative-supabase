@@ -21,7 +21,10 @@ func newTestProject(namespace string) *supabasev1alpha1.SupabaseProject {
 
 func newTestSecretNames() *supabasev1alpha1.SecretNamesStatus {
 	return &supabasev1alpha1.SecretNamesStatus{
-		JWT:                          "test-jwt",
+		GoTrueFallback:               "test-gotrue-jwt-secret",
+		SupabaseAdmin:                "test-supabase-admin-password",
+		Authenticator:                "test-authenticator-password",
+		AuthAdmin:                    "test-auth-admin-password",
 		PowersyncStoragePassword:     "test-powersync-storage-password",
 		PowersyncReplicationPassword: "test-powersync-replication-password",
 	}

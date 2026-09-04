@@ -54,6 +54,12 @@ spec:
               auth:
                 description: Auth service configuration (GoTrue)
                 properties:
+                  accessTokenExpirationSeconds:
+                    default: 3600
+                    description: AccessTokenExpirationSeconds controls the lifetime
+                      of user sessions.
+                    minimum: 1
+                    type: integer
                   autoConfirmEmail:
                     default: true
                     description: AutoConfirmEmail enables automatic email confirmation
@@ -825,50 +831,12 @@ spec:
                 - instances
                 - storage
                 type: object
-                x-kubernetes-validations:
-                - message: backup and recovery cannot both be enabled
-                  rule: '!(has(self.backup) && self.backup.enabled && has(self.recovery)
-                    && self.recovery.enabled)'
-              imagePullSecrets:
-                description: ImagePullSecrets for all deployments
-                items:
-                  description: |-
-                    LocalObjectReference contains enough information to let you locate the
-                    referenced object inside the same namespace.
-                  properties:
-                    name:
-                      default: ""
-                      description: |-
-                        Name of the referent.
-                        This field is effectively required, but due to backwards compatibility is
-                        allowed to be empty. Instances of this type with an empty value here are
-                        almost certainly wrong.
-                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                      type: string
-                  type: object
-                  x-kubernetes-map-type: atomic
-                type: array
-              jwt:
-                description: |-
-                  JWT configuration (auto-generated if not provided)
-                  Deprecated: Use secrets.jwt instead
-                properties:
-                  expirationSeconds:
-                    default: 3600
-                    description: ExpirationSeconds for generated tokens
-                    type: integer
-                  secretRef:
-                    description: |-
-                      SecretRef references an existing JWT secret
-                      If not provided, a secret will be auto-generated
-                    type: string
-                type: object
-              kong:
-                description: Kong API gateway configuration
+              gateway:
+                description: Envoy API gateway configuration
                 properties:
                   imageTag:
-                    description: ImageTag for kong (defaults to operator version if
-                      empty)
+                    description: ImageTag for Envoy (defaults to the pinned operator
+                      version if empty)
                     type: string
                   ingress:
                     description: Ingress configuration
@@ -905,7 +873,7 @@ spec:
                     format: int32
                     type: integer
                   resources:
-                    description: Resources for Kong pods
+                    description: Resources for gateway pods
                     properties:
                       claims:
                         description: |-
@@ -964,6 +932,25 @@ spec:
                         type: object
                     type: object
                 type: object
+              imagePullSecrets:
+                description: ImagePullSecrets for all deployments
+                items:
+                  description: |-
+                    LocalObjectReference contains enough information to let you locate the
+                    referenced object inside the same namespace.
+                  properties:
+                    name:
+                      default: ""
+                      description: |-
+                        Name of the referent.
+                        This field is effectively required, but due to backwards compatibility is
+                        allowed to be empty. Instances of this type with an empty value here are
+                        almost certainly wrong.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      type: string
+                  type: object
+                  x-kubernetes-map-type: atomic
+                type: array
               meta:
                 description: Meta service configuration (postgres-meta)
                 properties:
@@ -1287,6 +1274,12 @@ spec:
                 required:
                 - syncRules
                 type: object
+              projectCredentialsSecret:
+                description: |-
+                  ProjectCredentialsSecret references the externally managed project
+                  credential bundle. The Secret is intentionally not owned by the operator.
+                minLength: 1
+                type: string
               rest:
                 description: Rest service configuration (PostgREST)
                 properties:
@@ -1366,62 +1359,6 @@ spec:
                       type: string
                     type: array
                 type: object
-              secrets:
-                description: |-
-                  Secrets configuration for migration support
-                  When autoGenerate is false, user must provide all secret references
-                properties:
-                  authAdmin:
-                    description: |-
-                      AuthAdmin references an existing secret containing 'username' and 'password' keys
-                      for the supabase_auth_admin database role (used by GoTrue).
-                      Required when autoGenerate is false.
-                    type: string
-                  authenticator:
-                    description: |-
-                      Authenticator references an existing secret containing 'username' and 'password' keys
-                      for the authenticator database role (used by PostgREST).
-                      Required when autoGenerate is false.
-                    type: string
-                  autoGenerate:
-                    default: true
-                    description: |-
-                      AutoGenerate controls whether the operator generates secrets automatically.
-                      Set to false when migrating from an existing cluster with pre-existing secrets.
-                    type: boolean
-                  jwt:
-                    description: |-
-                      JWT references an existing JWT secret containing 'secret', 'anonKey', and 'serviceKey' keys.
-                      Required when autoGenerate is false.
-                    type: string
-                  powersyncReplicationPassword:
-                    description: |-
-                      PowersyncReplicationPassword references an existing secret containing 'username' and 'password' keys
-                      for the powersync_replication database role.
-                      Required when PowerSync is enabled and autoGenerate is false.
-                    minLength: 1
-                    type: string
-                  powersyncStoragePassword:
-                    description: |-
-                      PowersyncStoragePassword references an existing secret containing 'username' and 'password' keys
-                      for the powersync_storage database role.
-                      Required when PowerSync is enabled and autoGenerate is false.
-                    minLength: 1
-                    type: string
-                  supabaseAdmin:
-                    description: |-
-                      SupabaseAdmin references an existing secret containing 'username' and 'password' keys
-                      for the supabase_admin database role.
-                      Required when autoGenerate is false.
-                    type: string
-                required:
-                - autoGenerate
-                type: object
-                x-kubernetes-validations:
-                - message: all secret refs are required when autoGenerate is false
-                  rule: self.autoGenerate || (self.jwt.size() > 0 && self.supabaseAdmin.size()
-                    > 0 && self.authenticator.size() > 0 && self.authAdmin.size()
-                    > 0)
               studio:
                 description: Studio dashboard configuration
                 properties:
@@ -1508,12 +1445,8 @@ spec:
             required:
             - auth
             - database
+            - projectCredentialsSecret
             type: object
-            x-kubernetes-validations:
-            - message: PowerSync secret refs are required when PowerSync is enabled
-                and autoGenerate is false
-              rule: '!has(self.powersync) || !has(self.secrets) || self.secrets.autoGenerate
-                || (has(self.secrets.powersyncStoragePassword) && has(self.secrets.powersyncReplicationPassword))'
           status:
             description: SupabaseProjectStatus defines the observed state of SupabaseProject
             properties:
@@ -1600,7 +1533,7 @@ spec:
                 description: Endpoints contains service endpoints
                 properties:
                   api:
-                    description: API is the Kong gateway endpoint (internal)
+                    description: API is the Envoy gateway endpoint (internal)
                     type: string
                   database:
                     description: Database is the PostgreSQL connection endpoint
@@ -1635,8 +1568,9 @@ spec:
                       EmailHook is the name of the send-email webhook signing secret.
                       The secret contains the fixed key 'secret'.
                     type: string
-                  jwt:
-                    description: JWT is the name of the JWT secret
+                  goTrueFallback:
+                    description: GoTrueFallback is the name of the GoTrue-only fallback
+                      secret
                     type: string
                   powersyncReplicationPassword:
                     description: PowersyncReplicationPassword is the name of the powersync_replication
@@ -1668,7 +1602,7 @@ spec:
                     required:
                     - ready
                     type: object
-                  kong:
+                  gateway:
                     description: ServiceStatus defines individual service status
                     properties:
                       availableReplicas:

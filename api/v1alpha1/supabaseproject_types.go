@@ -81,8 +81,8 @@ const (
 	// ConditionTypeMetaReady indicates postgres-meta is ready
 	ConditionTypeMetaReady = "MetaReady"
 
-	// ConditionTypeKongReady indicates Kong is ready
-	ConditionTypeKongReady = "KongReady"
+	// ConditionTypeGatewayReady indicates the Envoy gateway is ready
+	ConditionTypeGatewayReady = "GatewayReady"
 
 	// ConditionTypeBackupReady indicates backup infrastructure is ready
 	ConditionTypeBackupReady = "BackupReady"
@@ -98,21 +98,16 @@ const (
 )
 
 // SupabaseProjectSpec defines the desired state of SupabaseProject
-// +kubebuilder:validation:XValidation:rule="!has(self.powersync) || !has(self.secrets) || self.secrets.autoGenerate || (has(self.secrets.powersyncStoragePassword) && has(self.secrets.powersyncReplicationPassword))",message="PowerSync secret refs are required when PowerSync is enabled and autoGenerate is false"
 type SupabaseProjectSpec struct {
 	// Database configuration for CNPG PostgreSQL cluster
 	// +required
 	Database DatabaseSpec `json:"database"`
 
-	// Secrets configuration for migration support
-	// When autoGenerate is false, user must provide all secret references
-	// +optional
-	Secrets *SecretsSpec `json:"secrets,omitempty"`
-
-	// JWT configuration (auto-generated if not provided)
-	// Deprecated: Use secrets.jwt instead
-	// +optional
-	JWT *JWTSpec `json:"jwt,omitempty"`
+	// ProjectCredentialsSecret references the externally managed project
+	// credential bundle. The Secret is intentionally not owned by the operator.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	ProjectCredentialsSecret string `json:"projectCredentialsSecret"`
 
 	// Auth service configuration (GoTrue)
 	// +required
@@ -130,9 +125,9 @@ type SupabaseProjectSpec struct {
 	// +optional
 	Meta MetaSpec `json:"meta,omitempty"`
 
-	// Kong API gateway configuration
+	// Envoy API gateway configuration
 	// +optional
-	Kong KongSpec `json:"kong,omitempty"`
+	Gateway GatewaySpec `json:"gateway,omitempty"`
 
 	// Powersync offline-first sync configuration (optional - presence enables Powersync)
 	// +optional
@@ -144,7 +139,6 @@ type SupabaseProjectSpec struct {
 }
 
 // DatabaseSpec defines PostgreSQL configuration via CNPG
-// +kubebuilder:validation:XValidation:rule="!(has(self.backup) && self.backup.enabled && has(self.recovery) && self.recovery.enabled)",message="backup and recovery cannot both be enabled"
 type DatabaseSpec struct {
 	// Instances is the number of PostgreSQL instances
 	// +kubebuilder:default=1
@@ -264,65 +258,6 @@ type RecoverySpec struct {
 	S3Config `json:",inline"`
 }
 
-// JWTSpec defines JWT configuration
-type JWTSpec struct {
-	// SecretRef references an existing JWT secret
-	// If not provided, a secret will be auto-generated
-	// +optional
-	SecretRef string `json:"secretRef,omitempty"`
-
-	// ExpirationSeconds for generated tokens
-	// +kubebuilder:default=3600
-	// +optional
-	ExpirationSeconds int `json:"expirationSeconds,omitempty"`
-}
-
-// SecretsSpec defines secrets configuration for migration support
-// +kubebuilder:validation:XValidation:rule="self.autoGenerate || (self.jwt.size() > 0 && self.supabaseAdmin.size() > 0 && self.authenticator.size() > 0 && self.authAdmin.size() > 0)",message="all secret refs are required when autoGenerate is false"
-type SecretsSpec struct {
-	// AutoGenerate controls whether the operator generates secrets automatically.
-	// Set to false when migrating from an existing cluster with pre-existing secrets.
-	// +kubebuilder:default=true
-	AutoGenerate bool `json:"autoGenerate"`
-
-	// JWT references an existing JWT secret containing 'secret', 'anonKey', and 'serviceKey' keys.
-	// Required when autoGenerate is false.
-	// +optional
-	JWT string `json:"jwt,omitempty"`
-
-	// SupabaseAdmin references an existing secret containing 'username' and 'password' keys
-	// for the supabase_admin database role.
-	// Required when autoGenerate is false.
-	// +optional
-	SupabaseAdmin string `json:"supabaseAdmin,omitempty"`
-
-	// Authenticator references an existing secret containing 'username' and 'password' keys
-	// for the authenticator database role (used by PostgREST).
-	// Required when autoGenerate is false.
-	// +optional
-	Authenticator string `json:"authenticator,omitempty"`
-
-	// AuthAdmin references an existing secret containing 'username' and 'password' keys
-	// for the supabase_auth_admin database role (used by GoTrue).
-	// Required when autoGenerate is false.
-	// +optional
-	AuthAdmin string `json:"authAdmin,omitempty"`
-
-	// PowersyncStoragePassword references an existing secret containing 'username' and 'password' keys
-	// for the powersync_storage database role.
-	// Required when PowerSync is enabled and autoGenerate is false.
-	// +kubebuilder:validation:MinLength=1
-	// +optional
-	PowersyncStoragePassword string `json:"powersyncStoragePassword,omitempty"`
-
-	// PowersyncReplicationPassword references an existing secret containing 'username' and 'password' keys
-	// for the powersync_replication database role.
-	// Required when PowerSync is enabled and autoGenerate is false.
-	// +kubebuilder:validation:MinLength=1
-	// +optional
-	PowersyncReplicationPassword string `json:"powersyncReplicationPassword,omitempty"`
-}
-
 // AuthSpec defines GoTrue auth service configuration
 type AuthSpec struct {
 	// Image tag for supabase/gotrue (defaults to operator version if empty)
@@ -341,6 +276,12 @@ type AuthSpec struct {
 	// ExternalURL is the public URL of the auth service
 	// +required
 	ExternalURL string `json:"externalURL"`
+
+	// AccessTokenExpirationSeconds controls the lifetime of user sessions.
+	// +kubebuilder:default=3600
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	AccessTokenExpirationSeconds int `json:"accessTokenExpirationSeconds,omitempty"`
 
 	// DisableSignup prevents new user registrations
 	// +kubebuilder:default=false
@@ -557,9 +498,9 @@ type MetaSpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
-// KongSpec defines Kong API gateway configuration
-type KongSpec struct {
-	// ImageTag for kong (defaults to operator version if empty)
+// GatewaySpec defines Envoy API gateway configuration
+type GatewaySpec struct {
+	// ImageTag for Envoy (defaults to the pinned operator version if empty)
 	// +optional
 	ImageTag string `json:"imageTag,omitempty"`
 
@@ -572,7 +513,7 @@ type KongSpec struct {
 	// +optional
 	Ingress *IngressSpec `json:"ingress,omitempty"`
 
-	// Resources for Kong pods
+	// Resources for gateway pods
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
@@ -768,7 +709,7 @@ type ServicesStatus struct {
 	// +optional
 	Meta ServiceStatus `json:"meta,omitempty"`
 	// +optional
-	Kong ServiceStatus `json:"kong,omitempty"`
+	Gateway ServiceStatus `json:"gateway,omitempty"`
 	// +optional
 	PowersyncAPI ServiceStatus `json:"powersyncApi,omitempty"`
 	// +optional
@@ -787,9 +728,9 @@ type ServiceStatus struct {
 
 // SecretNamesStatus contains resolved secret names
 type SecretNamesStatus struct {
-	// JWT is the name of the JWT secret
+	// GoTrueFallback is the name of the GoTrue-only fallback secret
 	// +optional
-	JWT string `json:"jwt,omitempty"`
+	GoTrueFallback string `json:"goTrueFallback,omitempty"`
 
 	// SupabaseAdmin is the name of the supabase_admin password secret
 	// +optional
@@ -819,7 +760,7 @@ type SecretNamesStatus struct {
 
 // EndpointsStatus contains service endpoints
 type EndpointsStatus struct {
-	// API is the Kong gateway endpoint (internal)
+	// API is the Envoy gateway endpoint (internal)
 	// +optional
 	API string `json:"api,omitempty"`
 

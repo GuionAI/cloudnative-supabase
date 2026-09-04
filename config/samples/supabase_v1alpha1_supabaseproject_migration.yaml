@@ -1,38 +1,32 @@
-# Example: Migrating from an existing Supabase deployment
-# Use this when you have existing secrets and want to preserve them.
-#
-# Prerequisites:
-# 1. Create your secrets before applying this CR
-# 2. Ensure secrets have the required keys:
-#    - JWT secret: 'secret', 'anonKey', 'serviceKey'
-#    - Role secrets: 'username', 'password'
+# Example: adopting a preserved database with simultaneous recovery and
+# steady-state backup. The credential and S3 Secrets are managed separately.
 apiVersion: supabase.guion.dev/v1alpha1
 kind: SupabaseProject
 metadata:
-  labels:
-    app.kubernetes.io/name: cloudnative-supabase
-    app.kubernetes.io/managed-by: kustomize
   name: flicknote
   namespace: flicknote
 spec:
-  # Disable automatic secret generation and use existing secrets
-  secrets:
-    autoGenerate: false
-    jwt: supabase-jwt
-    supabaseAdmin: cnpg-supabase-admin-password
-    authenticator: cnpg-authenticator-password
-    authAdmin: cnpg-supabase-auth-password
-
+  projectCredentialsSecret: flicknote-project-credentials
   database:
     instances: 1
     storage:
       size: 20Gi
       storageClass: local-path
-    enableSuperuserAccess: false
-
+    recovery:
+      enabled: true
+      serverName: flicknote-source
+      destinationPath: s3://flicknote-recovery/source
+      s3CredentialsSecret: flicknote-recovery-s3
+    backup:
+      enabled: true
+      destinationPath: s3://flicknote-backups/current
+      s3CredentialsSecret: flicknote-backup-s3
+      schedule: "0 0 2 * * *"
+      retentionPolicy: 30d
   auth:
     siteURL: https://app.flicknote.app
     externalURL: https://auth.flicknote.app
+    accessTokenExpirationSeconds: 3600
     autoConfirmEmail: true
     providers:
       google:
@@ -44,12 +38,12 @@ spec:
     emailHook:
       enabled: true
       uri: https://email.flicknote.app/api/v1/gotrue
-
   rest:
     schemas:
       - public
-
   studio:
     publicURL: https://studio.flicknote.app
     organizationName: FlickNote
     projectName: FlickNote
+  gateway:
+    replicas: 1

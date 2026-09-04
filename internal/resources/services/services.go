@@ -97,28 +97,22 @@ func BuildPowersyncAPIService(project *supabasev1alpha1.SupabaseProject) *corev1
 	}
 }
 
-// BuildKongService creates the service for Kong
-func BuildKongService(project *supabasev1alpha1.SupabaseProject) *corev1.Service {
+// BuildGatewayService creates the public Envoy gateway service.
+func BuildGatewayService(project *supabasev1alpha1.SupabaseProject) *corev1.Service {
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      project.Name + "-kong",
+			Name:      project.Name + "-api-gw",
 			Namespace: project.Namespace,
-			Labels:    common.ComponentLabels(project, "kong"),
+			Labels:    common.ComponentLabels(project, "gateway"),
 		},
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeClusterIP,
-			Selector: common.SelectorLabels(project, "kong"),
+			Selector: common.SelectorLabels(project, "gateway"),
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "http",
 					Port:       8000,
 					TargetPort: intstr.FromInt(8000),
-					Protocol:   corev1.ProtocolTCP,
-				},
-				{
-					Name:       "https",
-					Port:       8443,
-					TargetPort: intstr.FromInt(8443),
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},
