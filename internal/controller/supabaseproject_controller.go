@@ -1563,7 +1563,10 @@ func (r *SupabaseProjectReconciler) validateRecoveryBootstrapIntent(ctx context.
 		return fmt.Errorf("getting CNPG cluster for recovery validation: %w", err)
 	}
 	recoveryEnabled := project.Spec.Database.Recovery != nil && project.Spec.Database.Recovery.Enabled
-	if recoveryEnabled && recoveryBootstrapIntentChanged(existing, desired) {
+	// Bootstrap mode is immutable for every existing cluster. Compare it even
+	// when recovery is being disabled so cleanup cannot remove the source
+	// ObjectStore before CNPG reports the recovery-to-initdb change.
+	if recoveryBootstrapIntentChanged(existing, desired) {
 		return fmt.Errorf("CNPG recovery bootstrap configuration is immutable after cluster creation")
 	}
 

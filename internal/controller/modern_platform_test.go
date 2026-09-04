@@ -313,6 +313,50 @@ func TestRecoveryObjectStoreIdentityIsNotRewrittenForExistingCluster(t *testing.
 	}
 }
 
+func TestRecoveryDisableRejectsBootstrapChangeBeforeSourceCleanup(t *testing.T) {
+	t.Parallel()
+
+	scheme := newIdempotencyTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "disable-recovery", Namespace: "default"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Instances: 1,
+			Storage:   cnpgv1.StorageConfiguration{Size: "1Gi"},
+		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{
+			SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "disable-recovery-admin"},
+			Conditions:  []metav1.Condition{{Type: supabasev1alpha1.ConditionTypeRecoveryReady, Status: metav1.ConditionTrue}},
+		},
+	}
+	recoveredProject := project.DeepCopy()
+	recoveredProject.Spec.Database.Recovery = &supabasev1alpha1.RecoverySpec{
+		Enabled:    true,
+		ServerName: "source",
+		S3Config: supabasev1alpha1.S3Config{
+			DestinationPath:     "s3://source",
+			S3CredentialsSecret: "source-s3",
+		},
+	}
+	cluster := cnpgresources.BuildCluster(recoveredProject, &project.Status.SecretNames)
+	sourceStore := cnpgresources.BuildRecoveryObjectStore(recoveredProject)
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, cluster, sourceStore).Build(),
+		Scheme: scheme,
+	}
+
+	if err := reconciler.reconcileRecovery(context.Background(), project); err == nil {
+		t.Fatal("recovery disable unexpectedly accepted an immutable bootstrap change")
+	}
+	retained := &barmancloudv1.ObjectStore{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(sourceStore), retained); err != nil {
+		t.Fatalf("recovery source ObjectStore was deleted before immutable validation: %v", err)
+	}
+	condition := meta.FindStatusCondition(project.Status.Conditions, supabasev1alpha1.ConditionTypeDatabaseReady)
+	if condition == nil || condition.Status != metav1.ConditionFalse || condition.Reason != "BootstrapImmutable" {
+		t.Fatalf("database condition = %#v, want BootstrapImmutable false", condition)
+	}
+}
+
 func TestDurableMetadataProtectionRunsBeforeInvalidCredentials(t *testing.T) {
 	t.Parallel()
 
