@@ -78,6 +78,8 @@ spec:
   infisicalAuthRef:
     name: infisical-auth
     namespace: supabase
+  syncOptions:
+    refreshInterval: 60s
   sources:
     - projectId: <infisical-project-id>
       environmentSlug: dev

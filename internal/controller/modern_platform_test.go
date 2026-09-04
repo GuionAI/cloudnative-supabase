@@ -619,7 +619,7 @@ func TestRecoveryObjectStoreIdentityIsNotRewrittenForExistingCluster(t *testing.
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, cluster, store).Build(),
 		Scheme: scheme,
 	}
-	if err := reconciler.validateRecoveryBootstrapIntent(context.Background(), project); err == nil {
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(project)}); err == nil {
 		t.Fatal("recovery ObjectStore identity change was accepted")
 	}
 	updated := &barmancloudv1.ObjectStore{}
@@ -660,8 +660,8 @@ func TestRecoveryObjectStoreCredentialReferenceRotatesAfterBootstrap(t *testing.
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, cluster, store, credentials).Build(),
 		Scheme: scheme,
 	}
-	if err := reconciler.reconcileRecovery(context.Background(), project); err != nil {
-		t.Fatalf("reconcileRecovery() rejected a rotatable credential reference: %v", err)
+	if err := reconciler.reconcileBackupInfrastructure(context.Background(), project); err != nil {
+		t.Fatalf("production backup infrastructure reconcile rejected a rotatable credential reference: %v", err)
 	}
 	updated := &barmancloudv1.ObjectStore{}
 	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(store), updated); err != nil {
@@ -707,14 +707,18 @@ func TestRecoveryDisableRejectsBootstrapChangeBeforeSourceCleanup(t *testing.T) 
 		Scheme: scheme,
 	}
 
-	if err := reconciler.reconcileRecovery(context.Background(), project); err == nil {
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(project)}); err == nil {
 		t.Fatal("recovery disable unexpectedly accepted an immutable bootstrap change")
 	}
 	retained := &barmancloudv1.ObjectStore{}
 	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(sourceStore), retained); err != nil {
 		t.Fatalf("recovery source ObjectStore was deleted before immutable validation: %v", err)
 	}
-	condition := meta.FindStatusCondition(project.Status.Conditions, supabasev1alpha1.ConditionTypeDatabaseReady)
+	status := &supabasev1alpha1.SupabaseProject{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(project), status); err != nil {
+		t.Fatal(err)
+	}
+	condition := meta.FindStatusCondition(status.Status.Conditions, supabasev1alpha1.ConditionTypeDatabaseReady)
 	if condition == nil || condition.Status != metav1.ConditionFalse || condition.Reason != "BootstrapImmutable" {
 		t.Fatalf("database condition = %#v, want BootstrapImmutable false", condition)
 	}

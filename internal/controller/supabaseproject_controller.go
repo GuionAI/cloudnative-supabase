@@ -1877,11 +1877,6 @@ func (r *SupabaseProjectReconciler) cleanupBackupResources(ctx context.Context, 
 func (r *SupabaseProjectReconciler) reconcileRecovery(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
 	log := logf.FromContext(ctx)
 
-	if err := r.validateRecoveryBootstrapIntent(ctx, project); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "BootstrapImmutable", err.Error())
-		return r.failRecovery(ctx, project, "BootstrapImmutable", err)
-	}
-
 	// If recovery is disabled, clean up any existing recovery resources
 	if project.Spec.Database.Recovery == nil || !project.Spec.Database.Recovery.Enabled {
 		return r.cleanupRecoveryResources(ctx, project)
