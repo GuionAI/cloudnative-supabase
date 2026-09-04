@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -538,7 +539,7 @@ func TestCredentialRotationRollsOnlyCredentialConsumers(t *testing.T) {
 	before := make(map[string]map[string]string)
 	for _, name := range []string{
 		deploymentresources.AuthDeploymentName(project), deploymentresources.RestDeploymentName(project), deploymentresources.StudioDeploymentName(project),
-		deploymentresources.MetaDeploymentName(project), deploymentresources.GatewayDeploymentName(project),
+		deploymentresources.MetaDeploymentName(project), common.GatewayName(project),
 	} {
 		deployment := &appsv1.Deployment{}
 		if err := reconciler.Get(ctx, types.NamespacedName{Name: name, Namespace: project.Namespace}, deployment); err != nil {
@@ -550,7 +551,7 @@ func TestCredentialRotationRollsOnlyCredentialConsumers(t *testing.T) {
 		t.Fatalf("rotated reconcileServices() error = %v", err)
 	}
 	for _, name := range []string{
-		deploymentresources.AuthDeploymentName(project), deploymentresources.RestDeploymentName(project), deploymentresources.StudioDeploymentName(project), deploymentresources.GatewayDeploymentName(project),
+		deploymentresources.AuthDeploymentName(project), deploymentresources.RestDeploymentName(project), deploymentresources.StudioDeploymentName(project), common.GatewayName(project),
 	} {
 		deployment := &appsv1.Deployment{}
 		if err := reconciler.Get(ctx, types.NamespacedName{Name: name, Namespace: project.Namespace}, deployment); err != nil {
@@ -583,9 +584,12 @@ func TestInvalidCredentialRotationLeavesExistingWorkloadsUnchanged(t *testing.T)
 			ProjectCredentialsSecret: "invalid-rotation-credentials",
 			Database:                 supabasev1alpha1.DatabaseSpec{Instances: 1, Storage: cnpgv1.StorageConfiguration{Size: "1Gi"}},
 		},
-		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{
-			SupabaseAdmin: "invalid-rotation-admin", Authenticator: "invalid-rotation-authenticator", AuthAdmin: "invalid-rotation-auth-admin",
-		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{
+			SecretNames: supabasev1alpha1.SecretNamesStatus{
+				SupabaseAdmin: "invalid-rotation-admin", Authenticator: "invalid-rotation-authenticator", AuthAdmin: "invalid-rotation-auth-admin",
+			},
+			Conditions: []metav1.Condition{{Type: supabasev1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: "AllComponentsReady"}},
+		},
 	}
 	invalidCredentials := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: project.Spec.ProjectCredentialsSecret, Namespace: project.Namespace}, Data: map[string][]byte{
 		secretresources.ProjectCredentialsSigningKeysKey:    []byte("{"),
@@ -631,6 +635,56 @@ func TestInvalidCredentialRotationLeavesExistingWorkloadsUnchanged(t *testing.T)
 	condition := meta.FindStatusCondition(status.Status.Conditions, supabasev1alpha1.ConditionTypeSecretsReady)
 	if condition == nil || condition.Status != metav1.ConditionFalse {
 		t.Fatalf("SecretsReady condition = %#v, want false", condition)
+	}
+	ready := meta.FindStatusCondition(status.Status.Conditions, supabasev1alpha1.ConditionTypeReady)
+	if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != "SecretsNotReady" {
+		t.Fatalf("Ready condition = %#v, want SecretsNotReady false", ready)
+	}
+}
+
+func TestReconcileSecretsReferenceFailuresClearOverallReady(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name       string
+		credential string
+		reason     string
+	}{
+		{name: "missing reference", reason: "CredentialsReferenceMissing"},
+		{name: "unavailable secret", credential: "missing-credentials", reason: "CredentialsSecretUnavailable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			project := &supabasev1alpha1.SupabaseProject{
+				ObjectMeta: metav1.ObjectMeta{Name: "secret-failure-" + strings.ReplaceAll(test.name, " ", "-"), Namespace: "default"},
+				Spec:       supabasev1alpha1.SupabaseProjectSpec{ProjectCredentialsSecret: test.credential},
+				Status: supabasev1alpha1.SupabaseProjectStatus{
+					Conditions: []metav1.Condition{{Type: supabasev1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue}},
+				},
+			}
+			scheme := newIdempotencyTestScheme(t)
+			reconciler := &SupabaseProjectReconciler{
+				Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project).Build(),
+				Scheme: scheme,
+			}
+			if _, err := reconciler.reconcileSecrets(context.Background(), project); err == nil {
+				t.Fatal("reconcileSecrets() unexpectedly succeeded")
+			}
+
+			updated := &supabasev1alpha1.SupabaseProject{}
+			if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(project), updated); err != nil {
+				t.Fatal(err)
+			}
+			secretsReady := meta.FindStatusCondition(updated.Status.Conditions, supabasev1alpha1.ConditionTypeSecretsReady)
+			if secretsReady == nil || secretsReady.Status != metav1.ConditionFalse || secretsReady.Reason != test.reason {
+				t.Fatalf("SecretsReady condition = %#v, want %s false", secretsReady, test.reason)
+			}
+			ready := meta.FindStatusCondition(updated.Status.Conditions, supabasev1alpha1.ConditionTypeReady)
+			if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != "SecretsNotReady" {
+				t.Fatalf("Ready condition = %#v, want SecretsNotReady false", ready)
+			}
+		})
 	}
 }
 

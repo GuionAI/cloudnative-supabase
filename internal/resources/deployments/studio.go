@@ -68,7 +68,7 @@ func BuildStudioDeployment(project *supabasev1alpha1.SupabaseProject, secretName
 	replicas := NormalizeReplicas(spec.Replicas)
 
 	// Build internal service URLs
-	gatewayService := project.Name + "-api-gw"
+	gatewayService := common.GatewayName(project)
 	metaService := project.Name + "-meta"
 
 	env := []corev1.EnvVar{

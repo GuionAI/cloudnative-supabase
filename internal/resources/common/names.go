@@ -29,3 +29,8 @@ func EnvoyConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
 func JWKSConfigMapName(project *supabasev1alpha1.SupabaseProject) string {
 	return project.Name + "-auth-jwks"
 }
+
+// GatewayName returns the shared gateway Deployment and Service identity.
+func GatewayName(project *supabasev1alpha1.SupabaseProject) string {
+	return project.Name + "-api-gw"
+}

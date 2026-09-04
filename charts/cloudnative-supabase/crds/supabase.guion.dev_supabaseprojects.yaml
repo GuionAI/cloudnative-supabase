@@ -846,35 +846,6 @@ spec:
                     description: ImageTag for Envoy (defaults to the pinned operator
                       version if empty)
                     type: string
-                  ingress:
-                    description: Ingress configuration
-                    properties:
-                      annotations:
-                        additionalProperties:
-                          type: string
-                        description: Annotations for the ingress
-                        type: object
-                      className:
-                        description: ClassName is the ingress class name
-                        type: string
-                      enabled:
-                        description: Enabled enables ingress creation
-                        type: boolean
-                      host:
-                        description: Host is the ingress hostname (required when enabled)
-                        type: string
-                      tls:
-                        description: TLS enables TLS termination
-                        type: boolean
-                      tlsSecretName:
-                        description: TLSSecretName is the secret containing TLS certificate
-                        type: string
-                    required:
-                    - enabled
-                    type: object
-                    x-kubernetes-validations:
-                    - message: host is required when ingress is enabled
-                      rule: '!self.enabled || self.host.size() > 0'
                   replicas:
                     default: 1
                     description: Replicas count

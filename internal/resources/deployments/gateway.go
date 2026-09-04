@@ -43,11 +43,6 @@ const (
 	GatewayHealthPath = "/_internal/health"
 )
 
-// GatewayDeploymentName returns the gateway deployment identity.
-func GatewayDeploymentName(project *supabasev1alpha1.SupabaseProject) string {
-	return project.Name + "-api-gw"
-}
-
 // DefaultGatewayResources returns conservative resources for Envoy.
 func DefaultGatewayResources() corev1.ResourceRequirements {
 	return corev1.ResourceRequirements{
@@ -109,7 +104,7 @@ func BuildGatewayDeployment(project *supabasev1alpha1.SupabaseProject) *appsv1.D
 	}
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: GatewayDeploymentName(project), Namespace: project.Namespace,
+			Name: common.GatewayName(project), Namespace: project.Namespace,
 			Labels: common.ComponentLabels(project, GatewayComponentName), Annotations: common.ReloaderAnnotations(),
 		},
 		Spec: appsv1.DeploymentSpec{

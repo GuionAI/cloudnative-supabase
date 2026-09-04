@@ -324,11 +324,7 @@ func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, projec
 
 	if project.Spec.ProjectCredentialsSecret == "" {
 		err := fmt.Errorf("project credential field %q: Secret reference is required", "projectCredentialsSecret")
-		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "CredentialsReferenceMissing", err.Error())
-		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
-			return nil, statusErr
-		}
-		return nil, err
+		return r.failReconcileSecrets(ctx, project, "CredentialsReferenceMissing", err.Error(), err)
 	}
 	external := &corev1.Secret{}
 	if err := r.Get(ctx, types.NamespacedName{Name: project.Spec.ProjectCredentialsSecret, Namespace: project.Namespace}, external); err != nil {
@@ -336,33 +332,34 @@ func (r *SupabaseProjectReconciler) reconcileSecrets(ctx context.Context, projec
 		if !apierrors.IsNotFound(err) {
 			message = fmt.Sprintf("project credential Secret %q could not be read", project.Spec.ProjectCredentialsSecret)
 		}
-		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "CredentialsSecretUnavailable", message)
-		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
-			return nil, statusErr
-		}
-		return nil, fmt.Errorf("project credential Secret %q unavailable", project.Spec.ProjectCredentialsSecret)
+		return r.failReconcileSecrets(ctx, project, "CredentialsSecretUnavailable", message, fmt.Errorf("project credential Secret %q unavailable", project.Spec.ProjectCredentialsSecret))
 	}
 	credentials, err := secrets.ValidateProjectCredentials(external)
 	if err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "InvalidProjectCredentials", err.Error())
-		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
-			return nil, statusErr
-		}
-		return nil, err
+		return r.failReconcileSecrets(ctx, project, "InvalidProjectCredentials", err.Error(), err)
 	}
 
 	if err := r.reconcileImplementationSecrets(ctx, project); err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "ImplementationSecretFailed", err.Error())
-		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
-			return nil, statusErr
-		}
-		return nil, err
+		return r.failReconcileSecrets(ctx, project, "ImplementationSecretFailed", err.Error(), err)
 	}
 	r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionTrue, "CredentialsValidated", "Project credentials and implementation secrets are ready")
 	if err := r.updateProjectStatus(ctx, project); err != nil {
 		return nil, err
 	}
 	return credentials, nil
+}
+
+// failReconcileSecrets records both the detailed SecretsReady failure and the
+// aggregate Ready failure. The aggregate condition must be cleared immediately
+// so an already-ready project cannot remain advertised as ready after a bad
+// credential rotation.
+func (r *SupabaseProjectReconciler) failReconcileSecrets(ctx context.Context, project *supabasev1alpha1.SupabaseProject, reason, message string, reconcileErr error) (*secrets.ProjectCredentials, error) {
+	r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, reason, message)
+	r.setCondition(project, supabasev1alpha1.ConditionTypeReady, metav1.ConditionFalse, "SecretsNotReady", "Project credentials and implementation secrets are not ready")
+	if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
+		return nil, statusErr
+	}
+	return nil, reconcileErr
 }
 
 func (r *SupabaseProjectReconciler) reconcileImplementationSecrets(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
@@ -1247,7 +1244,7 @@ func (r *SupabaseProjectReconciler) reconcileGateway(ctx context.Context, projec
 	}
 
 	// Update API endpoint in status after the common service reconciliation.
-	project.Status.Endpoints.API = fmt.Sprintf("%s:8000", deployments.GatewayDeploymentName(project))
+	project.Status.Endpoints.API = fmt.Sprintf("%s:8000", common.GatewayName(project))
 	return nil
 }
 

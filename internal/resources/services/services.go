@@ -101,7 +101,7 @@ func BuildPowersyncAPIService(project *supabasev1alpha1.SupabaseProject) *corev1
 func BuildGatewayService(project *supabasev1alpha1.SupabaseProject) *corev1.Service {
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      project.Name + "-api-gw",
+			Name:      common.GatewayName(project),
 			Namespace: project.Namespace,
 			Labels:    common.ComponentLabels(project, "gateway"),
 		},

@@ -512,40 +512,9 @@ type GatewaySpec struct {
 	// +optional
 	Replicas int32 `json:"replicas,omitempty"`
 
-	// Ingress configuration
-	// +optional
-	Ingress *IngressSpec `json:"ingress,omitempty"`
-
 	// Resources for gateway pods
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
-}
-
-// IngressSpec defines ingress configuration
-// +kubebuilder:validation:XValidation:rule="!self.enabled || self.host.size() > 0",message="host is required when ingress is enabled"
-type IngressSpec struct {
-	// Enabled enables ingress creation
-	Enabled bool `json:"enabled"`
-
-	// ClassName is the ingress class name
-	// +optional
-	ClassName string `json:"className,omitempty"`
-
-	// Host is the ingress hostname (required when enabled)
-	// +optional
-	Host string `json:"host,omitempty"`
-
-	// TLS enables TLS termination
-	// +optional
-	TLS bool `json:"tls,omitempty"`
-
-	// TLSSecretName is the secret containing TLS certificate
-	// +optional
-	TLSSecretName string `json:"tlsSecretName,omitempty"`
-
-	// Annotations for the ingress
-	// +optional
-	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // ImageSpec defines container image configuration for optional services
