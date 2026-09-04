@@ -5,6 +5,7 @@
 - Feature branch: `modern-supabase-platform`
 - Starting `HEAD`: `9995056` (`feat(auth): allow custom GoTrue environment (#18)`)
 - Implementation commit: `f3fd3b4` (`feat(platform): implement modern Supabase platform`)
+- Review-fix commit: `5492aa6` (`fix(platform): harden modern Supabase reconciliation`)
 - Worker pane: `w5P:p6`
 - Owner pane: `w5P:p1`
 - Scope: the complete `spec.md` and tickets 01–05, in dependency order
@@ -74,3 +75,49 @@ legacy fixtures were deleted rather than duplicated.
 None within the requested implementation boundary. The report intentionally
 does not claim a live Envoy smoke test or deployment; both are explicit
 out-of-scope follow-up work.
+
+## Consolidated whole-spec review-fix batch
+
+The review-fix commit preserves the pinned upstream Envoy behavior while
+limiting the listener to the managed Auth/REST/GraphQL/Meta/Studio profile. It
+restores opaque-key admission and query/header translation, ES256 role-token
+mapping, genuine-user bearer preservation and synthesis, GraphQL and OAuth
+routes, vhost CORS/preflight handling, and service-role-only `/pg/` access.
+Legacy JWT-shaped keys and unused service routes remain absent. Envoy admin is
+loopback-only and the pod exposes only a public direct-response health route;
+the rendered credential-bearing config is kept in a pod-local volume.
+
+The CRD now rejects operator-owned GoTrue JWT/security names while preserving
+provider-specific settings, with regenerated config and chart CRD copies.
+Recovery validation compares bootstrap and barman external-source identity
+(including plugin parameters such as `serverName`) and prevents source
+ObjectStore identity rewrites. CNPG mutable resources converge on both set and
+clear, foreign/defaulted fields survive, and durable adoption/cleanup requires
+the exact project instance label. A first reconcile repairs only the matching
+project owner reference before credential or backup validation, preserving
+foreign owners even when validation fails.
+
+Compatibility-only `syncManagedRoles`, variadic credential/hash seams, and the
+unused gateway secret-status argument were removed; gateway reconciliation now
+uses the shared service-component path while retaining endpoint/status updates.
+Credential tests cover malformed JSON, private-key material, key/signature/
+role/audience/expiration/prefix/missing-field failures, and rotation tests
+prove invalid updates leave workload specs untouched while valid hashes roll
+only credential consumers (not Meta or PowerSync).
+
+Review-fix verification completed after commit:
+
+```text
+make generate manifests
+make test test-tanka test-delivery
+go test ./...
+go build ./...
+go vet ./...
+make lint                 # 0 issues
+git diff --check
+cmp -s config/crd/bases/supabase.guion.dev_supabaseprojects.yaml \
+  charts/cloudnative-supabase/crds/supabase.guion.dev_supabaseprojects.yaml
+```
+
+All commands passed; the two CRD copies compare byte-for-byte. No deployment or
+code-review pass was performed, per scope.
