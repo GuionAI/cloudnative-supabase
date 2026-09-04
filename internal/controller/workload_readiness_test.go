@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -19,6 +20,7 @@ import (
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/cnpg"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/deployments"
 	secretresources "github.com/GuionAI/cloudnative-supabase/internal/resources/secrets"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/services"
 )
 
 func TestReconcileServiceComponentReportsPendingDeployment(t *testing.T) {
@@ -239,6 +241,128 @@ func TestReconcileReturnsRequeueUntilCoreDeploymentsAreReady(t *testing.T) {
 	if ready == nil || ready.Status != metav1.ConditionTrue {
 		t.Fatalf("final Ready condition = %#v, want true", ready)
 	}
+}
+
+func TestReconcileClearsAggregateReadinessOnCoreServiceFailure(t *testing.T) {
+	t.Parallel()
+
+	project := &supabasev1alpha1.SupabaseProject{
+		TypeMeta: metav1.TypeMeta{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "failure", Namespace: "default", UID: "failure-project-uid", Generation: 7,
+		},
+		Status: supabasev1alpha1.SupabaseProjectStatus{
+			Phase:              supabasev1alpha1.PhaseRunning,
+			ObservedGeneration: 7,
+			Services: supabasev1alpha1.ServicesStatus{
+				Auth:    supabasev1alpha1.ServiceStatus{Ready: true, AvailableReplicas: 1},
+				Rest:    supabasev1alpha1.ServiceStatus{Ready: true, AvailableReplicas: 1},
+				Studio:  supabasev1alpha1.ServiceStatus{Ready: true, AvailableReplicas: 1},
+				Meta:    supabasev1alpha1.ServiceStatus{Ready: true, AvailableReplicas: 1},
+				Gateway: supabasev1alpha1.ServiceStatus{Ready: true, AvailableReplicas: 1},
+			},
+		},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{
+			ProjectCredentialsSecret: "failure-credentials",
+			Database: supabasev1alpha1.DatabaseSpec{
+				Instances: 1,
+				Storage:   cnpgv1.StorageConfiguration{Size: "1Gi"},
+			},
+			Auth: supabasev1alpha1.AuthSpec{SiteURL: "https://app.example.com", ExternalURL: "https://auth.example.com"},
+		},
+	}
+	for _, conditionType := range []string{
+		supabasev1alpha1.ConditionTypeReady,
+		supabasev1alpha1.ConditionTypeAuthReady,
+		supabasev1alpha1.ConditionTypeRestReady,
+		supabasev1alpha1.ConditionTypeStudioReady,
+		supabasev1alpha1.ConditionTypeMetaReady,
+		supabasev1alpha1.ConditionTypeGatewayReady,
+	} {
+		project.Status.Conditions = append(project.Status.Conditions, metav1.Condition{
+			Type: conditionType, Status: metav1.ConditionTrue, ObservedGeneration: project.Generation,
+			Reason: "Ready", Message: "component is running",
+		})
+	}
+
+	credentials := validProjectCredentialsSecret(t, project, project.Spec.ProjectCredentialsSecret)
+	generated, names, err := secretresources.GenerateSecrets(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.Status.SecretNames = names
+	cluster := cnpg.BuildCluster(project, &project.Status.SecretNames)
+	cluster.Default()
+	cluster.Status.ReadyInstances = cluster.Spec.Instances
+	apiCredentials, err := secretresources.ValidateProjectCredentials(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheme := newIdempotencyTestScheme(t)
+	coreDeployments := []*appsv1.Deployment{
+		deployments.BuildAuthDeployment(project, &project.Status.SecretNames),
+		deployments.BuildRestDeployment(project, &project.Status.SecretNames),
+		deployments.BuildStudioDeployment(project, &project.Status.SecretNames),
+		deployments.BuildMetaDeployment(project, &project.Status.SecretNames),
+		deployments.BuildGatewayDeployment(project),
+	}
+	for i, deployment := range coreDeployments {
+		if i != 3 {
+			applyProjectCredentialsHash(deployment, apiCredentials.PodTemplateHash)
+		}
+		markCoreDeploymentStatus(t, deployment, project.Generation, true, 0)
+		if err := setTestControllerReference(project, deployment, scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	objects := []client.Object{project, credentials, cluster}
+	for _, secret := range generated {
+		objects = append(objects, secret)
+	}
+	for _, deployment := range coreDeployments {
+		objects = append(objects, deployment)
+	}
+	injected := errors.New("injected auth service create failure")
+	baseClient := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(objects...).Build()
+	failingClient := &failCoreServiceCreateClient{
+		Client:      baseClient,
+		ServiceName: services.BuildAuthService(project).Name,
+		Err:         injected,
+	}
+	reconciler := &SupabaseProjectReconciler{Client: failingClient, Scheme: scheme}
+
+	_, err = reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(project)})
+	if !errors.Is(err, injected) {
+		t.Fatalf("reconcile error = %v, want injected service error", err)
+	}
+	status := &supabasev1alpha1.SupabaseProject{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(project), status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Status.Phase != supabasev1alpha1.PhaseProvisioning {
+		t.Fatalf("phase = %q, want Provisioning", status.Status.Phase)
+	}
+	if status.Status.Services.Auth.Ready || status.Status.Services.Auth.AvailableReplicas != 0 {
+		t.Fatalf("auth status = %#v, want cleared after service failure", status.Status.Services.Auth)
+	}
+	ready := meta.FindStatusCondition(status.Status.Conditions, supabasev1alpha1.ConditionTypeReady)
+	if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != "CoreServicesFailed" {
+		t.Fatalf("Ready condition = %#v, want CoreServicesFailed false", ready)
+	}
+}
+
+type failCoreServiceCreateClient struct {
+	client.Client
+	ServiceName string
+	Err         error
+}
+
+func (c *failCoreServiceCreateClient) Create(ctx context.Context, object client.Object, options ...client.CreateOption) error {
+	service, ok := object.(*corev1.Service)
+	if ok && service.Name == c.ServiceName {
+		return c.Err
+	}
+	return c.Client.Create(ctx, object, options...)
 }
 
 func newCoreReadinessFixture(t *testing.T, pendingRest bool) (*supabasev1alpha1.SupabaseProject, *SupabaseProjectReconciler) {

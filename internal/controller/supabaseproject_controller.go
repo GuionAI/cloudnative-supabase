@@ -900,29 +900,29 @@ func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, proje
 
 	// Deploy Auth (GoTrue)
 	if err := r.reconcileAuth(ctx, project, secretNames, credentialHash); err != nil {
-		return err
+		return r.failCoreServices(ctx, project, err)
 	}
 
 	// Deploy REST (PostgREST)
 	if err := r.reconcileRest(ctx, project, secretNames, credentialHash); err != nil {
-		return err
+		return r.failCoreServices(ctx, project, err)
 	}
 
 	// Deploy Studio
 	if err := r.reconcileStudio(ctx, project, secretNames, credentialHash); err != nil {
-		return err
+		return r.failCoreServices(ctx, project, err)
 	}
 
 	// Deploy Meta (postgres-meta)
 	// postgres-meta consumes no project credential material, so credential
 	// rotation must not roll this deployment.
 	if err := r.reconcileMeta(ctx, project, secretNames); err != nil {
-		return err
+		return r.failCoreServices(ctx, project, err)
 	}
 
 	// Deploy Envoy gateway
 	if err := r.reconcileGateway(ctx, project, credentialHash); err != nil {
-		return err
+		return r.failCoreServices(ctx, project, err)
 	}
 
 	if !coreServicesReady(project) {
@@ -934,6 +934,17 @@ func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, proje
 	}
 
 	return nil
+}
+
+// failCoreServices records the aggregate failure state before returning the
+// original component reconciliation error to the controller runtime.
+func (r *SupabaseProjectReconciler) failCoreServices(ctx context.Context, project *supabasev1alpha1.SupabaseProject, reconcileErr error) error {
+	project.Status.Phase = supabasev1alpha1.PhaseProvisioning
+	r.setCondition(project, supabasev1alpha1.ConditionTypeReady, metav1.ConditionFalse, "CoreServicesFailed", fmt.Sprintf("Core service reconciliation failed: %v", reconcileErr))
+	if err := r.updateProjectStatus(ctx, project); err != nil {
+		logf.FromContext(ctx).Error(err, "persisting core service failure status")
+	}
+	return reconcileErr
 }
 
 // reconcileServiceComponent is a generic helper for reconciling a service component (deployment + service)
@@ -2072,11 +2083,11 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 		return ctrl.Result{}, err
 	}
 
-	apiReady, apiAvailable, err := r.powersyncDeploymentStatus(ctx, apiDeployment)
+	apiReady, apiAvailable, err := r.deploymentStatus(ctx, apiDeployment)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	replicationReady, replicationAvailable, err := r.powersyncDeploymentStatus(ctx, replDeployment)
+	replicationReady, replicationAvailable, err := r.deploymentStatus(ctx, replDeployment)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -2169,10 +2180,6 @@ func (r *SupabaseProjectReconciler) deletePowerSyncOwnedResource(ctx context.Con
 	return client.IgnoreNotFound(r.Delete(ctx, object))
 }
 
-func (r *SupabaseProjectReconciler) powersyncDeploymentStatus(ctx context.Context, desired *appsv1.Deployment) (bool, int32, error) {
-	return r.deploymentStatus(ctx, desired)
-}
-
 func (r *SupabaseProjectReconciler) deploymentStatus(ctx context.Context, desired *appsv1.Deployment) (bool, int32, error) {
 	if desired == nil {
 		return false, 0, nil
@@ -2197,12 +2204,6 @@ func deploymentIsReady(deployment *appsv1.Deployment) bool {
 		deployment.Status.ReadyReplicas == expected &&
 		deployment.Status.AvailableReplicas == expected &&
 		deployment.Status.UnavailableReplicas == 0
-}
-
-// powersyncDeploymentIsReady is retained as the PowerSync-specific spelling
-// used by existing controller tests; all services share deploymentIsReady.
-func powersyncDeploymentIsReady(deployment *appsv1.Deployment) bool {
-	return deploymentIsReady(deployment)
 }
 
 func coreServicesReady(project *supabasev1alpha1.SupabaseProject) bool {

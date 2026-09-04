@@ -145,7 +145,7 @@ func TestDeploymentIsReadyForCurrentGeneration(t *testing.T) {
 			AvailableReplicas:  2,
 		},
 	}
-	if !powersyncDeploymentIsReady(deployment) {
+	if !deploymentIsReady(deployment) {
 		t.Fatal("current rollout with all replicas ready must be ready")
 	}
 	deployment.Status.ObservedGeneration = 2
