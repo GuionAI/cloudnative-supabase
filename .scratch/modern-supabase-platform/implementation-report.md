@@ -6,8 +6,10 @@
 - Starting `HEAD`: `9995056` (`feat(auth): allow custom GoTrue environment (#18)`)
 - Implementation commit: `f3fd3b4` (`feat(platform): implement modern Supabase platform`)
 - Review-fix commits: `5492aa6` (`fix(platform): harden modern Supabase reconciliation`),
-  `d9901f6` (`fix(platform): retain initdb bootstrap guard`), and
-  `9d90d95` (`fix(recovery): validate bootstrap intent before cleanup`)
+  `d9901f6` (`fix(platform): retain initdb bootstrap guard`),
+  `9d90d95` (`fix(recovery): validate bootstrap intent before cleanup`),
+  `993e28d` (`fix(platform): tighten durable and recovery contracts`), and
+  `8b29173` (`fix(platform): finalize gateway and recovery contracts`)
 - Worker pane: `w5P:p6`
 - Owner pane: `w5P:p1`
 - Scope: the complete `spec.md` and tickets 01–05, in dependency order
@@ -40,7 +42,7 @@ go test ./...
 go build ./...
 go vet ./...
 make lint                 # 0 issues
-git diff --cached --check
+git diff --check
 cmp -s config/crd/bases/supabase.guion.dev_supabaseprojects.yaml \
   charts/cloudnative-supabase/crds/supabase.guion.dev_supabaseprojects.yaml
 ```
@@ -81,23 +83,34 @@ out-of-scope follow-up work.
 ## Consolidated whole-spec review-fix batch
 
 The review-fix commit preserves the pinned upstream Envoy behavior while
-limiting the listener to the managed Auth/REST/GraphQL/Meta/Studio profile. It
+limiting the listener to the managed Auth/REST/Meta/Studio profile. It
 restores opaque-key admission and query/header translation, ES256 role-token
-mapping, genuine-user bearer preservation and synthesis, GraphQL and OAuth
-routes, vhost CORS/preflight handling, and service-role-only `/pg/` access.
+mapping, genuine-user bearer preservation and synthesis, OAuth routes,
+vhost CORS/preflight handling, and service-role-only `/pg/` access.
 Legacy JWT-shaped keys and unused service routes remain absent. Envoy admin is
 loopback-only and the pod exposes only a public direct-response health route;
 the rendered credential-bearing config is kept in a pod-local volume.
 
 The CRD now rejects operator-owned GoTrue JWT/security names while preserving
 provider-specific settings, with regenerated config and chart CRD copies.
-Recovery validation compares both creation-time bootstrap modes and barman
-external-source identity (including plugin parameters such as `serverName`) and
-prevents source ObjectStore identity rewrites. CNPG mutable resources converge
+Recovery validation compares both creation-time bootstrap modes and the
+explicit barman external-source identity fields (plugin, ObjectStore, source
+server/name) while leaving unknown plugin parameters unfrozen; recovery
+credential Secret references remain rotatable, and source ObjectStore identity
+cannot be rewritten. CNPG mutable resources converge
 on both set and clear, foreign/defaulted fields survive, and durable
 adoption/cleanup requires the exact project instance label. A first reconcile
 repairs only the matching project owner reference before credential or backup
 validation, preserving foreign owners even when validation fails.
+
+Durable owner cleanup now matches the Supabase API group, `SupabaseProject`
+kind, and project name while ignoring API version and UID for same-name project
+recreation; same-name owners from another API group remain intact. Admission
+rejects simultaneously enabled backup/recovery configurations whose destination
+paths are equal, while shared credential Secrets remain valid. Meta and
+PowerSync no longer carry unused credential-hash parameters or annotations,
+and recovery-source comparison uses the exact bootstrap source name so
+unrelated external clusters are preserved.
 
 Compatibility-only `syncManagedRoles`, variadic credential/hash seams, and the
 unused gateway secret-status argument were removed; gateway reconciliation now
@@ -128,7 +141,7 @@ code-review pass was performed, per scope.
 
 The preceding variance table is the original implementation snapshot and
 predates the review-fix commits. The final post-fix counts below are measured
-with `git diff --numstat 9995056..9d90d95 -- . ':!.scratch/modern-supabase-platform/implementation-report.md'`;
+with the final implementation commit range `git diff --numstat 9995056..8b29173 -- . ':!.scratch/modern-supabase-platform/implementation-report.md'`;
 they include all implementation and review-fix changes, exclude generated
 CRD/deepcopy artifacts and this report, and classify Go files by product code
 versus behavioral tests. This keeps the reported implementation delta stable
@@ -136,12 +149,14 @@ when the report itself is revised.
 
 | Category | Additions | Deletions | Line events |
 | --- | ---: | ---: | ---: |
-| Product code and gateway assets | 2,588 | 1,119 | 3,707 |
-| Behavioural tests and fixtures | 1,311 | 776 | 2,087 |
-| Docs and configuration | 327 | 467 | 794 |
-| **Non-generated implementation total** | **4,226** | **2,362** | **6,588** |
+| Product code and gateway assets | 2,578 | 1,115 | 3,693 |
+| Behavioural tests and fixtures | 1,441 | 776 | 2,217 |
+| Docs and configuration | 341 | 466 | 807 |
+| **Non-generated implementation total** | **4,360** | **2,357** | **6,717** |
 
-The follow-up recovery-order fix after `5492aa6` contributes 18 product-code
-additions, one deletion, and 44 behavioral-test additions. Generated artifacts
-remain synchronized separately and are intentionally excluded from these LOC
-totals.
+The recovery-order fix in `9d90d95` contributes 18 product-code additions, one
+deletion, and 44 behavioral-test additions. The final contract-tightening batch
+in `993e28d` contributes 32 product-code additions, 21 deletions, 72
+behavioral-test additions, five test deletions, and 10 documentation additions.
+Generated artifacts remain synchronized separately and are intentionally
+excluded from these LOC totals.
