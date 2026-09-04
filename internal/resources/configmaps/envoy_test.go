@@ -76,7 +76,7 @@ func TestRenderedEnvoyFixtureImplementsOpaqueGatewaySemantics(t *testing.T) {
 	wantRoutes := []string{
 		"internal-health", "auth-v1-verify", "auth-v1-callback", "auth-v1-authorize", "auth-v1-jwks",
 		"oauth-authorization-server", "auth-v1-saml-acs", "auth-v1-saml-metadata", "auth-v1-protected",
-		"rest-v1-openapi-protected", "rest-v1-protected", "graphql-v1-protected", "pg-protected", "studio",
+		"rest-v1-openapi-protected", "rest-v1-protected", "pg-protected", "studio",
 	}
 	if len(routes) != len(wantRoutes) {
 		t.Fatalf("route count = %d, want %d", len(routes), len(wantRoutes))
@@ -93,7 +93,7 @@ func TestRenderedEnvoyFixtureImplementsOpaqueGatewaySemantics(t *testing.T) {
 		}
 	}
 
-	assertRoute := func(name, matchField, matchValue, cluster string) map[string]any {
+	assertRoute := func(name, matchField, matchValue, cluster string) {
 		t.Helper()
 		for _, routeValue := range routes {
 			route := asMap(t, routeValue)
@@ -110,23 +110,13 @@ func TestRenderedEnvoyFixtureImplementsOpaqueGatewaySemantics(t *testing.T) {
 					t.Fatalf("route %s cluster = %v, want %q", name, routeConfig["cluster"], cluster)
 				}
 			}
-			return route
+			return
 		}
 		t.Fatalf("route %s not found", name)
-		return nil
 	}
 	assertRoute("internal-health", "path", "/_internal/health", "")
 	assertRoute("oauth-authorization-server", "prefix", "/.well-known/oauth-authorization-server", "auth")
 	assertRoute("rest-v1-openapi-protected", "path", "/rest/v1/", "rest")
-	graphql := assertRoute("graphql-v1-protected", "prefix", "/graphql/v1", "rest")
-	graphqlRoute := asMap(t, graphql["route"])
-	if graphqlRoute["prefix_rewrite"] != "/rpc/graphql" {
-		t.Fatalf("GraphQL rewrite = %v", graphqlRoute["prefix_rewrite"])
-	}
-	graphqlHeaders := asSlice(t, graphql["request_headers_to_add"])
-	if !containsHeaderValue(t, graphqlHeaders, "Content-Profile", "graphql_public") {
-		t.Fatal("GraphQL route does not set Content-Profile")
-	}
 	assertRoute("pg-protected", "prefix", "/pg/", "meta")
 
 	httpFilters := asSlice(t, hcm["http_filters"])
@@ -249,17 +239,6 @@ func asSlice(t *testing.T, value any) []any {
 		t.Fatalf("value has type %T, want []any", value)
 	}
 	return result
-}
-
-func containsHeaderValue(t *testing.T, headers []any, key, value string) bool {
-	t.Helper()
-	for _, headerValue := range headers {
-		header := asMap(t, asMap(t, headerValue)["header"])
-		if header["key"] == key && header["value"] == value {
-			return true
-		}
-	}
-	return false
 }
 
 func translateOpaqueFixture(key string, values map[string]string, protected bool) (string, bool) {

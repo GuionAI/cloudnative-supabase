@@ -152,7 +152,7 @@ func TestReconcileCNPGClusterRemovesOnlyProjectOwnerAndPreservesLabels(t *testin
 	controller := true
 	existing := desired.DeepCopy()
 	existing.OwnerReferences = []metav1.OwnerReference{
-		{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject", Name: project.Name, UID: "stale-project-uid", Controller: &controller},
+		{APIVersion: supabasev1alpha1.GroupVersion.Group + "/v1beta1", Kind: "SupabaseProject", Name: project.Name, UID: "stale-project-uid", Controller: &controller},
 		{APIVersion: "example.dev/v1", Kind: "SupabaseProject", Name: project.Name, UID: "foreign-uid"},
 	}
 	existing.Labels["foreign.example/keep"] = "yes"
@@ -278,6 +278,41 @@ func TestRecoveryBootstrapIntentIncludesExternalSourceParameters(t *testing.T) {
 	}
 }
 
+func TestRecoveryBootstrapIgnoresUnrecognizedExternalPluginParameters(t *testing.T) {
+	t.Parallel()
+
+	scheme := newPowerSyncTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "recovery-plugin-parameter", Namespace: "default"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Instances: 1,
+			Storage:   cnpgv1.StorageConfiguration{Size: "1Gi"},
+			Recovery: &supabasev1alpha1.RecoverySpec{Enabled: true, ServerName: "source", S3Config: supabasev1alpha1.S3Config{
+				DestinationPath:     "s3://source",
+				S3CredentialsSecret: "source-s3",
+			}},
+		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "recovery-plugin-parameter-admin"}},
+	}
+	desired := cnpgresources.BuildCluster(project, &project.Status.SecretNames)
+	existing := desired.DeepCopy()
+	existing.Spec.ExternalClusters[0].PluginConfiguration.Parameters["future-plugin-option"] = "preserved"
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(project, existing).Build(),
+		Scheme: scheme,
+	}
+	if _, err := reconciler.reconcileCNPGCluster(context.Background(), project); err != nil {
+		t.Fatalf("unrecognized external plugin parameter blocked reconciliation: %v", err)
+	}
+	updated := &cnpgv1.Cluster{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(existing), updated); err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.Spec.ExternalClusters[0].PluginConfiguration.Parameters["future-plugin-option"]; got != "preserved" {
+		t.Fatalf("unrecognized external plugin parameter = %q, want preserved", got)
+	}
+}
+
 func TestRecoveryBootstrapIgnoresUnrelatedExternalClustersInInitDBMode(t *testing.T) {
 	t.Parallel()
 
@@ -350,6 +385,51 @@ func TestRecoveryObjectStoreIdentityIsNotRewrittenForExistingCluster(t *testing.
 	}
 }
 
+func TestRecoveryObjectStoreCredentialReferenceRotatesAfterBootstrap(t *testing.T) {
+	t.Parallel()
+
+	scheme := newIdempotencyTestScheme(t)
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "rotating-recovery-credentials", Namespace: "default"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Instances: 1,
+			Storage:   cnpgv1.StorageConfiguration{Size: "1Gi"},
+			Recovery: &supabasev1alpha1.RecoverySpec{Enabled: true, ServerName: "source", S3Config: supabasev1alpha1.S3Config{
+				DestinationPath:     "s3://source",
+				EndpointURL:         "https://s3.example",
+				S3CredentialsSecret: "new-s3",
+			}},
+		}},
+		Status: supabasev1alpha1.SupabaseProjectStatus{SecretNames: supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "rotating-recovery-admin"}},
+	}
+	cluster := cnpgresources.BuildCluster(project, &project.Status.SecretNames)
+	oldProject := project.DeepCopy()
+	oldProject.Spec.Database.Recovery.S3CredentialsSecret = "old-s3"
+	store := cnpgresources.BuildRecoveryObjectStore(oldProject)
+	credentials := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "new-s3", Namespace: project.Namespace}, Data: map[string][]byte{
+		cnpgresources.DefaultAccessKeyIDKey:     []byte("new-access"),
+		cnpgresources.DefaultSecretAccessKeyKey: []byte("new-secret"),
+	}}
+	reconciler := &SupabaseProjectReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, cluster, store, credentials).Build(),
+		Scheme: scheme,
+	}
+	if err := reconciler.reconcileRecovery(context.Background(), project); err != nil {
+		t.Fatalf("reconcileRecovery() rejected a rotatable credential reference: %v", err)
+	}
+	updated := &barmancloudv1.ObjectStore{}
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(store), updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Spec.Configuration.AWS == nil ||
+		updated.Spec.Configuration.AWS.AccessKeyIDReference == nil ||
+		updated.Spec.Configuration.AWS.AccessKeyIDReference.Name != "new-s3" ||
+		updated.Spec.Configuration.AWS.SecretAccessKeyReference == nil ||
+		updated.Spec.Configuration.AWS.SecretAccessKeyReference.Name != "new-s3" {
+		t.Fatalf("recovery ObjectStore credential references = %#v, want new-s3", updated.Spec.Configuration.BarmanCredentials)
+	}
+}
+
 func TestRecoveryDisableRejectsBootstrapChangeBeforeSourceCleanup(t *testing.T) {
 	t.Parallel()
 
@@ -407,7 +487,7 @@ func TestDurableMetadataProtectionRunsBeforeInvalidCredentials(t *testing.T) {
 		},
 	}
 	controller := true
-	owner := metav1.OwnerReference{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject", Name: project.Name, UID: project.UID, Controller: &controller}
+	owner := metav1.OwnerReference{APIVersion: supabasev1alpha1.GroupVersion.Group + "/v1beta1", Kind: "SupabaseProject", Name: project.Name, UID: project.UID, Controller: &controller}
 	cluster := cnpgresources.BuildCluster(project, &supabasev1alpha1.SecretNamesStatus{SupabaseAdmin: "protected-admin"})
 	owner.UID = "old-project-uid"
 	cluster.OwnerReferences = []metav1.OwnerReference{owner, {APIVersion: "example.dev/v1", Kind: "SupabaseProject", Name: project.Name, UID: "foreign"}}

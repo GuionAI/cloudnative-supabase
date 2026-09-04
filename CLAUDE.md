@@ -37,9 +37,11 @@ charts/cloudnative-supabase/crds # chart copy of generated CRD
 8. Reconcile Auth, REST, Studio, Meta, Envoy, then optional PowerSync.
 
 When backup and recovery are both enabled, their deterministic ObjectStore
-names and normalized destination paths must differ. A credentials Secret may be
+names and configured destination paths must differ. A credentials Secret may be
 shared; prefer least-privilege IAM with recovery read access and backup write
-access instead of requiring separate Secret objects.
+access instead of requiring separate Secret objects. Recovery destination,
+endpoint, server identity, bootstrap source, and target are immutable after
+creation, while its operational credential reference may rotate.
 
 Invalid project credentials stop before dependent workloads are changed.
 Valid credential rotation updates a deterministic non-secret pod-template hash

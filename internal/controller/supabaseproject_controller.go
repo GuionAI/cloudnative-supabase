@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -620,14 +621,15 @@ func recoveryBootstrapIntentChanged(existing, desired *cnpgv1.Cluster) bool {
 	}
 
 	// The barman external-cluster plugin carries immutable source identity such
-	// as serverName and barmanObjectName. Compare its complete configuration,
-	// including any future plugin parameters, rather than just bootstrap fields.
+	// as its plugin name, serverName, and barmanObjectName. Compare only these
+	// explicit identity fields; operational or future plugin parameters remain
+	// available for CNPG/plugin reconciliation.
 	existingSource := recoveryExternalCluster(existing.Spec.ExternalClusters, recoverySourceName(existingRecovery))
 	desiredSource := recoveryExternalCluster(desired.Spec.ExternalClusters, recoverySourceName(desiredRecovery))
 	if (existingSource == nil) != (desiredSource == nil) {
 		return true
 	}
-	if existingSource != nil && !apiequality.Semantic.DeepEqual(normalizeRecoveryExternalCluster(existingSource), normalizeRecoveryExternalCluster(desiredSource)) {
+	if existingSource != nil && !apiequality.Semantic.DeepEqual(recoveryExternalClusterIdentity(existingSource), recoveryExternalClusterIdentity(desiredSource)) {
 		return true
 	}
 	return false
@@ -652,30 +654,32 @@ func recoveryExternalCluster(clusters []cnpgv1.ExternalCluster, sourceName strin
 		return nil
 	}
 	for i := range clusters {
-		if clusters[i].Name == sourceName && clusters[i].PluginConfiguration != nil && clusters[i].PluginConfiguration.Name == cnpg.BarmanCloudPluginName {
+		if clusters[i].Name == sourceName {
 			return clusters[i].DeepCopy()
 		}
 	}
 	return nil
 }
 
-func normalizeRecoveryExternalCluster(source *cnpgv1.ExternalCluster) *cnpgv1.ExternalCluster {
+type recoveryExternalClusterIdentityFields struct {
+	Name             string
+	PluginName       string
+	BarmanObjectName string
+	ServerName       string
+}
+
+func recoveryExternalClusterIdentity(source *cnpgv1.ExternalCluster) recoveryExternalClusterIdentityFields {
+	identity := recoveryExternalClusterIdentityFields{}
 	if source == nil {
-		return nil
+		return identity
 	}
-	normalized := source.DeepCopy()
-	if plugin := normalized.PluginConfiguration; plugin != nil {
-		// CNPG defaults these booleans on persisted objects. Treat the default
-		// representation and the omitted representation as the same intent while
-		// still detecting explicit non-default changes.
-		if plugin.Enabled != nil && *plugin.Enabled {
-			plugin.Enabled = nil
-		}
-		if plugin.IsWALArchiver != nil && !*plugin.IsWALArchiver {
-			plugin.IsWALArchiver = nil
-		}
+	identity.Name = source.Name
+	if plugin := source.PluginConfiguration; plugin != nil {
+		identity.PluginName = plugin.Name
+		identity.BarmanObjectName = plugin.Parameters["barmanObjectName"]
+		identity.ServerName = plugin.Parameters["serverName"]
 	}
-	return normalized
+	return identity
 }
 
 func reconcileErrReason(err error) string {
@@ -1249,6 +1253,8 @@ func (r *SupabaseProjectReconciler) reconcileGateway(ctx context.Context, projec
 
 // Helper methods
 
+const supabaseProjectKind = "SupabaseProject"
+
 // removeSupabaseProjectOwnerReference removes only the owner reference for
 // this operator's SupabaseProject API type and name. The UID is intentionally
 // ignored so a recreated same-name project can repair a stale reference, while
@@ -1264,7 +1270,8 @@ func removeSupabaseProjectOwnerReference(object metav1.Object, projectName strin
 	filtered := owners[:0]
 	changed := false
 	for _, owner := range owners {
-		if owner.APIVersion == supabasev1alpha1.GroupVersion.String() && owner.Kind == "SupabaseProject" && owner.Name == projectName {
+		ownerGroupVersion, err := schema.ParseGroupVersion(owner.APIVersion)
+		if err == nil && ownerGroupVersion.Group == supabasev1alpha1.GroupVersion.Group && owner.Kind == supabaseProjectKind && owner.Name == projectName {
 			changed = true
 			continue
 		}
@@ -1563,8 +1570,8 @@ func (r *SupabaseProjectReconciler) reconcileDurableMetadataProtection(ctx conte
 
 // validateRecoveryBootstrapIntent checks immutable recovery state before
 // backup/recovery reconciliation can update an ObjectStore. This preserves
-// the source identity used by an existing CNPG cluster, including plugin
-// parameters such as serverName and barmanObjectName.
+// the source identity used by an existing CNPG cluster, including the
+// explicit plugin fields serverName and barmanObjectName.
 func (r *SupabaseProjectReconciler) validateRecoveryBootstrapIntent(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
 	desired := cnpg.BuildCluster(project, &project.Status.SecretNames)
 	existing := &cnpgv1.Cluster{}
@@ -1582,9 +1589,9 @@ func (r *SupabaseProjectReconciler) validateRecoveryBootstrapIntent(ctx context.
 		return fmt.Errorf("CNPG recovery bootstrap configuration is immutable after cluster creation")
 	}
 
-	// A recovered cluster's source ObjectStore is also creation-time input. Do
-	// not let a changed destination, endpoint, or credential reference be
-	// silently rewritten before the immutable cluster check runs.
+	// A recovered cluster's source ObjectStore location is also creation-time
+	// input. Its operational credential Secret may rotate, so compare only the
+	// destination and endpoint before the immutable cluster check runs.
 	if recoveryEnabled {
 		desiredStore := cnpg.BuildRecoveryObjectStore(project)
 		currentStore := &barmancloudv1.ObjectStore{}
@@ -1606,8 +1613,7 @@ func recoveryObjectStoreIdentityChanged(existing, desired *barmancloudv1.ObjectS
 	}
 	existingConfig := existing.Spec.Configuration
 	desiredConfig := desired.Spec.Configuration
-	return !apiequality.Semantic.DeepEqual(existingConfig.BarmanCredentials, desiredConfig.BarmanCredentials) ||
-		existingConfig.EndpointURL != desiredConfig.EndpointURL ||
+	return existingConfig.EndpointURL != desiredConfig.EndpointURL ||
 		existingConfig.DestinationPath != desiredConfig.DestinationPath
 }
 

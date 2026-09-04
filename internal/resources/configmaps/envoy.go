@@ -529,23 +529,6 @@ const envoyLDS = `resources:
                               value: /rest/v1/
                             append_action: ADD_IF_ABSENT
 
-                      - name: graphql-v1-protected
-                        match:
-                          prefix: /graphql/v1
-                        route:
-                          cluster: rest
-                          prefix_rewrite: /rpc/graphql
-                          timeout: 30s
-                        request_headers_to_add:
-                          - header:
-                              key: X-Forwarded-Prefix
-                              value: /graphql/v1
-                            append_action: ADD_IF_ABSENT
-                          - header:
-                              key: Content-Profile
-                              value: graphql_public
-                            append_action: ADD_IF_ABSENT
-
                       - name: pg-protected
                         match:
                           prefix: /pg/
@@ -605,7 +588,6 @@ const envoyLDS = `resources:
                         return route == "auth-v1-protected"
                           or route == "rest-v1-openapi-protected"
                           or route == "rest-v1-protected"
-                          or route == "graphql-v1-protected"
                           or route == "pg-protected"
                       end
 
@@ -649,7 +631,6 @@ const envoyLDS = `resources:
                         return route == "auth-v1-protected"
                           or route == "rest-v1-openapi-protected"
                           or route == "rest-v1-protected"
-                          or route == "graphql-v1-protected"
                           or route == "pg-protected"
                       end
 
@@ -682,7 +663,6 @@ const envoyLDS = `resources:
                         return route == "auth-v1-protected"
                           or route == "rest-v1-openapi-protected"
                           or route == "rest-v1-protected"
-                          or route == "graphql-v1-protected"
                           or route == "pg-protected"
                       end
 
@@ -785,7 +765,7 @@ const envoyLDS = `resources:
                       function envoy_on_request(request_handle)
                         local route = request_handle:streamInfo():routeName()
                         if route ~= "auth-v1-protected" and route ~= "rest-v1-protected"
-                          and route ~= "rest-v1-openapi-protected" and route ~= "graphql-v1-protected"
+                          and route ~= "rest-v1-openapi-protected"
                           and route ~= "pg-protected" then
                           return
                         end
@@ -825,9 +805,6 @@ const envoyLDS = `resources:
                             - url_path:
                                 path:
                                   prefix: /rest/v1/
-                            - url_path:
-                                path:
-                                  prefix: /graphql/v1
                           principals:
                             - header:
                                 name: apikey

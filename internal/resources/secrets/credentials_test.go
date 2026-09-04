@@ -55,11 +55,15 @@ func TestValidateProjectCredentials(t *testing.T) {
 		},
 		"bad signature": func(values map[string]string) {
 			token := values[ProjectCredentialsAnonRoleJWTKey]
+			parts := strings.Split(token, ".")
+			signature := []byte(parts[2])
 			replacement := byte('A')
-			if token[len(token)-1] == replacement {
+			if signature[0] == replacement {
 				replacement = 'B'
 			}
-			values[ProjectCredentialsAnonRoleJWTKey] = token[:len(token)-1] + string(replacement)
+			signature[0] = replacement
+			parts[2] = string(signature)
+			values[ProjectCredentialsAnonRoleJWTKey] = strings.Join(parts, ".")
 		},
 		"wrong role": func(values map[string]string) {
 			values[ProjectCredentialsAnonRoleJWTKey] = signRoleWithClaims(t, key, "service_role", "authenticated", "fixture", 4102444800)

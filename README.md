@@ -144,13 +144,16 @@ spec:
       retentionPolicy: 30d
 ```
 
-Recovery bootstrap is creation-time state and cannot be changed after the
-CNPG Cluster exists. Supported mutable settings (instances, image, resources,
-superuser access, PostgreSQL parameters, managed roles, backup plugin, and
-storage expansion) continue to converge. Storage shrink is rejected.
+Recovery bootstrap identity is creation-time state and cannot be changed after
+the CNPG Cluster exists. Its destination path, endpoint, server name, exact
+bootstrap source, and recovery target remain immutable; the recovery
+`s3CredentialsSecret` is operational access and can rotate after bootstrap.
+Supported mutable settings (instances, image, resources, superuser access,
+PostgreSQL parameters, managed roles, backup plugin, and storage expansion)
+continue to converge. Storage shrink is rejected.
 
 Backup and recovery always use distinct ObjectStore names and must use distinct
-normalized `destinationPath` values. They may point at the same credentials
+configured `destinationPath` values. They may point at the same credentials
 Secret; use least-privilege IAM so recovery can read its source while backup can
 write its destination.
 
