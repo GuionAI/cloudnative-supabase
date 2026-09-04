@@ -4,6 +4,7 @@
 
 - Feature branch: `modern-supabase-platform`
 - Starting `HEAD`: `9995056` (`feat(auth): allow custom GoTrue environment (#18)`)
+- Implementation commit: `f3fd3b4` (`feat(platform): implement modern Supabase platform`)
 - Worker pane: `w5P:p6`
 - Owner pane: `w5P:p1`
 - Scope: the complete `spec.md` and tickets 01–05, in dependency order
