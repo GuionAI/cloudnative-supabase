@@ -86,6 +86,13 @@ not rotate ES256 signing keys or invalidate sessions.
 JWT environment names are rejected in `goTrueEnv`; provider-specific settings
 remain supported.
 
+For a new or rotated external credential bundle, have the human run
+`go run ./cmd/project-credentials-wizard` in a trusted interactive terminal.
+The wizard atomically generates and production-validates all five fields before
+copying them through OSC52. Agents hand off this command and never run it on
+the human's behalf. Use the complete output from one run; ad hoc or
+field-by-field generators can create internally inconsistent bundles.
+
 ## Durable ownership
 
 Never set a SupabaseProject controller owner on the CNPG Cluster, backup or

@@ -88,6 +88,20 @@ Infisical Kubernetes operator to synchronize them into the orphaned Secret
 above. Keep `signingKeys` as its JSON string; do not wrap the five values in a
 second JSON document or store the derived JWKS in Infisical.
 
+Generate a complete bundle with the repository wizard instead of assembling
+the fields independently:
+
+```bash
+go run ./cmd/project-credentials-wizard
+```
+
+Run it yourself in a trusted interactive terminal; it refuses redirected input
+or output. The wizard generates the values in process memory, validates the
+complete bundle with the operator's production validator, and copies each
+field through OSC52 without rendering plaintext or writing credentials to
+disk. A rerun creates a new atomic bundle; never combine fields from separate
+runs.
+
 For example, an Infisical `InfisicalStaticSecret` can target the same
 namespace with `creationPolicy: Orphan` (the auth objects and credentials are
 created separately):
