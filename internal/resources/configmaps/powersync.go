@@ -49,10 +49,12 @@ func BuildPowersyncConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.
 	configYAML := fmt.Sprintf(`storage:
   type: postgresql
   uri: !env PS_POWERSYNC_STORAGE_URI
+  sslmode: disable
 replication:
   connections:
     - type: postgresql
       uri: !env PS_POWERSYNC_REPLICATION_URI
+      sslmode: disable
       tag: default
 dev:
   demo_auth: false

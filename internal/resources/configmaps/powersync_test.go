@@ -17,14 +17,16 @@ const (
 
 type powersyncConfig struct {
 	Storage struct {
-		Type string `json:"type"`
-		URI  string `json:"uri"`
+		Type    string `json:"type"`
+		URI     string `json:"uri"`
+		SSLMode string `json:"sslmode"`
 	} `json:"storage"`
 	Replication struct {
 		Connections []struct {
-			Type string `json:"type"`
-			URI  string `json:"uri"`
-			Tag  string `json:"tag"`
+			Type    string `json:"type"`
+			URI     string `json:"uri"`
+			SSLMode string `json:"sslmode"`
+			Tag     string `json:"tag"`
 		} `json:"connections"`
 	} `json:"replication"`
 	ClientAuth struct {
@@ -131,6 +133,9 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 	if config.Storage.URI != "PS_POWERSYNC_STORAGE_URI" {
 		t.Errorf("storage URI = %q, want environment template", config.Storage.URI)
 	}
+	if config.Storage.SSLMode != "disable" {
+		t.Errorf("storage sslmode = %q, want disable", config.Storage.SSLMode)
+	}
 	if !strings.Contains(configYAML, "uri: !env PS_POWERSYNC_STORAGE_URI") {
 		t.Error("storage URI must use PowerSync's !env tag")
 	}
@@ -148,6 +153,9 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 	}
 	if conn.URI != "PS_POWERSYNC_REPLICATION_URI" {
 		t.Errorf("replication URI = %q, want environment template", conn.URI)
+	}
+	if conn.SSLMode != "disable" {
+		t.Errorf("replication sslmode = %q, want disable", conn.SSLMode)
 	}
 	if !strings.Contains(configYAML, "uri: !env PS_POWERSYNC_REPLICATION_URI") {
 		t.Error("replication URI must use PowerSync's !env tag")
