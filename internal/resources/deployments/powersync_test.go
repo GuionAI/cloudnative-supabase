@@ -2,6 +2,7 @@ package deployments
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
@@ -284,9 +285,9 @@ func TestBuildPowersyncEnvVars(t *testing.T) {
 	dep := BuildPowersyncAPIDeployment(project, secretNames)
 	env := dep.Spec.Template.Spec.Containers[0].Env
 
-	envMap := make(map[string]struct{})
+	envMap := make(map[string]string)
 	for _, e := range env {
-		envMap[e.Name] = struct{}{}
+		envMap[e.Name] = e.Value
 	}
 
 	required := []string{"POWERSYNC_CONFIG_PATH", "NODE_OPTIONS", "LOG_FORMAT", "METRICS_PORT", "MICRO_PROBE_TYPE", "PS_STORAGE_PASSWORD", "PS_REPLICATION_PASSWORD", "PS_POWERSYNC_STORAGE_URI", "PS_POWERSYNC_REPLICATION_URI"}
@@ -298,6 +299,11 @@ func TestBuildPowersyncEnvVars(t *testing.T) {
 	for _, env := range env {
 		if env.Name == "POWERSYNC_CONFIG_PATH" && env.Value != "/powersync/config/config.yaml" {
 			t.Errorf("POWERSYNC_CONFIG_PATH = %q, want config.yaml", env.Value)
+		}
+	}
+	for _, name := range []string{"PS_POWERSYNC_STORAGE_URI", "PS_POWERSYNC_REPLICATION_URI"} {
+		if strings.Contains(envMap[name], "sslmode=") {
+			t.Errorf("%s must leave TLS policy to config.yaml, got %q", name, envMap[name])
 		}
 	}
 }

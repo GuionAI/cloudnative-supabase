@@ -373,11 +373,11 @@ func buildPowersyncEnv(project *supabasev1alpha1.SupabaseProject, secretNames *s
 		// PowerSync resolves !env PS_* tags in config.yaml.
 		{
 			Name:  "PS_POWERSYNC_STORAGE_URI",
-			Value: fmt.Sprintf("postgresql://powersync_storage:$(PS_STORAGE_PASSWORD)@%s:5432/supabase?sslmode=disable", dbHost),
+			Value: fmt.Sprintf("postgresql://powersync_storage:$(PS_STORAGE_PASSWORD)@%s:5432/supabase", dbHost),
 		},
 		{
 			Name:  "PS_POWERSYNC_REPLICATION_URI",
-			Value: fmt.Sprintf("postgresql://powersync_replication:$(PS_REPLICATION_PASSWORD)@%s:5432/supabase?sslmode=disable", dbHost),
+			Value: fmt.Sprintf("postgresql://powersync_replication:$(PS_REPLICATION_PASSWORD)@%s:5432/supabase", dbHost),
 		},
 	}
 }
