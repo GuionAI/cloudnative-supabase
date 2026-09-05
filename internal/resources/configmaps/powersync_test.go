@@ -1,11 +1,11 @@
 package configmaps
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 )
@@ -14,6 +14,29 @@ const (
 	testProjectName = "my-app"
 	testNamespace   = "test-ns"
 )
+
+type powersyncConfig struct {
+	Storage struct {
+		Type string `json:"type"`
+		URI  string `json:"uri"`
+	} `json:"storage"`
+	Replication struct {
+		Connections []struct {
+			Type string `json:"type"`
+			URI  string `json:"uri"`
+			Tag  string `json:"tag"`
+		} `json:"connections"`
+	} `json:"replication"`
+	ClientAuth struct {
+		Supabase bool     `json:"supabase"`
+		JWKSURI  string   `json:"jwks_uri"`
+		Audience []string `json:"audience"`
+	} `json:"client_auth"`
+	SyncRules struct {
+		Path        string `json:"path"`
+		ExitOnError bool   `json:"exit_on_error"`
+	} `json:"sync_rules"`
+}
 
 func newTestProject(namespace string) *supabasev1alpha1.SupabaseProject {
 	return &supabasev1alpha1.SupabaseProject{
@@ -89,23 +112,27 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 		t.Errorf("Namespace = %q, want %q", cm.Namespace, testNamespace)
 	}
 
-	configJSON, ok := cm.Data["config.json"]
+	configYAML, ok := cm.Data["config.yaml"]
 	if !ok {
-		t.Fatal("config.json key not found")
+		t.Fatal("config.yaml key not found")
 	}
 
-	// Parse the JSON to validate structure
+	// Parse the YAML to validate structure. The raw assertions below preserve
+	// the !env tags that PowerSync resolves before decoding the values.
 	var config powersyncConfig
-	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
+	if err := yaml.Unmarshal([]byte(configYAML), &config); err != nil {
+		t.Fatalf("invalid YAML: %v", err)
 	}
 
 	// Storage
 	if config.Storage.Type != "postgresql" {
 		t.Errorf("storage type = %q, want postgresql", config.Storage.Type)
 	}
-	if config.Storage.URI != "{{ env.PS_POWERSYNC_STORAGE_URI }}" {
+	if config.Storage.URI != "PS_POWERSYNC_STORAGE_URI" {
 		t.Errorf("storage URI = %q, want environment template", config.Storage.URI)
+	}
+	if !strings.Contains(configYAML, "uri: !env PS_POWERSYNC_STORAGE_URI") {
+		t.Error("storage URI must use PowerSync's !env tag")
 	}
 
 	// Replication
@@ -119,8 +146,11 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 	if conn.Tag != "default" {
 		t.Errorf("connection tag = %q, want default", conn.Tag)
 	}
-	if conn.URI != "{{ env.PS_POWERSYNC_REPLICATION_URI }}" {
+	if conn.URI != "PS_POWERSYNC_REPLICATION_URI" {
 		t.Errorf("replication URI = %q, want environment template", conn.URI)
+	}
+	if !strings.Contains(configYAML, "uri: !env PS_POWERSYNC_REPLICATION_URI") {
+		t.Error("replication URI must use PowerSync's !env tag")
 	}
 
 	// Client auth

@@ -17,7 +17,7 @@ limitations under the License.
 package configmaps
 
 import (
-	"encoding/json"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,92 +41,34 @@ func PowersyncSyncRulesConfigMapName(project *supabasev1alpha1.SupabaseProject) 
 	return project.Name + "-powersync-sync-rules"
 }
 
-// powersyncConfig represents the PowerSync service config.json structure
-type powersyncConfig struct {
-	Storage     powersyncStorage     `json:"storage"`
-	Replication powersyncReplication `json:"replication"`
-	Dev         powersyncDev         `json:"dev"`
-	ClientAuth  powersyncClientAuth  `json:"client_auth"`
-	Migrations  powersyncMigrations  `json:"migrations"`
-	Port        int                  `json:"port"`
-	SyncRules   powersyncSyncRules   `json:"sync_rules"`
-	Telemetry   powersyncTelemetry   `json:"telemetry"`
-}
-
-type powersyncStorage struct {
-	Type string `json:"type"`
-	URI  string `json:"uri"`
-}
-
-type powersyncReplication struct {
-	Connections []powersyncConnection `json:"connections"`
-}
-
-type powersyncConnection struct {
-	Type string `json:"type"`
-	URI  string `json:"uri"`
-	Tag  string `json:"tag"`
-}
-
-type powersyncClientAuth struct {
-	// Supabase is kept false so PowerSync does not enable its legacy HMAC
-	// integration. JWTs are verified through the public JWKS URI instead.
-	Supabase bool     `json:"supabase"`
-	JWKSURI  string   `json:"jwks_uri"`
-	Audience []string `json:"audience"`
-}
-
-type powersyncDev struct {
-	DemoAuth bool `json:"demo_auth"`
-}
-
-type powersyncMigrations struct {
-	DisableAutoMigration bool `json:"disable_auto_migration"`
-}
-
-type powersyncSyncRules struct {
-	Path        string `json:"path"`
-	ExitOnError bool   `json:"exit_on_error"`
-}
-
-type powersyncTelemetry struct {
-	DisableTelemetrySharing bool `json:"disable_telemetry_sharing"`
-}
-
-// BuildPowersyncConfigMap creates the PowerSync config.json ConfigMap.
-// Database credentials are injected via environment variable templates that
-// PowerSync resolves at runtime.
+// BuildPowersyncConfigMap creates the PowerSync config.yaml ConfigMap.
+// PowerSync's !env tag resolves the database URIs at runtime without putting
+// credentials in the ConfigMap.
 func BuildPowersyncConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.ConfigMap {
-	config := powersyncConfig{
-		Storage: powersyncStorage{
-			Type: "postgresql",
-			URI:  "{{ env.PS_POWERSYNC_STORAGE_URI }}",
-		},
-		Replication: powersyncReplication{
-			Connections: []powersyncConnection{
-				{
-					Type: "postgresql",
-					URI:  "{{ env.PS_POWERSYNC_REPLICATION_URI }}",
-					Tag:  "default",
-				},
-			},
-		},
-		Dev: powersyncDev{DemoAuth: false},
-		ClientAuth: powersyncClientAuth{
-			Supabase: false,
-			JWKSURI:  common.AuthJWKSURL(project.Spec.Auth.ExternalURL),
-			Audience: []string{"authenticated"},
-		},
-		Migrations: powersyncMigrations{DisableAutoMigration: false},
-		Port:       8080,
-		SyncRules: powersyncSyncRules{
-			Path:        "/powersync/sync_rules/sync_rules.yaml",
-			ExitOnError: true,
-		},
-		Telemetry: powersyncTelemetry{DisableTelemetrySharing: false},
-	}
-
-	configJSON, _ := json.MarshalIndent(config, "", "  ")
+	configYAML := fmt.Sprintf(`storage:
+  type: postgresql
+  uri: !env PS_POWERSYNC_STORAGE_URI
+replication:
+  connections:
+    - type: postgresql
+      uri: !env PS_POWERSYNC_REPLICATION_URI
+      tag: default
+dev:
+  demo_auth: false
+client_auth:
+  supabase: false
+  jwks_uri: %q
+  audience:
+    - authenticated
+migrations:
+  disable_auto_migration: false
+port: 8080
+sync_rules:
+  path: /powersync/sync_rules/sync_rules.yaml
+  exit_on_error: true
+telemetry:
+  disable_telemetry_sharing: false
+`, common.AuthJWKSURL(project.Spec.Auth.ExternalURL))
 
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -135,7 +77,7 @@ func BuildPowersyncConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.
 			Labels:    common.ComponentLabels(project, PowersyncConfigComponentName),
 		},
 		Data: map[string]string{
-			"config.json": string(configJSON),
+			"config.yaml": configYAML,
 		},
 	}
 }

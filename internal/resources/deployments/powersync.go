@@ -339,7 +339,7 @@ func buildPowersyncEnv(project *supabasev1alpha1.SupabaseProject, secretNames *s
 	dbHost := cnpg.ClusterRWServiceName(project)
 
 	return []corev1.EnvVar{
-		{Name: "POWERSYNC_CONFIG_PATH", Value: "/powersync/config/config.json"},
+		{Name: "POWERSYNC_CONFIG_PATH", Value: "/powersync/config/config.yaml"},
 		{Name: "NODE_OPTIONS", Value: nodeOptions},
 		{Name: "LOG_FORMAT", Value: "json"},
 		{Name: "METRICS_PORT", Value: "9464"},
@@ -370,7 +370,7 @@ func buildPowersyncEnv(project *supabasev1alpha1.SupabaseProject, secretNames *s
 				},
 			},
 		},
-		// PowerSync resolves {{ env.VAR }} in config.json
+		// PowerSync resolves !env PS_* tags in config.yaml.
 		{
 			Name:  "PS_POWERSYNC_STORAGE_URI",
 			Value: fmt.Sprintf("postgresql://powersync_storage:$(PS_STORAGE_PASSWORD)@%s:5432/supabase?sslmode=disable", dbHost),
