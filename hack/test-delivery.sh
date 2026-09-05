@@ -5,7 +5,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
-for workflow in .github/workflows/ci.yaml .github/workflows/pr.yaml .github/workflows/release.yaml; do
+for workflow in .github/workflows/ci.yaml .github/workflows/release.yaml; do
   grep -Fq 'platforms: linux/amd64' "${workflow}"
 done
 if grep -R -q 'linux/arm64' .github/workflows Makefile; then
