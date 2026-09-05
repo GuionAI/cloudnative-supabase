@@ -41,7 +41,6 @@ func TestValidateEmailHookSecretRejectsMalformedValues(t *testing.T) {
 	tests := map[string]string{
 		"empty payload":  "v1,whsec_",
 		"invalid base64": "v1,whsec_not-base64",
-		"short payload":  "v1,whsec_" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 31)),
 		"wrong prefix":   strings.TrimPrefix(validValue, "v1,"),
 	}
 
@@ -58,6 +57,13 @@ func TestValidateEmailHookSecretRejectsMalformedValues(t *testing.T) {
 	valid := &corev1.Secret{Data: map[string][]byte{EmailHookSecretKey: []byte(validValue)}}
 	if err := ValidateEmailHookSecret(valid); err != nil {
 		t.Fatalf("ValidateEmailHookSecret() rejected a valid secret: %v", err)
+	}
+
+	preserved := &corev1.Secret{Data: map[string][]byte{EmailHookSecretKey: []byte(
+		"v1,whsec_" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 58)),
+	)}}
+	if err := ValidateEmailHookSecret(preserved); err != nil {
+		t.Fatalf("ValidateEmailHookSecret() rejected a valid preserved secret: %v", err)
 	}
 }
 

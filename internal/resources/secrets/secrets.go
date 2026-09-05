@@ -50,8 +50,6 @@ const (
 	GoTrueFallbackSecretNameSuffix = "-gotrue-jwt-secret"
 )
 
-const emailHookSecretBytes = 32
-
 // ProjectCredentials is the validated, transient projection of the external
 // credential bundle. Secret values are never written to project status.
 type ProjectCredentials struct {
@@ -289,7 +287,7 @@ func ValidateEmailHookSecret(secret *corev1.Secret) error {
 		return fmt.Errorf("email hook Secret must contain a Standard Webhooks value")
 	}
 	payload, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(value, "v1,whsec_"))
-	if err != nil || len(payload) != emailHookSecretBytes {
+	if err != nil || len(payload) == 0 {
 		return fmt.Errorf("email hook Secret contains an invalid Standard Webhooks value")
 	}
 	return nil
