@@ -92,14 +92,15 @@ Generate a complete bundle with the repository wizard instead of assembling
 the fields independently:
 
 ```bash
-fish hack/project-credentials-wizard.fish
+go run ./cmd/project-credentials-wizard
 ```
 
-The wizard requires `go`, `jq`, and a Fish function or command named `copy`.
-It generates the values in memory, validates the complete bundle with the
-operator's production validator, and copies each field in sequence without
-printing or writing credentials to disk. A rerun creates a new atomic bundle;
-never combine fields from separate runs.
+Run it yourself in a trusted interactive terminal; it refuses redirected input
+or output. The wizard generates the values in process memory, validates the
+complete bundle with the operator's production validator, and copies each
+field through OSC52 without rendering plaintext or writing credentials to
+disk. A rerun creates a new atomic bundle; never combine fields from separate
+runs.
 
 For example, an Infisical `InfisicalStaticSecret` can target the same
 namespace with `creationPolicy: Orphan` (the auth objects and credentials are

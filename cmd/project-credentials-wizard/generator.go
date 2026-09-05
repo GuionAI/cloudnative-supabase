@@ -19,14 +19,12 @@ package main
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math/big"
-	"os"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -40,23 +38,11 @@ const opaqueChecksumContext = "supabase-self-hosted"
 var rawURL = base64.RawURLEncoding
 
 type credentialBundle struct {
-	SigningKeys    string `json:"signingKeys"`
-	PublishableKey string `json:"publishableKey"`
-	SecretKey      string `json:"secretKey"`
-	AnonRoleJWT    string `json:"anonRoleJwt"`
-	ServiceRoleJWT string `json:"serviceRoleJwt"`
-}
-
-func main() {
-	bundle, err := generateCredentialBundle(time.Now(), rand.Reader)
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "generate project credentials: %v\n", err)
-		os.Exit(1)
-	}
-	if err := json.NewEncoder(os.Stdout).Encode(bundle); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "encode project credentials: %v\n", err)
-		os.Exit(1)
-	}
+	SigningKeys    string
+	PublishableKey string
+	SecretKey      string
+	AnonRoleJWT    string
+	ServiceRoleJWT string
 }
 
 func generateCredentialBundle(now time.Time, random io.Reader) (credentialBundle, error) {
