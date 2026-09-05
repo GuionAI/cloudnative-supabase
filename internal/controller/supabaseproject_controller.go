@@ -2039,7 +2039,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 
 	// Deploy Powersync API
 	apiDeployment := deployments.BuildPowersyncAPIDeployment(project, secretNames)
-	applyPowerSyncConfigHash(apiDeployment, psConfig.Data["config.json"], syncRulesContent)
+	applyPowerSyncConfigHash(apiDeployment, psConfig.Data[configmaps.PowersyncConfigKey], syncRulesContent)
 	if err := r.createOrUpdateDeployment(ctx, project, apiDeployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "APIDeploymentFailed", err.Error())
 		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
@@ -2060,7 +2060,7 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 
 	// Deploy Powersync Replication
 	replDeployment := deployments.BuildPowersyncReplicationDeployment(project, secretNames)
-	applyPowerSyncConfigHash(replDeployment, psConfig.Data["config.json"], syncRulesContent)
+	applyPowerSyncConfigHash(replDeployment, psConfig.Data[configmaps.PowersyncConfigKey], syncRulesContent)
 	if err := r.createOrUpdateDeployment(ctx, project, replDeployment); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypePowersyncReady, metav1.ConditionFalse, "ReplicationDeploymentFailed", err.Error())
 		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {

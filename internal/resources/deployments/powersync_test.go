@@ -295,4 +295,9 @@ func TestBuildPowersyncEnvVars(t *testing.T) {
 			t.Errorf("missing required env var: %s", name)
 		}
 	}
+	for _, env := range env {
+		if env.Name == "POWERSYNC_CONFIG_PATH" && env.Value != "/powersync/config/config.yaml" {
+			t.Errorf("POWERSYNC_CONFIG_PATH = %q, want config.yaml", env.Value)
+		}
+	}
 }
