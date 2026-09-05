@@ -73,7 +73,7 @@ type serviceReconcileConfig struct {
 	conditionType   string
 	buildDeployment func() *appsv1.Deployment
 	buildService    func() *corev1.Service
-	setStatus       func(ready bool)
+	setStatus       func(status supabasev1alpha1.ServiceStatus)
 	logFields       []any // optional
 	credentialHash  string
 }
@@ -85,7 +85,7 @@ func newServiceReconcileConfig(
 	conditionType string,
 	buildDeployment func() *appsv1.Deployment,
 	buildService func() *corev1.Service,
-	setStatus func(ready bool),
+	setStatus func(status supabasev1alpha1.ServiceStatus),
 ) serviceReconcileConfig {
 	return serviceReconcileConfig{
 		name:            name,
@@ -190,6 +190,9 @@ func (r *SupabaseProjectReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Phase 5: Deploy Supabase services
 	if err := r.reconcileServices(ctx, project, credentials); err != nil {
 		return ctrl.Result{}, err
+	}
+	if !coreServicesReady(project) {
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
 	}
 
 	// Phase 6: PowerSync (after core services)
@@ -897,32 +900,51 @@ func (r *SupabaseProjectReconciler) reconcileServices(ctx context.Context, proje
 
 	// Deploy Auth (GoTrue)
 	if err := r.reconcileAuth(ctx, project, secretNames, credentialHash); err != nil {
-		return err
+		return r.failCoreServices(ctx, project, err)
 	}
 
 	// Deploy REST (PostgREST)
 	if err := r.reconcileRest(ctx, project, secretNames, credentialHash); err != nil {
-		return err
+		return r.failCoreServices(ctx, project, err)
 	}
 
 	// Deploy Studio
 	if err := r.reconcileStudio(ctx, project, secretNames, credentialHash); err != nil {
-		return err
+		return r.failCoreServices(ctx, project, err)
 	}
 
 	// Deploy Meta (postgres-meta)
 	// postgres-meta consumes no project credential material, so credential
 	// rotation must not roll this deployment.
 	if err := r.reconcileMeta(ctx, project, secretNames); err != nil {
-		return err
+		return r.failCoreServices(ctx, project, err)
 	}
 
 	// Deploy Envoy gateway
 	if err := r.reconcileGateway(ctx, project, credentialHash); err != nil {
-		return err
+		return r.failCoreServices(ctx, project, err)
+	}
+
+	if !coreServicesReady(project) {
+		project.Status.Phase = supabasev1alpha1.PhaseProvisioning
+		r.setCondition(project, supabasev1alpha1.ConditionTypeReady, metav1.ConditionFalse, "CoreServicesPending", "Waiting for all core service deployments to become ready")
+		if err := r.updateProjectStatus(ctx, project); err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+// failCoreServices records the aggregate failure state before returning the
+// original component reconciliation error to the controller runtime.
+func (r *SupabaseProjectReconciler) failCoreServices(ctx context.Context, project *supabasev1alpha1.SupabaseProject, reconcileErr error) error {
+	project.Status.Phase = supabasev1alpha1.PhaseProvisioning
+	r.setCondition(project, supabasev1alpha1.ConditionTypeReady, metav1.ConditionFalse, "CoreServicesFailed", fmt.Sprintf("Core service reconciliation failed: %v", reconcileErr))
+	if err := r.updateProjectStatus(ctx, project); err != nil {
+		logf.FromContext(ctx).Error(err, "persisting core service failure status")
+	}
+	return reconcileErr
 }
 
 // reconcileServiceComponent is a generic helper for reconciling a service component (deployment + service)
@@ -937,6 +959,7 @@ func (r *SupabaseProjectReconciler) reconcileServiceComponent(ctx context.Contex
 	}
 	log.V(1).Info(fmt.Sprintf("Built %s deployment", config.name), config.logFields...)
 	if err := r.createOrUpdateDeployment(ctx, project, deployment); err != nil {
+		config.setStatus(supabasev1alpha1.ServiceStatus{})
 		r.setCondition(project, config.conditionType, metav1.ConditionFalse, "DeploymentFailed", err.Error())
 		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
@@ -947,6 +970,7 @@ func (r *SupabaseProjectReconciler) reconcileServiceComponent(ctx context.Contex
 	// Create service
 	service := config.buildService()
 	if err := r.createOrUpdateService(ctx, project, service); err != nil {
+		config.setStatus(supabasev1alpha1.ServiceStatus{})
 		r.setCondition(project, config.conditionType, metav1.ConditionFalse, "ServiceFailed", err.Error())
 		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
@@ -954,7 +978,21 @@ func (r *SupabaseProjectReconciler) reconcileServiceComponent(ctx context.Contex
 		return err
 	}
 
-	config.setStatus(true)
+	ready, availableReplicas, err := r.deploymentStatus(ctx, deployment)
+	if err != nil {
+		config.setStatus(supabasev1alpha1.ServiceStatus{})
+		r.setCondition(project, config.conditionType, metav1.ConditionFalse, "DeploymentStatusFailed", err.Error())
+		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
+			return statusErr
+		}
+		return err
+	}
+
+	config.setStatus(supabasev1alpha1.ServiceStatus{Ready: ready, AvailableReplicas: availableReplicas})
+	if !ready {
+		r.setCondition(project, config.conditionType, metav1.ConditionFalse, "DeploymentPending", fmt.Sprintf("Waiting for %s deployment to become ready", config.name))
+		return nil
+	}
 	r.setCondition(project, config.conditionType, metav1.ConditionTrue, "Ready", fmt.Sprintf("%s service is running", config.name))
 	return nil
 }
@@ -983,7 +1021,7 @@ func (r *SupabaseProjectReconciler) reconcileAuth(ctx context.Context, project *
 		supabasev1alpha1.ConditionTypeAuthReady,
 		func() *appsv1.Deployment { return deployment },
 		func() *corev1.Service { return services.BuildAuthService(project) },
-		func(ready bool) { project.Status.Services.Auth = supabasev1alpha1.ServiceStatus{Ready: ready} },
+		func(status supabasev1alpha1.ServiceStatus) { project.Status.Services.Auth = status },
 	)
 	config.logFields = []any{
 		"image", fmt.Sprintf("%s:%s", "supabase/gotrue", project.Spec.Auth.ImageTag),
@@ -1104,7 +1142,7 @@ func (r *SupabaseProjectReconciler) reconcileRest(ctx context.Context, project *
 		supabasev1alpha1.ConditionTypeRestReady,
 		func() *appsv1.Deployment { return deployments.BuildRestDeployment(project, secretNames) },
 		func() *corev1.Service { return services.BuildRestService(project) },
-		func(ready bool) { project.Status.Services.Rest = supabasev1alpha1.ServiceStatus{Ready: ready} },
+		func(status supabasev1alpha1.ServiceStatus) { project.Status.Services.Rest = status },
 	)
 	config.logFields = []any{
 		"image", fmt.Sprintf("%s:%s", "postgrest/postgrest", project.Spec.Rest.ImageTag),
@@ -1121,7 +1159,7 @@ func (r *SupabaseProjectReconciler) reconcileStudio(ctx context.Context, project
 		supabasev1alpha1.ConditionTypeStudioReady,
 		func() *appsv1.Deployment { return deployments.BuildStudioDeployment(project, secretNames) },
 		func() *corev1.Service { return services.BuildStudioService(project) },
-		func(ready bool) { project.Status.Services.Studio = supabasev1alpha1.ServiceStatus{Ready: ready} },
+		func(status supabasev1alpha1.ServiceStatus) { project.Status.Services.Studio = status },
 	)
 	config.logFields = []any{
 		"image", fmt.Sprintf("%s:%s", "supabase/studio", project.Spec.Studio.ImageTag),
@@ -1138,7 +1176,7 @@ func (r *SupabaseProjectReconciler) reconcileMeta(ctx context.Context, project *
 		supabasev1alpha1.ConditionTypeMetaReady,
 		func() *appsv1.Deployment { return deployments.BuildMetaDeployment(project, secretNames) },
 		func() *corev1.Service { return services.BuildMetaService(project) },
-		func(ready bool) { project.Status.Services.Meta = supabasev1alpha1.ServiceStatus{Ready: ready} },
+		func(status supabasev1alpha1.ServiceStatus) { project.Status.Services.Meta = status },
 	)
 	config.logFields = []any{
 		"image", fmt.Sprintf("%s:%s", "supabase/postgres-meta", project.Spec.Meta.ImageTag),
@@ -1155,6 +1193,7 @@ func (r *SupabaseProjectReconciler) reconcileGateway(ctx context.Context, projec
 	envoyConfig := configmaps.BuildEnvoyConfigMap(project)
 	log.V(1).Info("Built Envoy ConfigMap", "name", envoyConfig.Name)
 	if err := r.createOrUpdateConfigMap(ctx, project, envoyConfig); err != nil {
+		project.Status.Services.Gateway = supabasev1alpha1.ServiceStatus{}
 		r.setCondition(project, supabasev1alpha1.ConditionTypeGatewayReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
 		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 			return statusErr
@@ -1167,7 +1206,7 @@ func (r *SupabaseProjectReconciler) reconcileGateway(ctx context.Context, projec
 		supabasev1alpha1.ConditionTypeGatewayReady,
 		func() *appsv1.Deployment { return deployments.BuildGatewayDeployment(project) },
 		func() *corev1.Service { return services.BuildGatewayService(project) },
-		func(ready bool) { project.Status.Services.Gateway = supabasev1alpha1.ServiceStatus{Ready: ready} },
+		func(status supabasev1alpha1.ServiceStatus) { project.Status.Services.Gateway = status },
 	)
 	config.credentialHash = credentialHash
 	config.logFields = []any{
@@ -2044,11 +2083,11 @@ func (r *SupabaseProjectReconciler) reconcilePowersync(ctx context.Context, proj
 		return ctrl.Result{}, err
 	}
 
-	apiReady, apiAvailable, err := r.powersyncDeploymentStatus(ctx, apiDeployment)
+	apiReady, apiAvailable, err := r.deploymentStatus(ctx, apiDeployment)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	replicationReady, replicationAvailable, err := r.powersyncDeploymentStatus(ctx, replDeployment)
+	replicationReady, replicationAvailable, err := r.deploymentStatus(ctx, replDeployment)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -2141,15 +2180,21 @@ func (r *SupabaseProjectReconciler) deletePowerSyncOwnedResource(ctx context.Con
 	return client.IgnoreNotFound(r.Delete(ctx, object))
 }
 
-func (r *SupabaseProjectReconciler) powersyncDeploymentStatus(ctx context.Context, desired *appsv1.Deployment) (bool, int32, error) {
+func (r *SupabaseProjectReconciler) deploymentStatus(ctx context.Context, desired *appsv1.Deployment) (bool, int32, error) {
+	if desired == nil {
+		return false, 0, nil
+	}
 	existing := &appsv1.Deployment{}
 	if err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, 0, nil
+		}
 		return false, 0, err
 	}
-	return powersyncDeploymentIsReady(existing), existing.Status.AvailableReplicas, nil
+	return deploymentIsReady(existing), existing.Status.AvailableReplicas, nil
 }
 
-func powersyncDeploymentIsReady(deployment *appsv1.Deployment) bool {
+func deploymentIsReady(deployment *appsv1.Deployment) bool {
 	expected := int32(1)
 	if deployment.Spec.Replicas != nil {
 		expected = *deployment.Spec.Replicas
@@ -2159,6 +2204,15 @@ func powersyncDeploymentIsReady(deployment *appsv1.Deployment) bool {
 		deployment.Status.ReadyReplicas == expected &&
 		deployment.Status.AvailableReplicas == expected &&
 		deployment.Status.UnavailableReplicas == 0
+}
+
+func coreServicesReady(project *supabasev1alpha1.SupabaseProject) bool {
+	serviceStatus := project.Status.Services
+	return serviceStatus.Auth.Ready &&
+		serviceStatus.Rest.Ready &&
+		serviceStatus.Studio.Ready &&
+		serviceStatus.Meta.Ready &&
+		serviceStatus.Gateway.Ready
 }
 
 func (r *SupabaseProjectReconciler) updateProjectStatus(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {

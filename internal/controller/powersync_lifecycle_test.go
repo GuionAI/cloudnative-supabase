@@ -131,7 +131,7 @@ func ownedMeta(project *supabasev1alpha1.SupabaseProject, name string) metav1.Ob
 	}
 }
 
-func TestPowersyncDeploymentIsReadyForCurrentGeneration(t *testing.T) {
+func TestDeploymentIsReadyForCurrentGeneration(t *testing.T) {
 	t.Parallel()
 
 	replicas := int32(2)
@@ -145,27 +145,27 @@ func TestPowersyncDeploymentIsReadyForCurrentGeneration(t *testing.T) {
 			AvailableReplicas:  2,
 		},
 	}
-	if !powersyncDeploymentIsReady(deployment) {
+	if !deploymentIsReady(deployment) {
 		t.Fatal("current rollout with all replicas ready must be ready")
 	}
 	deployment.Status.ObservedGeneration = 2
-	if powersyncDeploymentIsReady(deployment) {
+	if deploymentIsReady(deployment) {
 		t.Fatal("stale rollout status must not be ready")
 	}
 	deployment.Status.ObservedGeneration = 3
 	deployment.Status.UpdatedReplicas = 1
-	if powersyncDeploymentIsReady(deployment) {
+	if deploymentIsReady(deployment) {
 		t.Fatal("old ready pods must not make an incomplete rollout ready")
 	}
 	deployment.Status.UpdatedReplicas = 2
 	deployment.Status.ReadyReplicas = 1
-	if powersyncDeploymentIsReady(deployment) {
+	if deploymentIsReady(deployment) {
 		t.Fatal("partial rollout must not be ready")
 	}
 	deployment.Status.ReadyReplicas = 2
 	deployment.Status.AvailableReplicas = 1
 	deployment.Status.UnavailableReplicas = 1
-	if powersyncDeploymentIsReady(deployment) {
+	if deploymentIsReady(deployment) {
 		t.Fatal("unavailable rollout must not be ready")
 	}
 }
