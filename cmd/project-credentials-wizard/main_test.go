@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,9 +12,10 @@ import (
 )
 
 type recordingClipboard struct {
-	copied  []string
-	current string
-	clears  int
+	copied   []string
+	current  string
+	clears   int
+	clearErr error
 }
 
 func (clipboard *recordingClipboard) Copy(value string) error {
@@ -23,8 +25,11 @@ func (clipboard *recordingClipboard) Copy(value string) error {
 }
 
 func (clipboard *recordingClipboard) Clear() error {
-	clipboard.current = ""
 	clipboard.clears++
+	if clipboard.clearErr != nil {
+		return clipboard.clearErr
+	}
+	clipboard.current = ""
 	return nil
 }
 
@@ -71,6 +76,17 @@ func TestWizardClearsClipboardWhenInputEnds(t *testing.T) {
 	}
 	if clipboard.current != "" {
 		t.Fatal("wizard left a credential in the clipboard after failure")
+	}
+}
+
+func TestWizardReportsInputAndClipboardCleanupFailures(t *testing.T) {
+	clipboard := &recordingClipboard{clearErr: errors.New("sentinel clipboard failure")}
+	err := runWizard(strings.NewReader("\n"), &bytes.Buffer{}, clipboard, time.Now(), rand.Reader)
+	if err == nil {
+		t.Fatal("runWizard() accepted incomplete input and failed cleanup")
+	}
+	if !strings.Contains(err.Error(), "input ended") || !strings.Contains(err.Error(), "clear clipboard") {
+		t.Fatalf("runWizard() error did not report both failures: %v", err)
 	}
 }
 

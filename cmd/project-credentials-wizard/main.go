@@ -79,7 +79,13 @@ func run() (err error) {
 	defer signal.Stop(interrupts)
 	go func() {
 		<-interrupts
-		_ = clipboard.Clear()
+		if err := clipboard.Clear(); err != nil {
+			_, _ = fmt.Fprintf(
+				os.Stderr,
+				"\nwarning: clipboard may still contain credential material: %v\n",
+				err,
+			)
+		}
 		os.Exit(130)
 	}()
 
@@ -94,8 +100,8 @@ func runWizard(
 	random io.Reader,
 ) (err error) {
 	defer func() {
-		if clearErr := clipboard.Clear(); err == nil && clearErr != nil {
-			err = fmt.Errorf("clear clipboard: %w", clearErr)
+		if clearErr := clipboard.Clear(); clearErr != nil {
+			err = errors.Join(err, fmt.Errorf("clear clipboard: %w", clearErr))
 		}
 	}()
 
