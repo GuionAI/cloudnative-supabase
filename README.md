@@ -88,6 +88,19 @@ Infisical Kubernetes operator to synchronize them into the orphaned Secret
 above. Keep `signingKeys` as its JSON string; do not wrap the five values in a
 second JSON document or store the derived JWKS in Infisical.
 
+Generate a complete bundle with the repository wizard instead of assembling
+the fields independently:
+
+```bash
+fish hack/project-credentials-wizard.fish
+```
+
+The wizard requires `go`, `jq`, and a Fish function or command named `copy`.
+It generates the values in memory, validates the complete bundle with the
+operator's production validator, and copies each field in sequence without
+printing or writing credentials to disk. A rerun creates a new atomic bundle;
+never combine fields from separate runs.
+
 For example, an Infisical `InfisicalStaticSecret` can target the same
 namespace with `creationPolicy: Orphan` (the auth objects and credentials are
 created separately):

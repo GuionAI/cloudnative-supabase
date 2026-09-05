@@ -86,6 +86,12 @@ not rotate ES256 signing keys or invalidate sessions.
 JWT environment names are rejected in `goTrueEnv`; provider-specific settings
 remain supported.
 
+For a new or rotated external credential bundle, use
+`fish hack/project-credentials-wizard.fish`. It atomically generates and
+production-validates all five fields before handing them to the human through
+the `copy` clipboard function. Use the complete output from one run; ad hoc or
+field-by-field generators can create internally inconsistent bundles.
+
 ## Durable ownership
 
 Never set a SupabaseProject controller owner on the CNPG Cluster, backup or
