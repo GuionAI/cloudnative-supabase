@@ -15,6 +15,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	fixturePublishableKey = "sb_publishable_A1_b2-C3d4_E5f6-G7h8I9_oWzQ-j5j"
+	fixtureSecretKey      = "sb_secret_Z9_y8-X7w6_V5u4-T3s2_R_6LqoZ8QA"
+)
+
 func TestValidateProjectCredentials(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -26,10 +31,13 @@ func TestValidateProjectCredentials(t *testing.T) {
 	}
 	bundle := map[string]string{
 		ProjectCredentialsSigningKeysKey:    mustMarshal(t, []any{private}),
-		ProjectCredentialsPublishableKey:    "sb_publishable_fixture",
-		ProjectCredentialsSecretKey:         "sb_secret_fixture",
+		ProjectCredentialsPublishableKey:    fixturePublishableKey,
+		ProjectCredentialsSecretKey:         fixtureSecretKey,
 		ProjectCredentialsAnonRoleJWTKey:    signRole(t, key, "anon"),
 		ProjectCredentialsServiceRoleJWTKey: signRole(t, key, "service_role"),
+	}
+	if len(bundle[ProjectCredentialsPublishableKey]) != 46 || len(bundle[ProjectCredentialsSecretKey]) != 41 {
+		t.Fatalf("canonical fixture lengths = %d and %d, want 46 and 41", len(bundle[ProjectCredentialsPublishableKey]), len(bundle[ProjectCredentialsSecretKey]))
 	}
 	projection, err := ValidateProjectCredentials(&corev1.Secret{Data: stringData(bundle)})
 	if err != nil {
@@ -74,8 +82,41 @@ func TestValidateProjectCredentials(t *testing.T) {
 		"expired": func(values map[string]string) {
 			values[ProjectCredentialsAnonRoleJWTKey] = signRoleWithClaims(t, key, "anon", "authenticated", "fixture", 1)
 		},
-		"wrong secret prefix":      func(values map[string]string) { values[ProjectCredentialsSecretKey] = "sb_publishable_other" },
-		"wrong publishable prefix": func(values map[string]string) { values[ProjectCredentialsPublishableKey] = "jwt_publishable_other" },
+		"wrong secret prefix": func(values map[string]string) {
+			values[ProjectCredentialsSecretKey] = fixturePublishableKey
+		},
+		"wrong publishable prefix": func(values map[string]string) {
+			values[ProjectCredentialsPublishableKey] = "jwt_publishable_A1_b2-C3d4_E5f6-G7h8I9_oWzQ-j5j"
+		},
+		"short random segment": func(values map[string]string) {
+			values[ProjectCredentialsPublishableKey] = canonicalOpaqueFixture("sb_publishable_", "short")
+		},
+		"long random segment": func(values map[string]string) {
+			values[ProjectCredentialsPublishableKey] = canonicalOpaqueFixture("sb_publishable_", "ABCDEFGHIJKLMNOPQRSTUVW")
+		},
+		"short checksum": func(values map[string]string) {
+			values[ProjectCredentialsPublishableKey] = "sb_publishable_A1_b2-C3d4_E5f6-G7h8I9_oWzQ-j5"
+		},
+		"long checksum": func(values map[string]string) {
+			values[ProjectCredentialsPublishableKey] = "sb_publishable_A1_b2-C3d4_E5f6-G7h8I9_oWzQ-j5jA"
+		},
+		"invalid random character": func(values map[string]string) {
+			values[ProjectCredentialsPublishableKey] = canonicalOpaqueFixture("sb_publishable_", "A1_b2-C3d4_E5f6-G7h8I!")
+		},
+		"invalid checksum character": func(values map[string]string) {
+			values[ProjectCredentialsPublishableKey] = "sb_publishable_A1_b2-C3d4_E5f6-G7h8I9_oWzQ-j!j"
+		},
+		"misplaced fixed-boundary separator": func(values map[string]string) {
+			key := []byte(fixturePublishableKey)
+			key[len("sb_publishable_")+5] = '_'
+			key[len("sb_publishable_")+22] = 'A'
+			values[ProjectCredentialsPublishableKey] = string(key)
+		},
+		"checksum mismatch": func(values map[string]string) {
+			key := []byte(fixturePublishableKey)
+			key[len(key)-1] = 'A'
+			values[ProjectCredentialsPublishableKey] = string(key)
+		},
 	}
 	for _, field := range RequiredProjectCredentialKeys {
 		mutations["missing "+field] = func(values map[string]string) { delete(values, field) }
@@ -88,11 +129,17 @@ func TestValidateProjectCredentials(t *testing.T) {
 			if err == nil {
 				t.Fatal("invalid credential bundle was accepted")
 			}
-			if strings.Contains(err.Error(), "sb_publishable_fixture") || strings.Contains(err.Error(), "sb_secret_fixture") || strings.Contains(err.Error(), "eyJ") {
+			if strings.Contains(err.Error(), fixturePublishableKey) || strings.Contains(err.Error(), fixtureSecretKey) || strings.Contains(err.Error(), "eyJ") {
 				t.Fatalf("validation error exposed credential material: %v", err)
 			}
 		})
 	}
+}
+
+func canonicalOpaqueFixture(prefix, random string) string {
+	digest := sha256.Sum256([]byte("supabase-self-hosted|" + prefix + random))
+	checksum := base64.RawURLEncoding.EncodeToString(digest[:])[:8]
+	return prefix + random + "_" + checksum
 }
 
 func stringData(values map[string]string) map[string][]byte {

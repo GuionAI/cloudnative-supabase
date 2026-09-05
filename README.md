@@ -46,8 +46,8 @@ The Secret contains exactly these string fields:
 | Key | Meaning |
 | --- | --- |
 | `signingKeys` | JSON array containing exactly one signing-capable P-256 ES256 private JWK with a non-empty `kid` |
-| `publishableKey` | Opaque `sb_publishable_*` client credential |
-| `secretKey` | Opaque `sb_secret_*` backend credential, distinct from the publishable key |
+| `publishableKey` | Canonical `sb_publishable_<22 Base64URL random>_<8 Base64URL checksum>` client credential (46 characters) |
+| `secretKey` | Canonical `sb_secret_<22 Base64URL random>_<8 Base64URL checksum>` backend credential (41 characters), distinct from the publishable key |
 | `anonRoleJwt` | ES256 JWT for role `anon`, audience `authenticated` |
 | `serviceRoleJwt` | ES256 JWT for role `service_role`, audience `authenticated` |
 
@@ -57,6 +57,30 @@ generates an independent, create-once GoTrue fallback secret. Validation
 errors set `SecretsReady=False` without putting credential contents in status.
 The fallback value is used only by GoTrue; it is not part of the signing-key
 array or public JWKS.
+
+### Canonical opaque API keys
+
+The opaque values are the self-hosted format used by Supabase. After the
+role-specific prefix, each key has exactly 22 unpadded Base64URL characters,
+one underscore separator at that fixed boundary, and exactly 8 unpadded
+Base64URL checksum characters. The random segment may itself contain
+underscores. The checksum is the first 8 Base64URL characters of SHA-256 over
+`supabase-self-hosted|<complete prefix plus random segment>`. This literal
+context and algorithm match the pinned Supabase self-hosted v0.7.0 scripts:
+[`add-new-auth-keys.sh`](https://github.com/supabase/supabase/blob/self-hosted/v0.7.0/docker/utils/add-new-auth-keys.sh#L125-L139)
+and
+[`rotate-new-api-keys.sh`](https://github.com/supabase/supabase/blob/self-hosted/v0.7.0/docker/utils/rotate-new-api-keys.sh#L60-L76).
+The format is also documented in Supabase's
+[`self-hosted-auth-keys.mdx`](https://github.com/supabase/supabase/blob/master/apps/docs/content/guides/self-hosting/self-hosted-auth-keys.mdx#L78-L85).
+The evidence and enforcement boundary are collected in
+[`docs/research/supabase-self-hosted-opaque-api-keys.md`](docs/research/supabase-self-hosted-opaque-api-keys.md).
+
+The operator rejects noncanonical opaque values before reconciling dependent
+workloads; there is no legacy or dual-format compatibility mode. Before
+deploying an operator image with this strict validator, rotate both opaque
+keys for every existing project and atomically update the matching client and
+backend consumers. This rotation is independent of the ES256 signing key and
+does not invalidate user sessions.
 
 The operator does not integrate with Infisical. A typical deployment stores
 the five values at one Infisical project/environment path and uses the
@@ -223,4 +247,6 @@ There is no compatibility or hybrid mode. Replace manifests using
 and `gateway`, provision the five external credential fields, and plan a
 coordinated client cutover to opaque keys and ES256 sessions. Existing
 databases can be retained and readopted; callers must not expect old HS256
-tokens or Kong routes to continue working.
+tokens or Kong routes to continue working. Existing projects with
+noncanonical opaque keys must complete the two-key rotation and matching
+consumer cutover before the strict operator image is rolled out.

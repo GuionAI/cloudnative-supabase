@@ -40,8 +40,8 @@ func TestRenderedEnvoyFixtureImplementsOpaqueGatewaySemantics(t *testing.T) {
 	project := &supabasev1alpha1.SupabaseProject{ObjectMeta: metav1.ObjectMeta{Name: "fixture", Namespace: "default"}}
 	config := BuildEnvoyConfigMap(project)
 	values := map[string]string{
-		"${SUPABASE_PUBLISHABLE_KEY}":  "sb_publishable_fixture",
-		"${SUPABASE_SECRET_KEY}":       "sb_secret_fixture",
+		"${SUPABASE_PUBLISHABLE_KEY}":  "sb_publishable_A1_b2-C3d4_E5f6-G7h8I9_oWzQ-j5j",
+		"${SUPABASE_SECRET_KEY}":       "sb_secret_Z9_y8-X7w6_V5u4-T3s2_R_6LqoZ8QA",
 		"${SUPABASE_ANON_ROLE_JWT}":    "eyJanon.fixture.token",
 		"${SUPABASE_SERVICE_ROLE_JWT}": "eyJservice.fixture.token",
 	}
@@ -176,8 +176,8 @@ func TestRenderedEnvoyFixtureImplementsOpaqueGatewaySemantics(t *testing.T) {
 	for _, test := range []struct {
 		key, want string
 	}{
-		{"sb_publishable_fixture", "eyJanon.fixture.token"},
-		{"sb_secret_fixture", "eyJservice.fixture.token"},
+		{"sb_publishable_A1_b2-C3d4_E5f6-G7h8I9_oWzQ-j5j", "eyJanon.fixture.token"},
+		{"sb_secret_Z9_y8-X7w6_V5u4-T3s2_R_6LqoZ8QA", "eyJservice.fixture.token"},
 	} {
 		if got, ok := translateOpaqueFixture(test.key, values, true); !ok || got != test.want {
 			t.Fatalf("opaque key %q translated to %q (ok=%v), want %q", test.key, got, ok, test.want)
@@ -190,7 +190,7 @@ func TestRenderedEnvoyFixtureImplementsOpaqueGatewaySemantics(t *testing.T) {
 		authorization, translated, want string
 	}{
 		{"Bearer eyJuser.claims.signature", "eyJanon.fixture.token", "Bearer eyJuser.claims.signature"},
-		{"Bearer sb_publishable_fixture", "eyJanon.fixture.token", "Bearer eyJanon.fixture.token"},
+		{"Bearer sb_publishable_A1_b2-C3d4_E5f6-G7h8I9_oWzQ-j5j", "eyJanon.fixture.token", "Bearer eyJanon.fixture.token"},
 		{"Basic abc", "eyJservice.fixture.token", "Bearer eyJservice.fixture.token"},
 		{"", "eyJanon.fixture.token", "Bearer eyJanon.fixture.token"},
 	} {

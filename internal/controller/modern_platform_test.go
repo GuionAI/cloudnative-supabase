@@ -686,8 +686,8 @@ func TestInvalidCredentialRotationLeavesExistingWorkloadsUnchanged(t *testing.T)
 	}
 	invalidCredentials := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: project.Spec.ProjectCredentialsSecret, Namespace: project.Namespace}, Data: map[string][]byte{
 		secretresources.ProjectCredentialsSigningKeysKey:    []byte("{"),
-		secretresources.ProjectCredentialsPublishableKey:    []byte("sb_publishable_previous"),
-		secretresources.ProjectCredentialsSecretKey:         []byte("sb_secret_previous"),
+		secretresources.ProjectCredentialsPublishableKey:    []byte("sb_publishable_A1_b2-C3d4_E5f6-G7h8I9_oWzQ-j5j"),
+		secretresources.ProjectCredentialsSecretKey:         []byte("sb_secret_Z9_y8-X7w6_V5u4-T3s2_R_6LqoZ8QA"),
 		secretresources.ProjectCredentialsAnonRoleJWTKey:    []byte("previous.anon.jwt"),
 		secretresources.ProjectCredentialsServiceRoleJWTKey: []byte("previous.service.jwt"),
 	}}
@@ -879,8 +879,8 @@ func validProjectCredentialsSecret(t *testing.T, project *supabasev1alpha1.Supab
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: project.Namespace},
 		Data: map[string][]byte{
 			secretresources.ProjectCredentialsSigningKeysKey:    []byte(keys),
-			secretresources.ProjectCredentialsPublishableKey:    []byte("sb_publishable_fixture"),
-			secretresources.ProjectCredentialsSecretKey:         []byte("sb_secret_fixture"),
+			secretresources.ProjectCredentialsPublishableKey:    []byte("sb_publishable_A1_b2-C3d4_E5f6-G7h8I9_oWzQ-j5j"),
+			secretresources.ProjectCredentialsSecretKey:         []byte("sb_secret_Z9_y8-X7w6_V5u4-T3s2_R_6LqoZ8QA"),
 			secretresources.ProjectCredentialsAnonRoleJWTKey:    []byte(sign("anon")),
 			secretresources.ProjectCredentialsServiceRoleJWTKey: []byte(sign("service_role")),
 		},

@@ -52,6 +52,12 @@ const (
 
 const emailHookSecretBytes = 32
 
+const (
+	opaqueKeyChecksumContext = "supabase-self-hosted"
+	opaqueKeyRandomLength    = 22
+	opaqueKeyChecksumLength  = 8
+)
+
 // ProjectCredentials is the validated, transient projection of the external
 // credential bundle. Secret values are never written to project status.
 type ProjectCredentials struct {
@@ -170,17 +176,43 @@ func fieldError(field, reason string) error {
 }
 
 func validateOpaqueKey(value, prefix string) error {
-	if !strings.HasPrefix(value, prefix) || len(value) == len(prefix) {
-		return fmt.Errorf("must start with %s and include a non-empty suffix", prefix)
+	if !strings.HasPrefix(value, prefix) {
+		return fmt.Errorf("must start with the canonical prefix")
 	}
-	for _, r := range value[len(prefix):] {
-		isLetter := (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
-		isDigit := r >= '0' && r <= '9'
-		if !isLetter && !isDigit && !strings.ContainsRune("._-", r) {
-			return fmt.Errorf("contains an invalid character")
+
+	expectedLength := len(prefix) + opaqueKeyRandomLength + 1 + opaqueKeyChecksumLength
+	if len(value) != expectedLength {
+		return fmt.Errorf("must be exactly %d characters", expectedLength)
+	}
+
+	randomStart := len(prefix)
+	randomEnd := randomStart + opaqueKeyRandomLength
+	if value[randomEnd] != '_' {
+		return fmt.Errorf("must contain a separator after the 22-character random segment")
+	}
+	for _, r := range value[randomStart:randomEnd] {
+		if !isBase64URLCharacter(r) {
+			return fmt.Errorf("random segment contains an invalid Base64URL character")
 		}
 	}
+	checksum := value[randomEnd+1:]
+	for _, r := range checksum {
+		if !isBase64URLCharacter(r) {
+			return fmt.Errorf("checksum contains an invalid Base64URL character")
+		}
+	}
+
+	digest := sha256.Sum256([]byte(opaqueKeyChecksumContext + "|" + value[:randomEnd]))
+	expectedChecksum := base64.RawURLEncoding.EncodeToString(digest[:])[:opaqueKeyChecksumLength]
+	if checksum != expectedChecksum {
+		return fmt.Errorf("checksum does not match the canonical key")
+	}
 	return nil
+}
+
+func isBase64URLCharacter(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
+		(r >= '0' && r <= '9') || r == '-' || r == '_'
 }
 
 // GenerateGoTrueFallbackSecret creates the independent random fallback value.
