@@ -243,6 +243,11 @@ func TestApplyPowerSyncConfigHashChangesPodTemplate(t *testing.T) {
 	if hashB := deploymentB.Spec.Template.Annotations[powerSyncConfigHashAnnotation]; hashB == hashA {
 		t.Fatal("sync rule changes must change the pod template hash")
 	}
+	deploymentC := &appsv1.Deployment{}
+	applyPowerSyncConfigHash(deploymentC, "changed-config", []byte("rules-a"))
+	if hashC := deploymentC.Spec.Template.Annotations[powerSyncConfigHashAnnotation]; hashC == hashA {
+		t.Fatal("generated config changes must change the pod template hash")
+	}
 }
 
 func TestMapExternalPowerSyncConfigMapToProjects(t *testing.T) {

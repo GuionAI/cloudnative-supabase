@@ -29,6 +29,7 @@ import (
 const (
 	PowersyncConfigComponentName    = "powersync-config"
 	PowersyncSyncRulesComponentName = "powersync-sync-rules"
+	PowersyncConfigKey              = "config.yaml"
 )
 
 // PowersyncConfigMapName returns the Powersync config ConfigMap name
@@ -77,7 +78,7 @@ telemetry:
 			Labels:    common.ComponentLabels(project, PowersyncConfigComponentName),
 		},
 		Data: map[string]string{
-			"config.yaml": configYAML,
+			PowersyncConfigKey: configYAML,
 		},
 	}
 }
