@@ -72,6 +72,8 @@ and
 [`rotate-new-api-keys.sh`](https://github.com/supabase/supabase/blob/self-hosted/v0.7.0/docker/utils/rotate-new-api-keys.sh#L60-L76).
 The format is also documented in Supabase's
 [`self-hosted-auth-keys.mdx`](https://github.com/supabase/supabase/blob/master/apps/docs/content/guides/self-hosting/self-hosted-auth-keys.mdx#L78-L85).
+The evidence and enforcement boundary are collected in
+[`docs/research/supabase-self-hosted-opaque-api-keys.md`](docs/research/supabase-self-hosted-opaque-api-keys.md).
 
 The operator rejects noncanonical opaque values before reconciling dependent
 workloads; there is no legacy or dual-format compatibility mode. Before
