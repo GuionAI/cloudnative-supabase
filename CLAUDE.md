@@ -71,6 +71,17 @@ supports. PostgREST receives only public JWKS. PowerSync uses the Auth JWKS URL,
 audience `authenticated`, and disabled Supabase HMAC mode; it has no JWT
 secret environment variable.
 
+`publishableKey` and `secretKey` use Supabase's canonical self-hosted opaque-key
+format: their role-specific prefix is followed by exactly 22 unpadded
+Base64URL random characters, a fixed underscore separator, and exactly 8
+unpadded Base64URL checksum characters (total lengths 46 and 41 respectively).
+The checksum is the first 8 Base64URL characters of SHA-256 over the literal
+`supabase-self-hosted|<complete prefix plus random segment>` context, matching
+the pinned self-hosted v0.7.0 generation and rotation scripts. Validation is
+strict with no legacy format. Existing projects must rotate both opaque keys
+and their matching consumers before deploying the strict validator; this does
+not rotate ES256 signing keys or invalidate sessions.
+
 `auth.accessTokenExpirationSeconds` defaults to 3600. Security-owned GoTrue
 JWT environment names are rejected in `goTrueEnv`; provider-specific settings
 remain supported.
