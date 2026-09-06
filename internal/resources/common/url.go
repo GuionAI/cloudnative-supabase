@@ -7,7 +7,7 @@ import (
 )
 
 // NormalizeExternalURL returns an absolute URL with a stable, slash-free path
-// representation. It is used for GoTrue's issuer and for derived public URLs.
+// representation for derived public URLs.
 func NormalizeExternalURL(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Scheme == "" || u.Host == "" {
@@ -23,12 +23,18 @@ func NormalizeExternalURL(raw string) string {
 	return strings.TrimRight(u.String(), "/")
 }
 
+// AuthIssuerURL derives the canonical Supabase Auth issuer from the configured
+// external URL. If the URL already includes /auth/v1, it is preserved.
+func AuthIssuerURL(externalURL string) string {
+	base := NormalizeExternalURL(externalURL)
+	if strings.HasSuffix(base, "/auth/v1") {
+		return base
+	}
+	return fmt.Sprintf("%s/auth/v1", base)
+}
+
 // AuthJWKSURL derives the public Auth JWKS endpoint from the configured Auth
 // external URL. If the URL already includes /auth/v1, it is preserved.
 func AuthJWKSURL(externalURL string) string {
-	base := NormalizeExternalURL(externalURL)
-	if strings.HasSuffix(base, "/auth/v1") {
-		return base + "/.well-known/jwks.json"
-	}
-	return fmt.Sprintf("%s/auth/v1/.well-known/jwks.json", base)
+	return AuthIssuerURL(externalURL) + "/.well-known/jwks.json"
 }

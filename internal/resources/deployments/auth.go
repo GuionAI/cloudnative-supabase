@@ -146,7 +146,7 @@ func buildAuthEnv(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 		corev1.EnvVar{Name: "GOTRUE_JWT_ADMIN_ROLES", Value: "service_role"},
 		corev1.EnvVar{Name: "GOTRUE_JWT_AUD", Value: "authenticated"},
 		corev1.EnvVar{Name: "GOTRUE_JWT_EXP", Value: fmt.Sprintf("%d", common.GetAccessTokenExpiration(project))},
-		corev1.EnvVar{Name: "GOTRUE_JWT_ISSUER", Value: common.NormalizeExternalURL(spec.ExternalURL)},
+		corev1.EnvVar{Name: "GOTRUE_JWT_ISSUER", Value: common.AuthIssuerURL(spec.ExternalURL)},
 		corev1.EnvVar{Name: "GOTRUE_JWT_VALID_METHODS", Value: "ES256"},
 		corev1.EnvVar{
 			Name: "GOTRUE_JWT_KEYS",

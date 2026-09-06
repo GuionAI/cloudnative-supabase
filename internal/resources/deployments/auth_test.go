@@ -48,6 +48,23 @@ func TestAuthDeploymentRendersAnonymousSignInsSetting(t *testing.T) {
 	}
 }
 
+func TestAuthDeploymentRendersCanonicalJWTIssuer(t *testing.T) {
+	project := newTestProject(testNamespace)
+	project.Spec.Auth.ExternalURL = "https://auth.example.com"
+
+	deployment := BuildAuthDeployment(project, newTestSecretNames())
+	for _, variable := range deployment.Spec.Template.Spec.Containers[0].Env {
+		if variable.Name != "GOTRUE_JWT_ISSUER" {
+			continue
+		}
+		if variable.Value != "https://auth.example.com/auth/v1" {
+			t.Fatalf("GOTRUE_JWT_ISSUER = %q, want %q", variable.Value, "https://auth.example.com/auth/v1")
+		}
+		return
+	}
+	t.Fatal("GOTRUE_JWT_ISSUER was not rendered")
+}
+
 func TestAuthEmailHookUsesGeneratedSigningSecret(t *testing.T) {
 	project := newTestProject(testNamespace)
 	project.Spec.Auth.EmailHook = &supabasev1alpha1.EmailHookSpec{
