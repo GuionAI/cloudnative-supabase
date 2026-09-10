@@ -34,10 +34,16 @@ type powersyncConfig struct {
 		JWKSURI  string   `json:"jwks_uri"`
 		Audience []string `json:"audience"`
 	} `json:"client_auth"`
+	API struct {
+		Tokens []string `json:"tokens"`
+	} `json:"api"`
 	SyncRules struct {
 		Path        string `json:"path"`
 		ExitOnError bool   `json:"exit_on_error"`
 	} `json:"sync_rules"`
+	Telemetry struct {
+		PrometheusPort int32 `json:"prometheus_port"`
+	} `json:"telemetry"`
 }
 
 func newTestProject(namespace string) *supabasev1alpha1.SupabaseProject {
@@ -172,12 +178,24 @@ func TestBuildPowersyncConfigMap(t *testing.T) {
 		t.Errorf("audience = %v, want authenticated", config.ClientAuth.Audience)
 	}
 
+	// Administrative API authentication
+	if len(config.API.Tokens) != 1 || config.API.Tokens[0] != "PS_POWERSYNC_API_TOKEN" {
+		t.Errorf("API tokens = %v, want the PS_POWERSYNC_API_TOKEN reference", config.API.Tokens)
+	}
+	if !strings.Contains(configYAML, "- !env PS_POWERSYNC_API_TOKEN") {
+		t.Error("API token must use PowerSync's !env tag")
+	}
+
 	// Sync rules path
 	if config.SyncRules.Path != "/powersync/sync_rules/sync_rules.yaml" {
 		t.Errorf("sync rules path = %q", config.SyncRules.Path)
 	}
 	if !config.SyncRules.ExitOnError {
 		t.Error("sync rules must fail startup when invalid")
+	}
+
+	if config.Telemetry.PrometheusPort != 9464 {
+		t.Errorf("telemetry prometheus port = %d, want 9464", config.Telemetry.PrometheusPort)
 	}
 }
 

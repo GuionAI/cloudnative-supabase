@@ -43,8 +43,8 @@ func PowersyncSyncRulesConfigMapName(project *supabasev1alpha1.SupabaseProject) 
 }
 
 // BuildPowersyncConfigMap creates the PowerSync config.yaml ConfigMap.
-// PowerSync's !env tag resolves the database URIs at runtime without putting
-// credentials in the ConfigMap.
+// PowerSync's !env tag resolves the database URIs and administrative API token
+// at runtime without putting credentials in the ConfigMap.
 func BuildPowersyncConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.ConfigMap {
 	configYAML := fmt.Sprintf(`storage:
   type: postgresql
@@ -63,6 +63,9 @@ client_auth:
   jwks_uri: %q
   audience:
     - authenticated
+api:
+  tokens:
+    - !env PS_POWERSYNC_API_TOKEN
 migrations:
   disable_auto_migration: false
 port: 8080
@@ -70,6 +73,7 @@ sync_rules:
   path: /powersync/sync_rules/sync_rules.yaml
   exit_on_error: true
 telemetry:
+  prometheus_port: 9464
   disable_telemetry_sharing: false
 `, common.AuthJWKSURL(project.Spec.Auth.ExternalURL))
 

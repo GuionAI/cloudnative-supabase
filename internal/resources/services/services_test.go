@@ -21,7 +21,8 @@ func TestBuildPowersyncAPIService(t *testing.T) {
 	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
 		t.Errorf("Type = %q, want ClusterIP", svc.Spec.Type)
 	}
-	if len(svc.Spec.Ports) != 2 || svc.Spec.Ports[0].Port != 8080 || svc.Spec.Ports[1].Port != 9464 {
+	if len(svc.Spec.Ports) != 2 || svc.Spec.Ports[0].Name != "http" || svc.Spec.Ports[0].Port != 8080 ||
+		svc.Spec.Ports[1].Name != "metrics" || svc.Spec.Ports[1].Port != 9464 {
 		t.Errorf("unexpected ports: %v", svc.Spec.Ports)
 	}
 	if svc.Spec.Selector["app.kubernetes.io/component"] != "powersync-api" {

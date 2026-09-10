@@ -450,34 +450,65 @@ func (r *SupabaseProjectReconciler) reconcilePowersyncSecrets(ctx context.Contex
 	}
 	if allExist {
 		log.Info("Powersync secrets already exist, syncing status")
-		secretNames.PowersyncStoragePassword = storagePwdName
-		secretNames.PowersyncReplicationPassword = replPwdName
-		return nil
-	}
-
-	// Generate Powersync secrets
-	log.Info("Generating Powersync secrets")
-	psSecrets, err := secrets.GeneratePowersyncSecrets(project)
-	if err != nil {
-		r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "PowersyncSecretsFailed", err.Error())
-		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
-			return statusErr
-		}
-		return err
-	}
-
-	for _, secret := range psSecrets {
-		if err := r.createOrUpdateSecret(ctx, project, secret); err != nil {
-			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "CreateFailed", err.Error())
+	} else {
+		// Generate PowerSync database role secrets. The create-once helper
+		// preserves any role Secret that was already present when only one role
+		// was missing.
+		log.Info("Generating Powersync secrets")
+		psSecrets, err := secrets.GeneratePowersyncSecrets(project)
+		if err != nil {
+			r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "PowersyncSecretsFailed", err.Error())
 			if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
 				return statusErr
 			}
 			return err
 		}
+
+		for _, secret := range psSecrets {
+			if err := r.createOrUpdateSecret(ctx, project, secret); err != nil {
+				r.setCondition(project, supabasev1alpha1.ConditionTypeSecretsReady, metav1.ConditionFalse, "CreateFailed", err.Error())
+				if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
+					return statusErr
+				}
+				return err
+			}
+		}
 	}
 
 	secretNames.PowersyncStoragePassword = storagePwdName
 	secretNames.PowersyncReplicationPassword = replPwdName
+	return r.reconcilePowersyncAPITokenSecret(ctx, project)
+}
+
+func (r *SupabaseProjectReconciler) reconcilePowersyncAPITokenSecret(ctx context.Context, project *supabasev1alpha1.SupabaseProject) error {
+	name := secrets.PowersyncAPITokenSecretName(project)
+	existing := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: project.Namespace}, existing)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("getting PowerSync API token Secret %q: %w", name, err)
+		}
+		generated, err := secrets.GeneratePowersyncAPITokenSecret(project)
+		if err != nil {
+			return err
+		}
+		if err := r.createOrUpdateSecret(ctx, project, generated); err != nil {
+			return fmt.Errorf("creating PowerSync API token Secret %q: %w", name, err)
+		}
+		return nil
+	}
+
+	if err := secrets.ValidatePowersyncAPITokenSecret(existing); err != nil {
+		return fmt.Errorf("validating PowerSync API token Secret %q: %w", name, err)
+	}
+
+	// The create-once helper repairs a missing project owner and refuses to
+	// replace a Secret controlled by another resource. A placeholder carries no
+	// token data, so an existing valid token can never be overwritten.
+	placeholder := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: project.Namespace}}
+	if err := r.createOrUpdateSecret(ctx, project, placeholder); err != nil {
+		return fmt.Errorf("adopting PowerSync API token Secret %q: %w", name, err)
+	}
 	return nil
 }
 
@@ -1364,8 +1395,10 @@ func (r *SupabaseProjectReconciler) createOrUpdateDeployment(ctx context.Context
 	normalizePodTemplateDefaults(&desired.Spec.Template)
 	normalizePodTemplateDefaults(&actual.Spec.Template)
 	ownerChanged := !apiequality.Semantic.DeepEqual(ownerRefs, existing.OwnerReferences)
+	strategyChanged := desired.Spec.Strategy.Type != "" &&
+		!apiequality.Semantic.DeepEqual(actual.Spec.Strategy, desired.Spec.Strategy)
 	if apiequality.Semantic.DeepEqual(actual.Spec.Replicas, desired.Spec.Replicas) &&
-		apiequality.Semantic.DeepEqual(actual.Spec.Template, desired.Spec.Template) && !ownerChanged {
+		apiequality.Semantic.DeepEqual(actual.Spec.Template, desired.Spec.Template) && !ownerChanged && !strategyChanged {
 		return nil
 	}
 
@@ -1373,6 +1406,9 @@ func (r *SupabaseProjectReconciler) createOrUpdateDeployment(ctx context.Context
 	log.V(1).Info("Updating deployment", "name", deployment.Name)
 	existing.Spec.Replicas = desired.Spec.Replicas
 	existing.Spec.Template = desired.Spec.Template
+	if strategyChanged {
+		existing.Spec.Strategy = desired.Spec.Strategy
+	}
 	return r.Update(ctx, existing)
 }
 

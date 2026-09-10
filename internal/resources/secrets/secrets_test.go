@@ -98,3 +98,46 @@ func TestGeneratePowersyncSecrets(t *testing.T) {
 		t.Error("storage and replication passwords must differ")
 	}
 }
+
+func TestPowersyncAPITokenSecretContract(t *testing.T) {
+	project := newTestProject("test-ns")
+
+	if got := PowersyncAPITokenSecretName(project); got != "my-app-powersync-api-token" {
+		t.Fatalf("PowersyncAPITokenSecretName() = %q, want my-app-powersync-api-token", got)
+	}
+
+	secret, err := GeneratePowersyncAPITokenSecret(project)
+	if err != nil {
+		t.Fatalf("GeneratePowersyncAPITokenSecret() error = %v", err)
+	}
+	if secret.Name != "my-app-powersync-api-token" || secret.Namespace != "test-ns" {
+		t.Fatalf("secret metadata = %s/%s", secret.Namespace, secret.Name)
+	}
+	token := secret.StringData[PowersyncAPITokenSecretKey]
+	if len(token) != 64 {
+		t.Fatalf("generated token length = %d, want 64 hex characters", len(token))
+	}
+	if err := ValidatePowersyncAPITokenSecret(secret); err != nil {
+		t.Fatalf("generated token failed validation: %v", err)
+	}
+}
+
+func TestValidatePowersyncAPITokenSecretRejectsMissingOrEmptyKey(t *testing.T) {
+	for name, secret := range map[string]*corev1.Secret{
+		"nil":    nil,
+		"absent": {Data: map[string][]byte{}},
+		"empty":  {Data: map[string][]byte{PowersyncAPITokenSecretKey: nil}},
+		"space":  {StringData: map[string]string{PowersyncAPITokenSecretKey: "  "}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidatePowersyncAPITokenSecret(secret); err == nil {
+				t.Fatal("ValidatePowersyncAPITokenSecret() unexpectedly succeeded")
+			}
+		})
+	}
+
+	valid := &corev1.Secret{Data: map[string][]byte{PowersyncAPITokenSecretKey: []byte("fixture-token")}}
+	if err := ValidatePowersyncAPITokenSecret(valid); err != nil {
+		t.Fatalf("valid token failed validation: %v", err)
+	}
+}

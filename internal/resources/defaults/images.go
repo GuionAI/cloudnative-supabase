@@ -28,5 +28,5 @@ const (
 
 	// Powersync image defaults
 	PowersyncImage = "journeyapps/powersync-service"
-	PowersyncTag   = "1.20.4"
+	PowersyncTag   = "1.21.0"
 )

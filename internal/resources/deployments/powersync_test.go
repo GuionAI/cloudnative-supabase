@@ -7,6 +7,7 @@ import (
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -61,6 +62,9 @@ func TestBuildPowersyncAPIDeployment(t *testing.T) {
 	if *dep.Spec.Replicas != 1 {
 		t.Errorf("Replicas = %d, want 1", *dep.Spec.Replicas)
 	}
+	if dep.Spec.Strategy.Type != "" || dep.Spec.Strategy.RollingUpdate != nil {
+		t.Fatalf("API strategy = %#v, want the existing rolling/default strategy", dep.Spec.Strategy)
+	}
 
 	c := dep.Spec.Template.Spec.Containers[0]
 
@@ -85,11 +89,14 @@ func TestBuildPowersyncAPIDeployment(t *testing.T) {
 	if c.Ports[0].ContainerPort != PowersyncHTTPPort {
 		t.Errorf("HTTP port = %d, want %d", c.Ports[0].ContainerPort, PowersyncHTTPPort)
 	}
+	if c.Ports[1].Name != "metrics" {
+		t.Errorf("metrics port name = %q, want metrics", c.Ports[1].Name)
+	}
 	if c.Ports[1].ContainerPort != PowersyncMetricsPort {
 		t.Errorf("metrics port = %d, want %d", c.Ports[1].ContainerPort, PowersyncMetricsPort)
 	}
 
-	// PowerSync 1.20 filesystem probes.
+	// PowerSync filesystem probes remain the ordinary availability contract.
 	assertFreshPowersyncLivenessProbe(t, c.LivenessProbe)
 	if c.ReadinessProbe == nil || c.ReadinessProbe.Exec == nil || c.ReadinessProbe.Exec.Command[1] != "/app/.probes/ready" {
 		t.Error("expected filesystem readiness probe")
@@ -164,6 +171,9 @@ func TestBuildPowersyncReplicationDeployment(t *testing.T) {
 	if *dep.Spec.Replicas != 1 {
 		t.Errorf("Replicas = %d, want 1 (replication must be single instance)", *dep.Spec.Replicas)
 	}
+	if dep.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType || dep.Spec.Strategy.RollingUpdate != nil {
+		t.Fatalf("replication strategy = %#v, want Recreate without rollingUpdate", dep.Spec.Strategy)
+	}
 
 	c := dep.Spec.Template.Spec.Containers[0]
 
@@ -172,7 +182,7 @@ func TestBuildPowersyncReplicationDeployment(t *testing.T) {
 	}
 
 	// Only metrics port (no HTTP)
-	if len(c.Ports) != 1 || c.Ports[0].ContainerPort != PowersyncMetricsPort {
+	if len(c.Ports) != 1 || c.Ports[0].Name != "metrics" || c.Ports[0].ContainerPort != PowersyncMetricsPort {
 		t.Errorf("expected only metrics port %d", PowersyncMetricsPort)
 	}
 	assertFreshPowersyncLivenessProbe(t, c.LivenessProbe)
@@ -290,11 +300,30 @@ func TestBuildPowersyncEnvVars(t *testing.T) {
 		envMap[e.Name] = e.Value
 	}
 
-	required := []string{"POWERSYNC_CONFIG_PATH", "NODE_OPTIONS", "LOG_FORMAT", "METRICS_PORT", "MICRO_PROBE_TYPE", "PS_STORAGE_PASSWORD", "PS_REPLICATION_PASSWORD", "PS_POWERSYNC_STORAGE_URI", "PS_POWERSYNC_REPLICATION_URI"}
+	required := []string{"POWERSYNC_CONFIG_PATH", "NODE_OPTIONS", "LOG_FORMAT", "MICRO_PROBE_TYPE", "PS_STORAGE_PASSWORD", "PS_REPLICATION_PASSWORD", "PS_POWERSYNC_API_TOKEN", "PS_POWERSYNC_STORAGE_URI", "PS_POWERSYNC_REPLICATION_URI"}
 	for _, name := range required {
 		if _, ok := envMap[name]; !ok {
 			t.Errorf("missing required env var: %s", name)
 		}
+	}
+	if _, ok := envMap["METRICS_PORT"]; ok {
+		t.Error("METRICS_PORT must not override PowerSync's native telemetry configuration")
+	}
+	var tokenEnv *corev1.EnvVar
+	for i := range env {
+		if env[i].Name == "PS_POWERSYNC_API_TOKEN" {
+			tokenEnv = &env[i]
+			break
+		}
+	}
+	if tokenEnv == nil || tokenEnv.ValueFrom == nil || tokenEnv.ValueFrom.SecretKeyRef == nil {
+		t.Fatal("PowerSync API token must come from a SecretKeyRef")
+	}
+	if got := tokenEnv.ValueFrom.SecretKeyRef.Name; got != "my-app-powersync-api-token" {
+		t.Errorf("API token Secret = %q, want my-app-powersync-api-token", got)
+	}
+	if got := tokenEnv.ValueFrom.SecretKeyRef.Key; got != "token" {
+		t.Errorf("API token key = %q, want token", got)
 	}
 	for _, env := range env {
 		if env.Name == "POWERSYNC_CONFIG_PATH" && env.Value != "/powersync/config/config.yaml" {
@@ -305,5 +334,55 @@ func TestBuildPowersyncEnvVars(t *testing.T) {
 		if strings.Contains(envMap[name], "sslmode=") {
 			t.Errorf("%s must leave TLS policy to config.yaml, got %q", name, envMap[name])
 		}
+	}
+}
+
+func TestBuildPowersyncTokenEnvForEveryManagedCommand(t *testing.T) {
+	project := newTestProject("default")
+	secretNames := newTestSecretNames()
+	containers := []corev1.Container{
+		BuildPowersyncAPIDeployment(project, secretNames).Spec.Template.Spec.Containers[0],
+		BuildPowersyncReplicationDeployment(project, secretNames).Spec.Template.Spec.Containers[0],
+		BuildPowersyncCompactCronJob(project, secretNames).Spec.JobTemplate.Spec.Template.Spec.Containers[0],
+	}
+
+	for _, container := range containers {
+		var tokenEnv *corev1.EnvVar
+		for i := range container.Env {
+			if container.Env[i].Name == "PS_POWERSYNC_API_TOKEN" {
+				tokenEnv = &container.Env[i]
+				break
+			}
+		}
+		if tokenEnv == nil || tokenEnv.ValueFrom == nil || tokenEnv.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("%s does not load the API token from a SecretKeyRef", container.Name)
+		}
+		if got := tokenEnv.ValueFrom.SecretKeyRef.Name; got != "my-app-powersync-api-token" {
+			t.Errorf("%s API token Secret = %q", container.Name, got)
+		}
+		if got := tokenEnv.ValueFrom.SecretKeyRef.Key; got != "token" {
+			t.Errorf("%s API token key = %q", container.Name, got)
+		}
+	}
+}
+
+func TestPowersyncImageOverrideAppliesToEveryManagedCommand(t *testing.T) {
+	project := newTestProject("default")
+	project.Spec.Powersync.Image = supabasev1alpha1.ImageSpec{
+		Registry:   "registry.example",
+		Repository: "powersync/service",
+		Tag:        "test",
+	}
+	secretNames := newTestSecretNames()
+	const expectedImage = "registry.example/powersync/service:test"
+
+	if got := BuildPowersyncAPIDeployment(project, secretNames).Spec.Template.Spec.Containers[0].Image; got != expectedImage {
+		t.Errorf("API image = %q", got)
+	}
+	if got := BuildPowersyncReplicationDeployment(project, secretNames).Spec.Template.Spec.Containers[0].Image; got != expectedImage {
+		t.Errorf("replication image = %q", got)
+	}
+	if got := BuildPowersyncCompactCronJob(project, secretNames).Spec.JobTemplate.Spec.Template.Spec.Containers[0].Image; got != expectedImage {
+		t.Errorf("compact image = %q", got)
 	}
 }
