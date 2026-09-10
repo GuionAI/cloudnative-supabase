@@ -48,9 +48,16 @@ const (
 	// GoTrueFallbackSecretNameSuffix is appended to a project name for the
 	// create-once fallback Secret.
 	GoTrueFallbackSecretNameSuffix = "-gotrue-jwt-secret"
+	// PowersyncAPITokenSecretKey is the key containing the internal PowerSync
+	// administrative API token.
+	PowersyncAPITokenSecretKey = "token"
+	// PowersyncAPITokenSecretNameSuffix is appended to a project name for the
+	// create-once PowerSync administrative API token Secret.
+	PowersyncAPITokenSecretNameSuffix = "-powersync-api-token"
 )
 
 const emailHookSecretBytes = 32
+const powersyncAPITokenBytes = 32
 
 const (
 	opaqueKeyChecksumContext = "supabase-self-hosted"
@@ -356,4 +363,44 @@ func GeneratePowersyncSecrets(project *supabasev1alpha1.SupabaseProject) ([]*cor
 // PowersyncSecretNames returns expected PowerSync implementation Secret names.
 func PowersyncSecretNames(project *supabasev1alpha1.SupabaseProject) (string, string) {
 	return project.Name + "-powersync-storage-password", project.Name + "-powersync-replication-password"
+}
+
+// PowersyncAPITokenSecretName returns the create-once PowerSync administrative
+// API token Secret name.
+func PowersyncAPITokenSecretName(project *supabasev1alpha1.SupabaseProject) string {
+	return project.Name + PowersyncAPITokenSecretNameSuffix
+}
+
+// GeneratePowersyncAPITokenSecret creates the internal PowerSync administrative
+// API token Secret. The token is intentionally independent of project client
+// credentials and database role passwords.
+func GeneratePowersyncAPITokenSecret(project *supabasev1alpha1.SupabaseProject) (*corev1.Secret, error) {
+	token, err := crypto.GenerateHex(powersyncAPITokenBytes)
+	if err != nil {
+		return nil, fmt.Errorf("generating PowerSync API token: %w", err)
+	}
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      PowersyncAPITokenSecretName(project),
+			Namespace: project.Namespace,
+			Labels:    common.ComponentLabels(project, "powersync-api-token"),
+		},
+		Type: corev1.SecretTypeOpaque,
+		StringData: map[string]string{
+			PowersyncAPITokenSecretKey: token,
+		},
+	}, nil
+}
+
+// ValidatePowersyncAPITokenSecret validates the non-secret API token contract.
+// Error messages identify only the missing or invalid key, never its value.
+func ValidatePowersyncAPITokenSecret(secret *corev1.Secret) error {
+	if secret == nil {
+		return fmt.Errorf("PowerSync API token Secret is nil")
+	}
+	value, ok := secretValue(secret, PowersyncAPITokenSecretKey)
+	if !ok || strings.TrimSpace(value) == "" {
+		return fmt.Errorf("PowerSync API token Secret is missing required non-empty key %q", PowersyncAPITokenSecretKey)
+	}
+	return nil
 }

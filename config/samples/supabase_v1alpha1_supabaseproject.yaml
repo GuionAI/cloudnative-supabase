@@ -40,8 +40,12 @@ spec:
 
   # Meta and Envoy use defaults (all core services are always enabled).
 
-  # Optional PowerSync offline-first sync. Sync Streams are required and should
-  # select explicit columns guarded by auth.user_id().
+  # Optional PowerSync offline-first sync. The managed default is
+  # journeyapps/powersync-service:1.21.0 with native metrics on named port
+  # 9464 and an operator-generated same-namespace <project>-powersync-api-token
+  # Secret (key: token) for authenticated Diagnostics. Sync Streams are required
+  # and should select explicit columns guarded by auth.user_id(). An explicit
+  # image override applies to API, replication, and compaction.
   # powersync:
   #   api:
   #     replicas: 1

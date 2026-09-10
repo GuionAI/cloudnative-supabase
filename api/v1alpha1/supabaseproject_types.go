@@ -539,7 +539,7 @@ type ImageSpec struct {
 
 // PowersyncSpec defines Powersync offline-first sync configuration
 type PowersyncSpec struct {
-	// Image configuration (default: journeyapps/powersync-service:1.20.4)
+	// Image configuration (default: journeyapps/powersync-service:1.21.0)
 	// +optional
 	Image ImageSpec `json:"image,omitempty"`
 

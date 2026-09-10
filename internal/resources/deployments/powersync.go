@@ -30,6 +30,7 @@ import (
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/common"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/configmaps"
 	"github.com/GuionAI/cloudnative-supabase/internal/resources/defaults"
+	"github.com/GuionAI/cloudnative-supabase/internal/resources/secrets"
 )
 
 const (
@@ -193,6 +194,7 @@ func BuildPowersyncReplicationDeployment(project *supabasev1alpha1.SupabaseProje
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			Selector: &metav1.LabelSelector{
 				MatchLabels: common.SelectorLabels(project, PowersyncReplicationComponentName),
 			},
@@ -342,10 +344,22 @@ func buildPowersyncEnv(project *supabasev1alpha1.SupabaseProject, secretNames *s
 		{Name: "POWERSYNC_CONFIG_PATH", Value: "/powersync/config/config.yaml"},
 		{Name: "NODE_OPTIONS", Value: nodeOptions},
 		{Name: "LOG_FORMAT", Value: "json"},
-		{Name: "METRICS_PORT", Value: "9464"},
 		{Name: "MICRO_ENVIRONMENT_NAME", Value: "production"},
 		{Name: "MICRO_PROBE_TYPE", Value: "fs"},
 		{Name: "MICRO_SERVICE_NAME", Value: "powersync"},
+		// PowerSync's administrative API token is shared with same-namespace
+		// monitoring through this stable Secret contract.
+		{
+			Name: "PS_POWERSYNC_API_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: secrets.PowersyncAPITokenSecretName(project),
+					},
+					Key: secrets.PowersyncAPITokenSecretKey,
+				},
+			},
+		},
 		// Storage password (powersync_storage role — internal sync state tables)
 		{
 			Name: "PS_STORAGE_PASSWORD",

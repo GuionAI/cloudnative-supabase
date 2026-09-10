@@ -30,7 +30,8 @@ The Envoy assets are adapted from the official self-hosted Supabase assets at
 upstream commit
 [`95ca3024398080ff18c9abcd1c6c8beae73fd9e1`](https://github.com/supabase/supabase/commit/95ca3024398080ff18c9abcd1c6c8beae73fd9e1).
 Pinned images are Envoy `envoyproxy/envoy:v1.39.0`, GoTrue
-`supabase/gotrue:v2.189.0`, and PostgREST `postgrest/postgrest:v14.12`.
+`supabase/gotrue:v2.189.0`, PostgREST `postgrest/postgrest:v14.12`, and
+PowerSync `journeyapps/powersync-service:1.21.0` when PowerSync is enabled.
 
 ## Project credentials
 
@@ -161,6 +162,57 @@ All core services are always deployed. `rest`, `studio`, `meta`, and
 operator defaults. `auth.goTrueEnv` remains available for provider settings,
 but JWT keys, fallback secret, key ID, issuer, audience, lifetime, valid
 methods, and role settings are operator-owned and cannot be overridden.
+
+## Optional PowerSync profile
+
+Adding `spec.powersync` enables the managed PowerSync 1.21.0 profile. The
+default image is used by the API Deployment, the singleton replication
+Deployment, and the optional compaction CronJob. An explicit
+`spec.powersync.image` override remains available and is applied consistently
+to all three managed PowerSync commands.
+
+The API and replication containers expose a named `metrics` port on TCP 9464,
+and the generated PowerSync configuration sets
+`telemetry.prometheus_port: 9464`. The API Service exposes both HTTP 8080 and
+metrics 9464; the replication pod exposes its named metrics port for a pod
+scrape. Both roles serve `GET /metrics`. The API continues to use its normal
+HTTP and filesystem availability probes, while replication uses a Recreate
+rollout so two replication processes do not overlap during replacement.
+
+The operator creates one independent, create-once Secret in the project
+namespace: `<project>-powersync-api-token`, with the required key `token`.
+PowerSync loads that value through a `secretKeyRef`; it is not part of the
+five-field project credential bundle and is never copied into a ConfigMap or
+project status. Monitoring in the same namespace can mount this Secret and
+use the token as `Authorization: Bearer <token>` for the authenticated
+`POST /api/admin/v1/diagnostics` endpoint. A pre-existing non-empty token is
+preserved. A missing or invalid key blocks the PowerSync secret phase without
+printing the value, and a same-name Secret controlled by another resource is
+not adopted.
+
+To rotate the internal token, replace only the `token` key using the approved
+Secret management path. The operator does not rotate it during reconciliation;
+restart or roll out the API and replication processes (and any compaction
+process that is running) so they reload the value. A monitor only needs access
+to its mounted Secret and does not need Secret-value API permission. Disabling
+PowerSync prevents new PowerSync implementation Secrets from being generated;
+existing create-once implementation credentials follow the operator's normal
+retention behavior.
+
+For an upgrade, validate the development project first. Confirm the generated
+images and named ports, scrape `/metrics` for both roles, authenticate a
+Diagnostics request, and run an existing-client smoke check. Also confirm that
+the database role Secret bytes, edition-3 sync rules, project credential
+identity, and application data remain unchanged. This is an operator
+verification procedure; the repository does not claim a live deployment.
+
+The 1.20.4-to-1.21.0 change has no new operational PostgreSQL storage
+migration script, but that is not a blanket rollback guarantee. Rolling an
+image back does not reverse persistent PowerSync state or database changes.
+Keep an appropriate backup and use the recovery/runbook decision for the
+observed failure instead of assuming an image rollback restores the prior
+state. No sync-rule conversion, dual-running path, or automatic data recovery
+is provided by this feature.
 
 ## CNPG configuration source of truth
 

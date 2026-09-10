@@ -27,7 +27,7 @@ charts/cloudnative-supabase/crds # chart copy of generated CRD
    durable resources before validating external input.
 2. Validate the externally managed `projectCredentialsSecret` bundle.
 3. Create-once implementation Secrets (database role passwords, GoTrue
-   fallback, optional email hook and PowerSync credentials).
+   fallback, optional email hook, and PowerSync database/API credentials).
 4. Validate immutable recovery intent, then create init SQL and public JWKS
    ConfigMaps.
 5. Reconcile independent recovery and steady-state backup resources.
@@ -37,7 +37,9 @@ charts/cloudnative-supabase/crds # chart copy of generated CRD
    fields outside that projection, rejecting bootstrap mutation and storage
    shrink.
 7. Wait for ready database instances.
-8. Reconcile Auth, REST, Studio, Meta, Envoy, then optional PowerSync.
+8. Reconcile Auth, REST, Studio, Meta, Envoy, then optional PowerSync. The
+   PowerSync config hash covers the generated native metrics and diagnostics
+   configuration, while token values remain outside hashes.
 
 When backup and recovery are both enabled, their deterministic ObjectStore
 names and configured destination paths must differ. A credentials Secret may be
@@ -69,7 +71,23 @@ secret and normalized Auth issuer. Envoy receives opaque keys and internal role
 tokens. Studio receives opaque keys and the internal role-token variables it
 supports. PostgREST receives only public JWKS. PowerSync uses the Auth JWKS URL,
 audience `authenticated`, and disabled Supabase HMAC mode; it has no JWT
-secret environment variable.
+secret environment variable. The default PowerSync image is
+`journeyapps/powersync-service:1.21.0`; its generated config enables native
+Prometheus metrics on named port 9464 and loads administrative API tokens from
+`PS_POWERSYNC_API_TOKEN`.
+
+The operator creates the PowerSync API token only when PowerSync is enabled, in
+the same-namespace create-once Secret `<project>-powersync-api-token` under key
+`token`. It is runtime-owned, independent of the five external project
+credentials, and never appears in ConfigMaps, status, annotations, or logs.
+Existing non-empty values are retained; invalid or foreign-controlled
+same-name Secrets fail safely without adoption. Explicit token rotation is an
+operator Secret operation and requires restarting the API/replication processes
+that consume it; a monitoring workload can use its mounted Secret without
+Secret-value API permission. PowerSync replication uses a Recreate Deployment
+strategy; the client-facing API retains its rolling/default strategy and
+existing availability probes. The configured image override feeds API,
+replication, and compaction.
 
 `publishableKey` and `secretKey` use Supabase's canonical self-hosted opaque-key
 format: their role-specific prefix is followed by exactly 22 unpadded
