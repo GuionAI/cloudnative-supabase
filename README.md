@@ -175,8 +175,9 @@ The API and replication containers expose a named `metrics` port on TCP 9464,
 and the generated PowerSync configuration sets
 `telemetry.prometheus_port: 9464`. The API Service exposes both HTTP 8080 and
 metrics 9464; the replication pod exposes its named metrics port for a pod
-scrape. Both roles serve `GET /metrics`. The API continues to use its normal
-HTTP and filesystem availability probes, while replication uses a Recreate
+scrape. Both roles serve `GET /metrics`. Kubernetes startup, readiness, and
+liveness probes use filesystem `Exec` actions; the API's existing HTTP health
+route remains available to external monitors. Replication uses a Recreate
 rollout so two replication processes do not overlap during replacement.
 
 The operator creates one independent, create-once Secret in the project
