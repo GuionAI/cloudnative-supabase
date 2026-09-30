@@ -167,6 +167,11 @@ type DatabaseSpec struct {
 	// +optional
 	Parameters map[string]string `json:"parameters,omitempty"`
 
+	// AdditionalPreloadLibraries are appended to the platform's required
+	// shared_preload_libraries. Every database instance must have these libraries.
+	// +optional
+	AdditionalPreloadLibraries []string `json:"additionalPreloadLibraries,omitempty"`
+
 	// AdditionalExtensions beyond the standard Supabase set
 	// +optional
 	AdditionalExtensions []string `json:"additionalExtensions,omitempty"`

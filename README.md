@@ -218,12 +218,19 @@ is provided by this feature.
 ## CNPG configuration source of truth
 
 `SupabaseProject` is the single supported customization interface for the
-generated CNPG PostgreSQL projection. Its current `database.parameters`,
+generated CNPG PostgreSQL projection. Its current `database.image`,
+`database.parameters`, `database.additionalPreloadLibraries`,
 additional roles, platform HBA rules, and platform preload libraries are
 assigned exactly on every reconcile, so removing a declaration or correcting a
 direct edit converges on the project declaration. Direct edits to those
 managed CNPG fields are unsupported and are reconciled away; fields outside
 this explicit projection retain their existing CNPG/operator behavior.
+
+An opt-in PostgreSQL 18 CNPG image with PGroonga is built separately from the
+operator. See the [PGroonga image guide](docs/operations/postgres-pgroonga.md)
+for its build command, published image name, required project preload/GUC
+settings, application-owned extension and index migration, and physical
+backup/recovery limits. The operator's default PostgreSQL image is unchanged.
 
 ## Recovery and steady-state backup
 

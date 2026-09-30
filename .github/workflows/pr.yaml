@@ -55,3 +55,12 @@ jobs:
         with:
           version: v2.5.0
           args: --timeout=5m
+
+  postgres-pgroonga:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build separate PostgreSQL image
+        run: docker build --platform linux/amd64 -f Dockerfile.postgres-pgroonga -t cnsupa-postgres-pgroonga:chatgpt-mcp-pg .
+      - name: Search and recovery smoke
+        run: CONTAINER_TOOL=docker hack/test-pgroonga-image.sh

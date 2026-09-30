@@ -8,6 +8,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: guionai/cloudnative-supabase
+  POSTGRES_IMAGE_NAME: guionai/cloudnative-supabase-postgres-pgroonga
   CHART_REGISTRY: oci://ghcr.io/guionai/charts
 
 jobs:
@@ -87,3 +88,38 @@ jobs:
           files: |
             config/crd/bases/*.yaml
             dist/*.tgz
+
+  postgres-pgroonga:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and smoke without publishing
+        run: |
+          docker build --platform linux/amd64 -f Dockerfile.postgres-pgroonga -t cnsupa-postgres-pgroonga:chatgpt-mcp-pg .
+          CONTAINER_TOOL=docker hack/test-pgroonga-image.sh
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: postgres-meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.POSTGRES_IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.postgres-pgroonga
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.postgres-meta.outputs.tags }}
+          labels: ${{ steps.postgres-meta.outputs.labels }}
+          cache-from: type=gha,scope=postgres-pgroonga
+          cache-to: type=gha,scope=postgres-pgroonga,mode=max

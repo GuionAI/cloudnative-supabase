@@ -58,6 +58,7 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 	if spec.Image != "" {
 		image = spec.Image
 	}
+	preloadLibraries := append([]string{"pg_stat_statements", "pgaudit", "auto_explain"}, spec.AdditionalPreloadLibraries...)
 
 	cluster := &cnpgv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
@@ -73,12 +74,8 @@ func BuildCluster(project *supabasev1alpha1.SupabaseProject, secretNames *supaba
 			Bootstrap: buildBootstrapConfiguration(project, secretNames),
 
 			PostgresConfiguration: cnpgv1.PostgresConfiguration{
-				AdditionalLibraries: []string{
-					"pg_stat_statements",
-					"pgaudit",
-					"auto_explain",
-				},
-				Parameters: mergeParameters(defaultParameters(), spec.Parameters),
+				AdditionalLibraries: preloadLibraries,
+				Parameters:          mergeParameters(defaultParameters(), spec.Parameters),
 				PgHBA: []string{
 					// Local connections
 					"local all all trust",

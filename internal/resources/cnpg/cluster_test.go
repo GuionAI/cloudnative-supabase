@@ -1,6 +1,7 @@
 package cnpg
 
 import (
+	"reflect"
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -8,6 +9,34 @@ import (
 
 	supabasev1alpha1 "github.com/GuionAI/cloudnative-supabase/api/v1alpha1"
 )
+
+func TestBuildClusterProjectsPGroongaPreloads(t *testing.T) {
+	project := &supabasev1alpha1.SupabaseProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "search", Namespace: "test"},
+		Spec: supabasev1alpha1.SupabaseProjectSpec{Database: supabasev1alpha1.DatabaseSpec{
+			Image:                      "example.test/postgres-pgroonga:18",
+			Storage:                    supabaseStorage("1Gi"),
+			AdditionalPreloadLibraries: []string{"pgroonga_wal_resource_manager", "pgroonga_crash_safer"},
+			Parameters: map[string]string{
+				"pgroonga.enable_wal_resource_manager": "on",
+				"pgroonga.enable_crash_safe":           "on",
+			},
+		}},
+	}
+	cluster := BuildCluster(project, &supabasev1alpha1.SecretNamesStatus{})
+	if cluster.Spec.ImageName != project.Spec.Database.Image {
+		t.Fatalf("image = %q", cluster.Spec.ImageName)
+	}
+	want := []string{"pg_stat_statements", "pgaudit", "auto_explain", "pgroonga_wal_resource_manager", "pgroonga_crash_safer"}
+	if !reflect.DeepEqual(cluster.Spec.PostgresConfiguration.AdditionalLibraries, want) {
+		t.Fatalf("preload libraries = %v, want %v", cluster.Spec.PostgresConfiguration.AdditionalLibraries, want)
+	}
+	for name, value := range project.Spec.Database.Parameters {
+		if cluster.Spec.PostgresConfiguration.Parameters[name] != value {
+			t.Fatalf("parameter %s = %q, want %q", name, cluster.Spec.PostgresConfiguration.Parameters[name], value)
+		}
+	}
+}
 
 func TestBuildClusterRecoveryAndBackupUseSeparateStores(t *testing.T) {
 	project := &supabasev1alpha1.SupabaseProject{
