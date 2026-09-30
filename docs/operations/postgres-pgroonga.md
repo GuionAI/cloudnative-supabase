@@ -59,29 +59,52 @@ PostgreSQL restart.
 
 ## Physical backup and recovery
 
-PGroonga keeps Groonga files alongside PostgreSQL data. Before a physical
-copy, stop writes to PGroonga-indexed tables, run
-`SELECT pgroonga_command('io_flush')`, and keep writes stopped until the copy
-finishes. The fixture uses a cold physical copy after a clean stop, then
-restarts the source, writes new data, archives WAL, and restores the copy to a
-new instance. It confirms the post-copy row survived WAL replay, then runs
-`REINDEX INDEX` before checking older and newer search results. The PGroonga
-index did not reliably return the post-copy row before REINDEX in this test.
-The fixture does **not** validate a live CNPG/Barman backup path;
-that path needs its own non-production recovery drill before use.
+PGroonga keeps Groonga files alongside PostgreSQL data. Follow its documented
+base-backup procedure: quiesce writes to indexed tables, run
+`SELECT pgroonga_command('io_flush')`, and keep writes stopped until
+`pg_basebackup` finishes. All source, standby and promoted nodes must use the
+same image and extension/runtime versions.
 
-PGroonga's replication guide loads `pgroonga_wal_resource_manager` on a
-standby and says `pgroonga_crash_safer` is unnecessary there. In the fixture,
-the recovery instance uses WAL resource manager only during replay, then
-promotes. A recovery project can declare only the WAL manager during recovery.
-The current `SupabaseProject`
-preload projection is uniform across all CNPG instances; it does not provide
-a primary-versus-standby split. Validate replica and backup behavior before
-using this configuration with multiple instances. Crash safer on the recovered
-instance made the restored index unsearchable in this fixture, including after
-one REINDEX attempt. Do not enable it on a recovered primary without a
-separate validated procedure. Do not assume this image alone makes an existing
-backup policy PGroonga-aware.
+The fixture uses `pg_basebackup -X stream -c fast` while indexed tables are
+quiescent. It then commits a new indexed row, flushes, archives its WAL segment,
+and restores the backup to that committed LSN. It asserts index scans return
+both pre-backup and post-backup matches before any index rebuild.
+
+**The pinned PGroonga 4.0.9 WAL manager requires standby-mode replay.** Its
+[redo implementation](https://github.com/pgroonga/pgroonga/blob/4.0.9/src/pgroonga-wal-resource-manager.c#L874)
+returns without applying custom records when PostgreSQL's `StandbyMode` is
+false. Use `standby.signal` for the validated archive replay path; a plain
+`recovery.signal` archive restore can recover PostgreSQL rows while leaving
+PGroonga indexes stale. The fixture sets `recovery_target_lsn` and
+`recovery_target_action = 'promote'` to exit standby mode after the required
+records replay. Merely enabling the WAL-generation GUC does not change the
+recovery mode.
+
+Use these settings for each phase, retaining `pg_stat_statements`, `pgaudit`
+and `auto_explain` throughout:
+
+| Phase | Additional preload libraries | WAL generation | Crash safer |
+| --- | --- | --- | --- |
+| Writable primary | `pgroonga_wal_resource_manager`, `pgroonga_crash_safer` | `pgroonga.enable_wal_resource_manager = on` | `pgroonga.enable_crash_safe = on` |
+| Standby replay | `pgroonga_wal_resource_manager` | `pgroonga.enable_wal_resource_manager = off` | `pgroonga.enable_crash_safe = off` |
+| Promoted writable primary | `pgroonga_wal_resource_manager`, `pgroonga_crash_safer` | `pgroonga.enable_wal_resource_manager = on` | `pgroonga.enable_crash_safe = on` |
+
+PGroonga's module documentation says crash safer must not run on a standby.
+After replay and promotion, restore the writable-primary settings and restart
+before accepting writes. The fixture asserts both GUCs and all five preloads,
+commits another indexed write on the promoted primary, restarts, and verifies
+both recovered and subsequent matches through the PGroonga index. No manual
+`REINDEX` is part of this recovery procedure.
+
+This fixture validates the image and the explicit standby replay/promotion
+sequence. It does not exercise a live CNPG/Barman restore. CNPG v1.28's built-in
+archive restore creates `recovery.signal`; selecting this image and these GUCs
+does not convert that restore to the validated standby-mode path. Validate and
+integrate the required recovery mode before using native archive restore with
+PGroonga indexes. The current `SupabaseProject` preload projection also applies
+uniformly to CNPG instances and does not distinguish primary and standby
+settings. A multi-instance rollout needs a validated role-specific configuration
+procedure before deployment.
 
 The work here builds and tests an opt-in image. It does not migrate FlickNote
 indexes, switch production to this operator, or complete ChatGPT OAuth.

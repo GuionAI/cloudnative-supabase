@@ -5,7 +5,7 @@ export PATH="/usr/lib/postgresql/18/bin:$PATH"
 export PGHOST=/tmp
 export PGPORT=5432
 mkdir /tmp/archive
-initdb -D /tmp/source -A trust --no-instructions >/dev/null
+initdb -D /tmp/source -A trust --encoding UTF8 --locale C --no-instructions >/dev/null
 cat >> /tmp/source/postgresql.conf <<'CONF'
 shared_preload_libraries = 'pg_stat_statements,pgaudit,auto_explain,pgroonga_wal_resource_manager,pgroonga_crash_safer'
 pgroonga.enable_wal_resource_manager = on
@@ -48,6 +48,7 @@ SET ROLE bob;
 DO $$ BEGIN
  IF (SELECT count(*) FROM notes WHERE body &@~ '苹果 OR apple') <> 1 THEN RAISE EXCEPTION 'Bob search leaked or missed rows'; END IF;
  IF EXISTS (SELECT 1 FROM notes WHERE body &@~ '苹果 OR apple' AND body LIKE '%private-alice%') THEN RAISE EXCEPTION 'Bob saw Alice result'; END IF;
+ IF EXISTS (SELECT 1 FROM notes WHERE body &@~ '苹果 OR apple' AND array_to_string(pgroonga_snippet_html(body, ARRAY['苹果','apple']), '') LIKE '%private-alice%') THEN RAISE EXCEPTION 'Bob saw Alice snippet'; END IF;
 END $$;
 RESET ROLE;
 UPDATE notes SET body = '中文 香蕉 private-alice' WHERE id = 1;
@@ -59,15 +60,13 @@ END $$;
 SQL
 pg_ctl -D /tmp/source -m fast stop >/dev/null
 pg_ctl -D /tmp/source -o '-k /tmp -p 5432' -l /tmp/source.log start >/dev/null
-psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SELECT count(*) FROM notes WHERE body &@~ '香蕉'" | grep -qx 1
-# A cold physical copy gives Groonga and PostgreSQL files one coherent point.
-# Subsequent committed writes are recovered from archived PostgreSQL WAL.
+PGOPTIONS="-c enable_seqscan=off" psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SELECT count(*) FROM notes WHERE body &@~ '香蕉'" | grep -qx 1
+# Flush Groonga and keep indexed tables quiescent until pg_basebackup finishes.
 psql -X -v ON_ERROR_STOP=1 -d postgres -c "SELECT pgroonga_command('io_flush')" >/dev/null
-pg_ctl -D /tmp/source -m fast stop >/dev/null
-cp -a /tmp/source /tmp/backup
-pg_ctl -D /tmp/source -o '-k /tmp -p 5432' -l /tmp/source.log start >/dev/null
+pg_basebackup -D /tmp/backup -X stream -c fast >/dev/null
 psql -X -v ON_ERROR_STOP=1 -d postgres -c "INSERT INTO notes VALUES (3, 'bob', '恢复 recovery-after-backup')" >/dev/null
 psql -X -v ON_ERROR_STOP=1 -d postgres -c "SELECT pgroonga_command('io_flush')" >/dev/null
+replay_lsn="$(psql -X -v ON_ERROR_STOP=1 -d postgres -Atc 'SELECT pg_current_wal_lsn()')"
 wal_segment="$(psql -X -v ON_ERROR_STOP=1 -d postgres -Atc 'SELECT pg_walfile_name(pg_current_wal_lsn())')"
 psql -X -v ON_ERROR_STOP=1 -d postgres -c 'SELECT pg_switch_wal()' >/dev/null
 for i in $(seq 1 60); do
@@ -81,8 +80,11 @@ shared_preload_libraries = 'pg_stat_statements,pgaudit,auto_explain,pgroonga_wal
 pgroonga.enable_crash_safe = off
 pgroonga.enable_wal_resource_manager = off
 restore_command = 'cp /tmp/archive/%f %p'
+recovery_target_lsn = '${replay_lsn}'
+recovery_target_action = 'promote'
 CONF
-touch /tmp/backup/recovery.signal
+# PGroonga 4.0.9 only replays custom WAL in standby mode, not recovery.signal.
+touch /tmp/backup/standby.signal
 export PGPORT=5433
 pg_ctl -D /tmp/backup -o '-k /tmp -p 5433' -l /tmp/backup.log start >/dev/null
 for i in $(seq 1 60); do
@@ -91,8 +93,22 @@ for i in $(seq 1 60); do
 done
 test "$(psql -X -v ON_ERROR_STOP=1 -d postgres -Atc 'SELECT pg_is_in_recovery()')" = f
 psql -X -v ON_ERROR_STOP=1 -d postgres -Atc 'SELECT count(*) FROM notes WHERE id = 3' | grep -qx 1
-psql -X -v ON_ERROR_STOP=1 -d postgres -c 'REINDEX INDEX notes_body_pgroonga' >/dev/null
-psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SELECT count(*) FROM notes WHERE body &@~ '香蕉'" | grep -qx 1
-psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SELECT count(*) FROM notes WHERE body &@~ 'recovery'" | grep -qx 1
+PGOPTIONS="-c enable_seqscan=off" psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "EXPLAIN SELECT * FROM notes WHERE body &@~ 'recovery'" | grep -q 'Index Scan using notes_body_pgroonga'
+PGOPTIONS="-c enable_seqscan=off" psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SELECT count(*) FROM notes WHERE body &@~ '香蕉'" | grep -qx 1
+PGOPTIONS="-c enable_seqscan=off" psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SELECT count(*) FROM notes WHERE body &@~ 'recovery'" | grep -qx 1
 psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SELECT current_setting('shared_preload_libraries') LIKE '%pgroonga_wal_resource_manager%'" | grep -qx t
+# After replay and promotion, restore the primary WAL and crash-safe settings.
+pg_ctl -D /tmp/backup -m fast stop >/dev/null
+cat >> /tmp/backup/postgresql.auto.conf <<'CONF'
+shared_preload_libraries = 'pg_stat_statements,pgaudit,auto_explain,pgroonga_wal_resource_manager,pgroonga_crash_safer'
+pgroonga.enable_wal_resource_manager = on
+pgroonga.enable_crash_safe = on
+CONF
+pg_ctl -D /tmp/backup -o '-k /tmp -p 5433' -l /tmp/backup.log start >/dev/null
+psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SET enable_seqscan = off; SELECT count(*) FROM notes WHERE body &@~ 'recovery'" | tail -1 | grep -qx 1
+psql -Xq -v ON_ERROR_STOP=1 -d postgres -Atc "LOAD 'pgroonga'; SELECT NOT pg_is_in_recovery() AND current_setting('pgroonga.enable_wal_resource_manager') = 'on' AND current_setting('pgroonga.enable_crash_safe') = 'on' AND current_setting('pgroonga.enable_row_level_security') = 'on' AND current_setting('shared_preload_libraries') = 'pg_stat_statements,pgaudit,auto_explain,pgroonga_wal_resource_manager,pgroonga_crash_safer'" | grep -qx t
+psql -X -v ON_ERROR_STOP=1 -d postgres -c "INSERT INTO notes VALUES (4, 'bob', 'recovery promoted-write')" >/dev/null
+pg_ctl -D /tmp/backup -m fast stop >/dev/null
+pg_ctl -D /tmp/backup -o '-k /tmp -p 5433' -l /tmp/backup.log start >/dev/null
+psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SET enable_seqscan = off; SELECT count(*) FROM notes WHERE body &@~ 'recovery'" | tail -1 | grep -qx 2
 echo 'PGroonga image: search, RLS, writes, restart and physical WAL recovery passed'
