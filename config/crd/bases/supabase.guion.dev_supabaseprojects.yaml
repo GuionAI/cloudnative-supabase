@@ -322,6 +322,13 @@ spec:
                     items:
                       type: string
                     type: array
+                  additionalPreloadLibraries:
+                    description: |-
+                      AdditionalPreloadLibraries are appended to the platform's required
+                      shared_preload_libraries. Every database instance must have these libraries.
+                    items:
+                      type: string
+                    type: array
                   additionalRoles:
                     description: |-
                       AdditionalRoles beyond the roles managed by the operator

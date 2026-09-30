@@ -133,6 +133,11 @@ func (in *DatabaseSpec) DeepCopyInto(out *DatabaseSpec) {
 			(*out)[key] = val
 		}
 	}
+	if in.AdditionalPreloadLibraries != nil {
+		in, out := &in.AdditionalPreloadLibraries, &out.AdditionalPreloadLibraries
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.AdditionalExtensions != nil {
 		in, out := &in.AdditionalExtensions, &out.AdditionalExtensions
 		*out = make([]string, len(*in))
