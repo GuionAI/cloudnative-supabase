@@ -1349,6 +1349,10 @@ func (r *SupabaseProjectReconciler) createOrUpdateConfigMap(ctx context.Context,
 		return err
 	}
 
+	if existing.Labels[common.LabelInstance] != project.Name {
+		return fmt.Errorf("refusing to adopt ConfigMap %s without the project instance label", existing.Name)
+	}
+
 	ownerRefs := append([]metav1.OwnerReference(nil), existing.OwnerReferences...)
 	if err := controllerutil.SetControllerReference(project, existing, r.Scheme); err != nil {
 		return err
@@ -1933,7 +1937,10 @@ func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context,
 	secretNames := &project.Status.SecretNames
 
 	// Create CDC migrations ConfigMap
-	configMap := jobs.BuildCDCMigrationsConfigMap(project)
+	configMap, err := jobs.BuildCDCMigrationsConfigMap(project)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	if err := r.createOrUpdateConfigMap(ctx, project, configMap); err != nil {
 		r.setCondition(project, supabasev1alpha1.ConditionTypeCDCReady, metav1.ConditionFalse, "ConfigMapFailed", err.Error())
 		if statusErr := r.updateProjectStatus(ctx, project); statusErr != nil {
@@ -1943,7 +1950,7 @@ func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context,
 	}
 
 	// Compute a hash of the CDC script so we can detect spec changes
-	scriptHash := cdcScriptHash(project)
+	scriptHash := cdcScriptHash(configMap)
 
 	// Create or check CDC permissions Job
 	job := jobs.BuildCDCPermissionsJob(project, secretNames)
@@ -1970,16 +1977,18 @@ func (r *SupabaseProjectReconciler) reconcileCDCPermissions(ctx context.Context,
 
 // cdcScriptHash computes a SHA-256 hash of the CDC setup script content.
 // Used to detect permission script changes so the Job can be recreated.
-func cdcScriptHash(project *supabasev1alpha1.SupabaseProject) string {
-	cm := jobs.BuildCDCMigrationsConfigMap(project)
+func cdcScriptHash(cm *corev1.ConfigMap) string {
 	h := sha256.Sum256([]byte(cm.Data["setup.sh"]))
 	return hex.EncodeToString(h[:])
 }
 
 func (r *SupabaseProjectReconciler) reconcilePowerSyncPublication(ctx context.Context, project *supabasev1alpha1.SupabaseProject) (ctrl.Result, error) {
-	desired := cnpg.BuildPowerSyncPublication(project)
+	desired, err := cnpg.BuildPowerSyncPublication(project)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	existing := &cnpgv1.Publication{}
-	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
+	err = r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
@@ -1995,6 +2004,10 @@ func (r *SupabaseProjectReconciler) reconcilePowerSyncPublication(ctx context.Co
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+	}
+
+	if existing.Labels[common.LabelInstance] != project.Name {
+		return ctrl.Result{}, fmt.Errorf("refusing to adopt publication %s without the project instance label", existing.Name)
 	}
 
 	needsUpdate := !apiequality.Semantic.DeepEqual(desired.Spec, existing.Spec)
@@ -2337,6 +2350,10 @@ func (r *SupabaseProjectReconciler) createOrCheckJob(ctx context.Context, projec
 		}
 		return false, err
 	}
+	if existing.Labels[common.LabelInstance] != project.Name {
+		return false, fmt.Errorf("refusing to adopt Job %s without the project instance label", existing.Name)
+	}
+
 	ownerRefs := append([]metav1.OwnerReference(nil), existing.OwnerReferences...)
 	if err := controllerutil.SetControllerReference(project, existing, r.Scheme); err != nil {
 		return false, err

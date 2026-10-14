@@ -1173,6 +1173,20 @@ spec:
                         description: Tag (pinned stable version per service)
                         type: string
                     type: object
+                  publicationSchemas:
+                    default:
+                    - public
+                    description: |-
+                      PublicationSchemas selects existing schemas for replication, independently of rest.schemas.
+                      Omitted defaults to public; an explicit list replaces the default.
+                      Names must be lowercase ASCII PostgreSQL identifiers, up to 63 characters.
+                    items:
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
                   replication:
                     description: Replication deployment configuration (CDC processing)
                     properties:

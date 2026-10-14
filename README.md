@@ -171,6 +171,38 @@ Deployment, and the optional compaction CronJob. An explicit
 `spec.powersync.image` override remains available and is applied consistently
 to all three managed PowerSync commands.
 
+`spec.powersync.publicationSchemas` selects the schemas included in the managed
+`powersync` publication and the CDC read grants for `powersync_replication`.
+Omitting it defaults to `[public]`. An explicit nonempty list replaces that
+default; it does not implicitly add `public`. Names must be unique lowercase
+ASCII identifiers (`[a-z_][a-z0-9_]*`), each at most 63 characters.
+
+For example, to replicate an application schema alongside `public`:
+
+```yaml
+powersync:
+  publicationSchemas: [public, app_data]
+  syncRules:
+    configMapRef: application-sync-rules
+```
+
+The application repository owns its schema and table migrations. Create the
+schemas through those migrations **before** adding them to this list; the
+operator never creates application schemas or tables. A missing schema prevents
+publication from applying, or fails the CDC permissions Job. The Job stops on
+SQL errors and applies its grants in one transaction. It grants schema `USAGE`,
+`SELECT` on existing tables, and future table default privileges for tables
+created by `supabase_admin`. Tables created by other roles need explicit grants
+from their migration owner. The existing database `CREATE` grant for
+`powersync_storage` remains for PowerSync's internal state.
+
+Changing this list reconciles the publication and reruns the existing CDC Job
+when its script hash changes. Removing a schema stops publishing it; historical
+grants are not automatically revoked. REST exposure remains controlled by
+`spec.rest.schemas`; replication configuration does not expose a schema through
+PostgREST or grant API users access. Configure application RLS, API grants, and
+PowerSync sync rules separately.
+
 The API and replication containers expose a named `metrics` port on TCP 9464,
 and the generated PowerSync configuration sets
 `telemetry.prometheus_port: 9464`. The API Service exposes both HTTP 8080 and

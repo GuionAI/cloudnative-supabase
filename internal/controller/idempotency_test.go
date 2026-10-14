@@ -56,7 +56,7 @@ func TestOwnedResourceHelpersSkipNoOpUpdates(t *testing.T) {
 		TypeMeta:   metav1.TypeMeta{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject"},
 		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default", UID: "project-uid"},
 	}
-	configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "config", Namespace: "default"}, Data: map[string]string{"key": "value"}}
+	configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "config", Namespace: "default", Labels: commonresources.CommonLabels(project)}, Data: map[string]string{"key": "value"}}
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "deployment", Namespace: "default"}, Spec: appsv1.DeploymentSpec{Replicas: ptr.To[int32](1)}}
 	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default"}, Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "http", Port: 80}}}}
 	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "cron", Namespace: "default"}, Spec: batchv1.CronJobSpec{Schedule: "0 3 * * *"}}
@@ -208,7 +208,10 @@ func TestReconcilePowerSyncPublicationRemovesStaleParameters(t *testing.T) {
 		TypeMeta:   metav1.TypeMeta{APIVersion: supabasev1alpha1.GroupVersion.String(), Kind: "SupabaseProject"},
 		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default", UID: "project-uid"},
 	}
-	existing := cnpgresources.BuildPowerSyncPublication(project)
+	existing, err := cnpgresources.BuildPowerSyncPublication(project)
+	if err != nil {
+		t.Fatal(err)
+	}
 	existing.Spec.Parameters = map[string]string{"publish": "insert"}
 	existing.Status.Applied = ptr.To(true)
 	if err := setTestControllerReference(project, existing, scheme); err != nil {

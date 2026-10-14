@@ -288,7 +288,7 @@ func TestReconcilePowerSyncPublicationRepairsSpecAndOwnership(t *testing.T) {
 		Spec:       supabasev1alpha1.SupabaseProjectSpec{Powersync: &supabasev1alpha1.PowersyncSpec{}},
 	}
 	publication := &cnpgv1.Publication{
-		ObjectMeta: metav1.ObjectMeta{Name: "app-powersync", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "app-powersync", Namespace: "default", Labels: map[string]string{"app.kubernetes.io/instance": "app"}},
 		Spec: cnpgv1.PublicationSpec{
 			ClusterRef:    corev1.LocalObjectReference{Name: "app-pg"},
 			Name:          "powersync",
@@ -337,6 +337,7 @@ func TestCreateOrCheckJobWaitsDuringRetryBackoff(t *testing.T) {
 			Name:        "app-cdc-permissions",
 			Namespace:   "default",
 			Annotations: map[string]string{cdcScriptHashAnnotation: "same"},
+			Labels:      map[string]string{"app.kubernetes.io/instance": "app"},
 		},
 		Status: batchv1.JobStatus{Failed: 1},
 	}
@@ -396,6 +397,7 @@ func TestCreateOrCheckJobUsesTerminalConditions(t *testing.T) {
 					Name:        "app-cdc-permissions",
 					Namespace:   "default",
 					Annotations: map[string]string{cdcScriptHashAnnotation: "same"},
+					Labels:      map[string]string{"app.kubernetes.io/instance": "app"},
 				},
 				Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{Type: tt.conditionType, Status: "True"}}},
 			}
