@@ -17,18 +17,34 @@ podman build --arch amd64 -f Dockerfile.postgres-pgroonga -t cnsupa-postgres-pgr
 hack/test-pgroonga-image.sh
 ```
 
-The smoke fixture runs a networkless, disposable container. It creates only
-container-local data, checks Chinese and English OR search, user-scoped RLS
-results and snippets, updates and deletes, then a clean restart and physical
-backup/WAL recovery. Set `CONTAINER_TOOL=docker` for Docker, and
-`PGROONGA_IMAGE` to test a different locally loaded image. Neither command
-uses a real database or Kubernetes cluster.
+The root smoke command preserves the archive fixture and also runs a streaming
+fixture. Each runs two PostgreSQL directories/Unix socket ports in one networkless,
+disposable container, with no real database or Kubernetes access. Set
+`CONTAINER_TOOL=docker` for Docker and `PGROONGA_IMAGE` for a locally loaded image.
+Each fixture has a bounded runtime and cleans up only its container-local state.
+
+The exact published image tested for production MCP readiness is PostgreSQL 18.3,
+PGroonga 4.0.9 and Groonga 16.1.2:
+
+```bash
+PGROONGA_IMAGE=ghcr.io/guionai/cloudnative-supabase-postgres-pgroonga:18.3@sha256:d555bf68fad60626664e22cf90390fc8936b42092d504f7f02a592ec70b92626 \
+  hack/test-pgroonga-image.sh
+```
+
+On 2026-10-14, this published image passed five complete observable streaming
+trials after preparing a valid, quiesced source snapshot: first indexed read,
+streamed insert/update/delete, Chinese/English search and owner RLS/snippets,
+same-postmaster promotion, immediate writes, controlled crash/restart and clean
+restart. A native flush worker was present on the standby, recorded separately
+as a lifecycle observation; its presence alone did not establish a correctness
+failure. No operator, image, extension module, or topology repair is part of this
+readiness work.
 
 ## Project configuration
 
 After publishing the image, select an immutable SHA tag or digest via the
-existing project image field. For a single primary, add the two PGroonga
-preloads and GUCs:
+existing project image field. The tested uniform configuration adds the two
+PGroonga preloads and GUCs on every instance:
 
 ```yaml
 spec:
@@ -65,53 +81,70 @@ base-backup procedure: quiesce writes to indexed tables, run
 `pg_basebackup` finishes. All source, standby and promoted nodes must use the
 same image and extension/runtime versions.
 
-The fixture uses `pg_basebackup -X stream -c fast` while indexed tables are
-quiescent. It then commits a new indexed row, flushes, archives its WAL segment,
-and restores the backup to that committed LSN. It asserts index scans return
-both pre-backup and post-backup matches before any index rebuild.
+The streaming fixture uses `pg_basebackup -X stream -c fast -R` with all five
+preloads and both PGroonga GUCs `on` on both nodes. After its deliberate source
+restart, it matches native crash-safer READY to a live flush child of the current
+source postmaster before `io_flush` and base backup. SQL readiness alone does
+not establish that native startup recovery has stopped changing Groonga files.
 
-**The pinned PGroonga 4.0.9 WAL manager requires standby-mode replay.** Its
+A diagnostic syscall trace identified the source crash-safer creating
+`pgrn.000010D.c` during native index recovery while backup startup overlapped its
+preparation. That traced run passed. Attribution of an earlier untraced candidate
+missing-file error to this overlap remains an inference. The initial raw fixture
+failed five of five trials, but correctly prepared snapshots passed search-only
+checks on both published and candidate images. All those outcomes are retained
+with spec #3922; raw failures are not evidence that the published image fails the
+correctly prepared observable contract. A candidate runtime patch was evaluated
+and left out of delivery because the final baseline did not demonstrate a need.
+
+The streaming assertions inspect actual index plans and results under each owner,
+check stale insert/update/delete matches, and preserve postmaster PID/start time
+across `pg_promote`. The first primary write follows promotion immediately.
+Native READY plus live flush-child/parent identity establish that crash-safer is
+ready on the promoted primary; indexed data and owner isolation are checked after
+both an immediate crash/restart and a clean restart. The child may already be
+active before promotion. Source readiness and replay/worker polling never defer
+the first standby indexed read or the immediate promoted write.
+
+The original archive fixture remains unchanged, including its reduced standby
+settings and explicit restart into primary settings. Its coverage complements
+the uniform-settings streaming fixture. The
+[upstream streaming guide](https://pgroonga.github.io/reference/streaming-replication-wal-resource-manager.html)
+omits crash-safer on a standby; that guidance is context, not proof that uniform
+settings fail the behavior tested here. The operator continues to project uniform
+settings, and the existing two-node topology is unchanged.
+
+### Archive recovery and derived indexes
+
+PGroonga's pinned
 [redo implementation](https://github.com/pgroonga/pgroonga/blob/4.0.9/src/pgroonga-wal-resource-manager.c#L874)
-returns without applying custom records when PostgreSQL's `StandbyMode` is
-false. Use `standby.signal` for the validated archive replay path; a plain
-`recovery.signal` archive restore can recover PostgreSQL rows while leaving
-PGroonga indexes stale. The fixture sets `recovery_target_lsn` and
-`recovery_target_action = 'promote'` to exit standby mode after the required
-records replay. Merely enabling the WAL-generation GUC does not change the
-recovery mode.
+skips custom WAL when PostgreSQL's `StandbyMode` is false. Retained exact-image
+PostgreSQL evidence referenced by spec #3922 from fse (`native-restore-reindex-fixture.sh`,
+lines 64–119, and `native-restore-reindex.log`) demonstrated `recovery.signal`
+restoring a post-backup row while forced PGroonga index search missed it.
+Targeted `REINDEX INDEX notes_body_pgroonga` restored the match and owner
+isolation. Promoted writes and a later clean restart passed after restoring
+primary settings. That fixture used reduced preloads/GUCs during archive replay
+and an explicit restart into primary settings; it proves neither uniform-settings
+promotion nor unattended Barman recovery. It is reused evidence, not a duplicate
+test in this repository.
 
-Use these settings for each phase, retaining `pg_stat_statements`, `pgaudit`
-and `auto_explain` throughout:
+For a recovered application database, keep search traffic closed until derived
+indexes have been rebuilt and checked. Once PostgreSQL has completed recovery
+and is writable, run targeted `REINDEX INDEX <schema>.<index>` for each affected
+PGroonga index as an authorized database operator. Verify restored rows separately
+from forced indexed Chinese/English matches, absence of stale update/delete
+matches, and owner RLS results/snippets under each application role before
+reopening traffic. A healthy PostgreSQL row count alone is insufficient.
+Rebuild only derived indexes; this is not a replacement for verifying the restored
+application data. Do not run `REINDEX` while the server is still in recovery.
 
-| Phase | Additional preload libraries | WAL generation | Crash safer |
-| --- | --- | --- | --- |
-| Writable primary | `pgroonga_wal_resource_manager`, `pgroonga_crash_safer` | `pgroonga.enable_wal_resource_manager = on` | `pgroonga.enable_crash_safe = on` |
-| Standby replay | `pgroonga_wal_resource_manager` | `pgroonga.enable_wal_resource_manager = off` | `pgroonga.enable_crash_safe = off` |
-| Promoted writable primary | `pgroonga_wal_resource_manager`, `pgroonga_crash_safer` | `pgroonga.enable_wal_resource_manager = on` | `pgroonga.enable_crash_safe = on` |
-
-PGroonga's module documentation says crash safer must not run on a standby.
-After replay and promotion, restore the writable-primary settings and restart
-before accepting writes. The fixture asserts both GUCs and all five preloads,
-commits another indexed write on the promoted primary, restarts, and verifies
-both recovered and subsequent matches through the PGroonga index. No manual
-`REINDEX` is part of this recovery procedure.
-
-This fixture validates the image and the explicit standby replay/promotion
-sequence. It does not exercise a live CNPG/Barman restore. CNPG v1.28's built-in
-archive restore creates `recovery.signal`; selecting this image and these GUCs
-does not convert that restore to the validated standby-mode path. Validate and
-integrate the required recovery mode before using native archive restore with
-PGroonga indexes. The current `SupabaseProject` preload projection also applies
-uniformly to CNPG instances and does not distinguish primary and standby
-settings. A multi-instance rollout needs a validated role-specific configuration
-procedure before deployment.
-
-The work here builds and tests an opt-in image. It does not migrate FlickNote
-indexes, switch production to this operator, or complete ChatGPT OAuth.
-Cross-repository acceptance requires the `flicknote-cli` PR for spec #2809 to
-run its real PG integration suite against this image; neither PR should merge
-before that evidence is recorded. The fb OAuth Worker resource and full-grant
-changes remain a later delivery unit.
+The disposable fixture exercises image/PostgreSQL behavior only. It does not
+exercise CNPG controller election, fencing, service routing, or automatic
+failover, nor actual CNPG/Barman restores. Quiesced `io_flush`/basebackup evidence
+does not certify continuously writable online backups. Merged fse spec #3920 /
+PR174 configures production MCP/Web, but this readiness work neither deploys it
+nor creates any production indexes, roles, credentials, or databases.
 
 Sources: [PGroonga Debian installation](https://pgroonga.github.io/install/debian.html),
 [WAL resource manager replication](https://pgroonga.github.io/reference/streaming-replication-wal-resource-manager.html),
