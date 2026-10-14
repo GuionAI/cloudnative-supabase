@@ -10,8 +10,16 @@ import (
 )
 
 // BuildPowerSyncPublication creates the CNPG resource that manages PowerSync's
-// PostgreSQL publication, including future tables in the public schema.
-func BuildPowerSyncPublication(project *supabasev1alpha1.SupabaseProject) *cnpgv1.Publication {
+// PostgreSQL publication, including future tables in the selected schemas.
+func BuildPowerSyncPublication(project *supabasev1alpha1.SupabaseProject) (*cnpgv1.Publication, error) {
+	schemas, err := project.EffectivePublicationSchemas()
+	if err != nil {
+		return nil, err
+	}
+	objects := make([]cnpgv1.PublicationTargetObject, len(schemas))
+	for i, schema := range schemas {
+		objects[i] = cnpgv1.PublicationTargetObject{TablesInSchema: schema}
+	}
 	return &cnpgv1.Publication{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      project.Name + "-powersync",
@@ -23,9 +31,9 @@ func BuildPowerSyncPublication(project *supabasev1alpha1.SupabaseProject) *cnpgv
 			Name:       "powersync",
 			DBName:     common.DatabaseName,
 			Target: cnpgv1.PublicationTarget{
-				Objects: []cnpgv1.PublicationTargetObject{{TablesInSchema: "public"}},
+				Objects: objects,
 			},
 			ReclaimPolicy: cnpgv1.PublicationReclaimDelete,
 		},
-	}
+	}, nil
 }

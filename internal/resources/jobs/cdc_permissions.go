@@ -44,8 +44,11 @@ func CDCJobName(project *supabasev1alpha1.SupabaseProject) string {
 }
 
 // BuildCDCMigrationsConfigMap creates the ConfigMap containing CDC setup scripts
-func BuildCDCMigrationsConfigMap(project *supabasev1alpha1.SupabaseProject) *corev1.ConfigMap {
-	setupScript := buildCDCSetupScript(project)
+func BuildCDCMigrationsConfigMap(project *supabasev1alpha1.SupabaseProject) (*corev1.ConfigMap, error) {
+	setupScript, err := buildCDCSetupScript(project)
+	if err != nil {
+		return nil, err
+	}
 
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -56,11 +59,15 @@ func BuildCDCMigrationsConfigMap(project *supabasev1alpha1.SupabaseProject) *cor
 		Data: map[string]string{
 			"setup.sh": setupScript,
 		},
-	}
+	}, nil
 }
 
 // buildCDCSetupScript generates the PowerSync database setup script.
-func buildCDCSetupScript(project *supabasev1alpha1.SupabaseProject) string {
+func buildCDCSetupScript(project *supabasev1alpha1.SupabaseProject) (string, error) {
+	schemas, err := project.EffectivePublicationSchemas()
+	if err != nil {
+		return "", err
+	}
 	script := `#!/bin/sh
 set -e
 
@@ -72,23 +79,26 @@ echo "=== CDC Permissions Setup ==="
 		script += `
 # Apply Powersync grants
 echo "Applying Powersync grants..."
-psql "$PGCONNSTR" <<'EOSQL'
+psql -v ON_ERROR_STOP=1 --single-transaction "$PGCONNSTR" <<'EOSQL'
 -- Grant powersync_storage role access to create its schema (internal sync state)
 GRANT CREATE ON DATABASE supabase TO powersync_storage;
 
--- Grant powersync_replication role CDC read access to public schema
-GRANT USAGE ON SCHEMA public TO powersync_replication;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO powersync_replication;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT SELECT ON TABLES TO powersync_replication;
-EOSQL
-
 `
+		for _, schema := range schemas {
+			// Validation excludes quotes and shell syntax; quote even reserved identifiers.
+			script += fmt.Sprintf(`GRANT USAGE ON SCHEMA "%[1]s" TO powersync_replication;
+GRANT SELECT ON ALL TABLES IN SCHEMA "%[1]s" TO powersync_replication;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA "%[1]s" GRANT SELECT ON TABLES TO powersync_replication;
+`, schema)
+		}
+		script += "EOSQL\n"
+
 	}
 
 	script += `
 echo "=== CDC Permissions Setup Complete ==="
 `
-	return script
+	return script, nil
 }
 
 // BuildCDCPermissionsJob creates the Job that applies CDC permissions after database is ready

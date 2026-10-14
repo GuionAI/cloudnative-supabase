@@ -544,6 +544,17 @@ type ImageSpec struct {
 
 // PowersyncSpec defines Powersync offline-first sync configuration
 type PowersyncSpec struct {
+	// PublicationSchemas selects existing schemas for replication, independently of rest.schemas.
+	// Omitted defaults to public; an explicit list replaces the default.
+	// Names must be lowercase ASCII PostgreSQL identifiers, up to 63 characters.
+	// +kubebuilder:default={public}
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:Pattern="^[a-z_][a-z0-9_]*$"
+	// +kubebuilder:validation:items:MaxLength=63
+	// +listType=set
+	// +optional
+	PublicationSchemas []string `json:"publicationSchemas,omitempty"`
+
 	// Image configuration (default: journeyapps/powersync-service:1.21.0)
 	// +optional
 	Image ImageSpec `json:"image,omitempty"`
